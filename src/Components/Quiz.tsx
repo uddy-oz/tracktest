@@ -1,37 +1,74 @@
-import { useState } from "react";
-
-const quizQuestions = [
-  {
-    clue: "Track 1 from the selected album is playing...",
-    correctAnswer: "Marvins Room",
-    options: ["Marvins Room", "Headlines", "Crew Love", "Take Care"],
-  },
-  {
-    clue: "Track 2 from the selected album is playing...",
-    correctAnswer: "Headlines",
-    options: ["The Motto", "Headlines", "Practice", "Over My Dead Body"],
-  },
-  {
-    clue: "Track 3 from the selected album is playing...",
-    correctAnswer: "Crew Love",
-    options: ["Crew Love", "Shot For Me", "Make Me Proud", "HYFR"],
-  },
-];
+import { useEffect, useState } from "react";
+import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
+import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 
 type QuizProps = {
-  selectedAlbum: string;
+  selectedAlbum: SpotifyAlbum;
   onRestartApp: () => void;
 };
 
+type QuizQuestion = {
+  correctTrack: SpotifyTrack;
+  options: SpotifyTrack[];
+};
+
+function shuffleArray<T>(array: T[]) {
+  return [...array].sort(() => Math.random() - 0.5);
+}
+
+function buildQuizQuestions(tracks: SpotifyTrack[]) {
+  const quizTracks = shuffleArray(tracks).slice(0, 5);
+
+  return quizTracks.map((correctTrack) => {
+    const wrongOptions = shuffleArray(
+      tracks.filter((track) => track.id !== correctTrack.id)
+    ).slice(0, 3);
+
+    return {
+      correctTrack,
+      options: shuffleArray([correctTrack, ...wrongOptions]),
+    };
+  });
+}
+
 function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [guess, setGuess] = useState("");
   const [message, setMessage] = useState("");
   const [score, setScore] = useState(0);
   const [hasAnswered, setHasAnswered] = useState(false);
   const [isQuizComplete, setIsQuizComplete] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const currentQuestion = quizQuestions[currentQuestionIndex];
+  useEffect(() => {
+    async function loadTracks() {
+      try {
+        setIsLoading(true);
+        setError("");
+
+        const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
+
+        if (albumTracks.length < 4) {
+          setError("Not enough tracks for a quiz.");
+          return;
+        }
+
+        const cleanedTracks = albumTracks.slice(0, 20);
+        const quizQuestions = buildQuizQuestions(cleanedTracks);
+
+        setQuestions(quizQuestions);
+      } catch (error) {
+        console.error(error);
+        setError("Could not load tracks for this album.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadTracks();
+  }, [selectedAlbum.id]);
 
   function checkAnswer() {
     if (guess === "") {
@@ -44,20 +81,20 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       return;
     }
 
-    if (guess.toLowerCase() === currentQuestion.correctAnswer.toLowerCase()) {
+    const correctAnswer = questions[currentQuestionIndex].correctTrack.name;
+
+    if (guess.toLowerCase() === correctAnswer.toLowerCase()) {
       setMessage("Correct. You know ball.");
       setScore(score + 1);
     } else {
-      setMessage(`Wrong. The correct answer was ${currentQuestion.correctAnswer}.`);
+      setMessage(`Wrong. The correct answer was ${correctAnswer}.`);
     }
 
     setHasAnswered(true);
   }
 
   function goToNextQuestion() {
-    const nextQuestionIndex = currentQuestionIndex + 1;
-
-    setCurrentQuestionIndex(nextQuestionIndex);
+    setCurrentQuestionIndex(currentQuestionIndex + 1);
     setGuess("");
     setMessage("");
     setHasAnswered(false);
@@ -74,6 +111,33 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setScore(0);
     setHasAnswered(false);
     setIsQuizComplete(false);
+    setQuestions(buildQuizQuestions(questions.map((question) => question.correctTrack)));
+  }
+
+  if (isLoading) {
+    return (
+      <section className="quiz">
+        <h2>Loading tracks...</h2>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="quiz">
+        <h2>{error}</h2>
+        <button onClick={onRestartApp}>Choose Another Album</button>
+      </section>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <section className="quiz">
+        <h2>No questions available.</h2>
+        <button onClick={onRestartApp}>Choose Another Album</button>
+      </section>
+    );
   }
 
   if (isQuizComplete) {
@@ -82,46 +146,48 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         <h2>Quiz complete</h2>
 
         <p className="score">
-          Final score: {score} / {quizQuestions.length}
+          Final score: {score} / {questions.length}
         </p>
 
         <p className="quiz-message">
-          {score === quizQuestions.length
+          {score === questions.length
             ? "Perfect score. Certified album demon."
             : "Not bad. Run it back and beat your score."}
         </p>
 
         <div className="hero-buttons">
-  <button onClick={restartQuiz}>Restart Quiz</button>
-  <button className="secondary-button" onClick={onRestartApp}>
-    Choose Another Album
-  </button>
-</div>
+          <button onClick={restartQuiz}>Restart Quiz</button>
+          <button className="secondary-button" onClick={onRestartApp}>
+            Choose Another Album
+          </button>
+        </div>
       </section>
     );
   }
+
+  const currentQuestion = questions[currentQuestionIndex];
 
   return (
     <section className="quiz">
       <h2>Guess the song</h2>
 
       <p className="score">
-        Score: {score} / {quizQuestions.length}
+        Score: {score} / {questions.length}
       </p>
 
       <p className="quiz-clue">
-  {selectedAlbum} quiz: {currentQuestion.clue}
-</p>
+        {selectedAlbum.title} quiz: Track {currentQuestionIndex + 1} is playing...
+      </p>
 
       <div className="song-options">
-        {currentQuestion.options.map((song) => (
+        {currentQuestion.options.map((track) => (
           <button
-            key={song}
-            className={guess === song ? "song-button selected-song" : "song-button"}
-            onClick={() => setGuess(song)}
+            key={track.id}
+            className={guess === track.name ? "song-button selected-song" : "song-button"}
+            onClick={() => setGuess(track.name)}
             disabled={hasAnswered}
           >
-            {song}
+            {track.name}
           </button>
         ))}
       </div>
@@ -134,13 +200,13 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
       <button onClick={checkAnswer}>Submit Answer</button>
 
-      {hasAnswered && currentQuestionIndex < quizQuestions.length - 1 && (
+      {hasAnswered && currentQuestionIndex < questions.length - 1 && (
         <button className="next-button" onClick={goToNextQuestion}>
           Next Question
         </button>
       )}
 
-      {hasAnswered && currentQuestionIndex === quizQuestions.length - 1 && (
+      {hasAnswered && currentQuestionIndex === questions.length - 1 && (
         <button className="next-button" onClick={finishQuiz}>
           Finish Quiz
         </button>

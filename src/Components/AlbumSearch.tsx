@@ -1,42 +1,37 @@
 import { useState } from "react";
-
-const fakeAlbums = [
-  {
-    id: 1,
-    title: "Take Care",
-    artist: "Drake",
-    year: "2011",
-  },
-  {
-    id: 2,
-    title: "Nothing Was The Same",
-    artist: "Drake",
-    year: "2013",
-  },
-  {
-    id: 3,
-    title: "Scorpion",
-    artist: "Drake",
-    year: "2018",
-  },
-];
+import { searchSpotifyAlbums, type SpotifyAlbum } from "../lib/spotifyApi";
 
 type AlbumSearchProps = {
-  onStartQuiz: (albumTitle: string) => void;
+  onStartQuiz: (album: SpotifyAlbum) => void;
 };
 
 function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
-  const [selectedAlbum, setSelectedAlbum] = useState("");
+ const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
+  const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  function handleSearch() {
+  async function handleSearch() {
     if (searchTerm.trim() === "") {
       return;
     }
 
-    setSubmittedSearch(searchTerm);
-    setSelectedAlbum("");
+    try {
+      setIsLoading(true);
+      setError("");
+      setSubmittedSearch(searchTerm);
+      setSelectedAlbum("");
+
+      const results = await searchSpotifyAlbums(searchTerm);
+      setAlbums(results);
+    } catch (error) {
+      console.error(error);
+      setError("Could not search albums. Make sure Spotify is connected.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
@@ -53,22 +48,34 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
           onChange={(event) => setSearchTerm(event.target.value)}
         />
 
-        <button onClick={handleSearch}>Search</button>
+        <button onClick={handleSearch}>
+          {isLoading ? "Searching..." : "Search"}
+        </button>
       </div>
 
-      {submittedSearch && (
+      {error && <p className="search-result">{error}</p>}
+
+      {submittedSearch && !error && (
         <>
           <p className="search-result">
             Showing results for: <strong>{submittedSearch}</strong>
           </p>
 
           <div className="album-grid">
-            {fakeAlbums.map((album) => (
+            {albums.map((album) => (
               <button
                 className="album-card"
                 key={album.id}
-                onClick={() => setSelectedAlbum(album.title)}
+                onClick={() => setSelectedAlbum(album)}
               >
+                {album.imageUrl && (
+                  <img
+                    className="album-cover"
+                    src={album.imageUrl}
+                    alt={`${album.title} cover`}
+                  />
+                )}
+
                 <h3>{album.title}</h3>
                 <p>{album.artist}</p>
                 <span>{album.year}</span>
@@ -81,10 +88,12 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
       {selectedAlbum && (
   <div className="selected-album">
     <p>
-      Selected album: <strong>{selectedAlbum}</strong>
+      Selected album: <strong>{selectedAlbum.title}</strong>
     </p>
 
-    <button onClick={() => onStartQuiz(selectedAlbum)}>Start Quiz</button>
+    <button onClick={() => onStartQuiz(selectedAlbum)}>
+      Start Quiz
+    </button>
   </div>
 )}
     </section>
