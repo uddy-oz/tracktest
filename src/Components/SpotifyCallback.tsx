@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getSpotifyAccessToken } from "../lib/spotifyAuth";
 
 type SpotifyCallbackProps = {
@@ -7,9 +7,16 @@ type SpotifyCallbackProps = {
 
 function SpotifyCallback({ onSpotifyConnected }: SpotifyCallbackProps) {
   const [message, setMessage] = useState("Connecting to Spotify...");
+  const hasHandledCallback = useRef(false);
 
   useEffect(() => {
     async function handleCallback() {
+      if (hasHandledCallback.current) {
+        return;
+      }
+
+      hasHandledCallback.current = true;
+
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
 
@@ -22,6 +29,8 @@ function SpotifyCallback({ onSpotifyConnected }: SpotifyCallbackProps) {
         await getSpotifyAccessToken(code);
         onSpotifyConnected();
         setMessage("Spotify connected successfully.");
+
+        window.history.replaceState({}, "", "/");
       } catch (error) {
         console.error(error);
         setMessage("Spotify connection failed.");

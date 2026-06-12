@@ -303,3 +303,15 @@ button:hover {
   color: white;
   border: 1px solid #ff4d4d;
 }
+
+.audio-preview {
+  margin: 18px 0 24px;
+  width: 320px;
+  max-width: 100%;
+}
+
+.preview-unavailable {
+  color: #aaaaaa;
+  font-size: 15px;
+  margin-bottom: 24px;
+}

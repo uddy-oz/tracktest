@@ -166,6 +166,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   const currentQuestion = questions[currentQuestionIndex];
+  const previewUrl = currentQuestion.correctTrack.previewUrl;
 
   return (
     <section className="quiz">
@@ -187,6 +188,16 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   Question {currentQuestionIndex + 1} of {questions.length}: Pick the correct track from{" "}
   <strong>{selectedAlbum.title}</strong>.
 </p>
+
+{previewUrl ? (
+  <audio className="audio-preview" controls src={previewUrl}>
+    Your browser does not support the audio element.
+  </audio>
+) : (
+  <p className="preview-unavailable">
+    Audio preview unavailable. Pick the correct track from the options.
+  </p>
+)}
 
       <div className="song-options">
         {currentQuestion.options.map((track) => (

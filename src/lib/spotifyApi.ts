@@ -9,6 +9,7 @@ export type SpotifyAlbum = {
 export type SpotifyTrack = {
   id: string;
   name: string;
+  previewUrl: string | null;
 };
 
 export async function searchSpotifyAlbums(query: string): Promise<SpotifyAlbum[]> {
@@ -69,8 +70,9 @@ export async function getSpotifyAlbumTracks(albumId: string): Promise<SpotifyTra
 
   const data = await response.json();
 
-  return data.items.map((track: any) => ({
-    id: track.id,
-    name: track.name,
-  }));
+ return data.items.map((track: any) => ({
+  id: track.id,
+  name: track.name,
+  previewUrl: track.preview_url,
+}));
 }
