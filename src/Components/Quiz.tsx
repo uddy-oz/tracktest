@@ -169,26 +169,47 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
   return (
     <section className="quiz">
-      <h2>Guess the song</h2>
+      {selectedAlbum.imageUrl && (
+  <img
+    className="quiz-album-cover"
+    src={selectedAlbum.imageUrl}
+    alt={`${selectedAlbum.title} cover`}
+  />
+)}
 
-      <p className="score">
-        Score: {score} / {questions.length}
-      </p>
+<h2>Guess the song</h2>
+
+<p className="score">
+  Score: {score} / {questions.length}
+</p>
 
       <p className="quiz-clue">
-        {selectedAlbum.title} quiz: Track {currentQuestionIndex + 1} is playing...
-      </p>
+  Question {currentQuestionIndex + 1} of {questions.length}: Pick the correct track from{" "}
+  <strong>{selectedAlbum.title}</strong>.
+</p>
 
       <div className="song-options">
         {currentQuestion.options.map((track) => (
           <button
-            key={track.id}
-            className={guess === track.name ? "song-button selected-song" : "song-button"}
-            onClick={() => setGuess(track.name)}
-            disabled={hasAnswered}
-          >
-            {track.name}
-          </button>
+  key={track.id}
+  className={`song-button ${
+    guess === track.name ? "selected-song" : ""
+  } ${
+    hasAnswered && track.name === currentQuestion.correctTrack.name
+      ? "correct-song"
+      : ""
+  } ${
+    hasAnswered &&
+    guess === track.name &&
+    guess !== currentQuestion.correctTrack.name
+      ? "wrong-song"
+      : ""
+  }`}
+  onClick={() => setGuess(track.name)}
+  disabled={hasAnswered}
+>
+  {track.name}
+</button>
         ))}
       </div>
 
@@ -198,7 +219,9 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         </p>
       )}
 
-      <button onClick={checkAnswer}>Submit Answer</button>
+      {!hasAnswered && (
+  <button onClick={checkAnswer}>Submit Answer</button>
+)}
 
       {hasAnswered && currentQuestionIndex < questions.length - 1 && (
         <button className="next-button" onClick={goToNextQuestion}>
