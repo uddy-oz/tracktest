@@ -315,3 +315,23 @@ button:hover {
   font-size: 15px;
   margin-bottom: 24px;
 }
+
+.youtube-preview {
+  margin: 20px auto 28px;
+  display: flex;
+  justify-content: center;
+}
+
+.youtube-player {
+  width: 420px;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid #333333;
+  border-radius: 18px;
+}
+
+.audio-preview-wrapper {
+  margin: 18px auto 24px;
+  display: flex;
+  justify-content: center;
+}

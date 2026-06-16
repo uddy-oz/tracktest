@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
+import { searchITunesPreview } from "../lib/itunesApi";
+
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
@@ -32,6 +34,7 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
 }
 
 function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
+  const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [guess, setGuess] = useState("");
@@ -41,6 +44,12 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [itunesPreviewUrl, setItunesPreviewUrl] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
+ 
+  const currentQuestion = questions[currentQuestionIndex];
+  const previewUrl = currentQuestion?.correctTrack.previewUrl;
 
   useEffect(() => {
     async function loadTracks() {
@@ -56,9 +65,9 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         }
 
         const cleanedTracks = albumTracks.slice(0, 20);
-        const quizQuestions = buildQuizQuestions(cleanedTracks);
 
-        setQuestions(quizQuestions);
+        setTracks(cleanedTracks);
+        setQuestions(buildQuizQuestions(cleanedTracks));
       } catch (error) {
         console.error(error);
         setError("Could not load tracks for this album.");
@@ -69,6 +78,35 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
     loadTracks();
   }, [selectedAlbum.id]);
+
+  useEffect(() => {
+  async function loadITunesPreview() {
+    if (!currentQuestion || previewUrl) {
+      setItunesPreviewUrl(null);
+      setIsPreviewLoading(false);
+      return;
+    }
+
+    try {
+      setIsPreviewLoading(true);
+      setItunesPreviewUrl(null);
+
+      const preview = await searchITunesPreview(
+        selectedAlbum.artist,
+        currentQuestion.correctTrack.name
+      );
+
+      setItunesPreviewUrl(preview?.previewUrl || null);
+    } catch (error) {
+      console.error(error);
+      setItunesPreviewUrl(null);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  }
+
+  loadITunesPreview();
+}, [currentQuestionIndex, currentQuestion, previewUrl, selectedAlbum.artist]);
 
   function checkAnswer() {
     if (guess === "") {
@@ -111,7 +149,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setScore(0);
     setHasAnswered(false);
     setIsQuizComplete(false);
-    setQuestions(buildQuizQuestions(questions.map((question) => question.correctTrack)));
+    setQuestions(buildQuizQuestions(tracks));
   }
 
   if (isLoading) {
@@ -165,62 +203,73 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     );
   }
 
-  const currentQuestion = questions[currentQuestionIndex];
-  const previewUrl = currentQuestion.correctTrack.previewUrl;
-
   return (
     <section className="quiz">
       {selectedAlbum.imageUrl && (
-  <img
-    className="quiz-album-cover"
-    src={selectedAlbum.imageUrl}
-    alt={`${selectedAlbum.title} cover`}
-  />
-)}
+        <img
+          className="quiz-album-cover"
+          src={selectedAlbum.imageUrl}
+          alt={`${selectedAlbum.title} cover`}
+        />
+      )}
 
-<h2>Guess the song</h2>
+      <h2>Guess the song</h2>
 
-<p className="score">
-  Score: {score} / {questions.length}
-</p>
+      <p className="score">
+        Score: {score} / {questions.length}
+      </p>
 
       <p className="quiz-clue">
-  Question {currentQuestionIndex + 1} of {questions.length}: Pick the correct track from{" "}
-  <strong>{selectedAlbum.title}</strong>.
-</p>
+        Question {currentQuestionIndex + 1} of {questions.length}: Pick the
+        correct track from <strong>{selectedAlbum.title}</strong>.
+      </p>
 
-{previewUrl ? (
+      {previewUrl ? (
   <audio className="audio-preview" controls src={previewUrl}>
     Your browser does not support the audio element.
   </audio>
 ) : (
-  <p className="preview-unavailable">
-    Audio preview unavailable. Pick the correct track from the options.
-  </p>
+  <div className="audio-preview-wrapper">
+    {isPreviewLoading && (
+      <p className="preview-unavailable">Loading audio preview...</p>
+    )}
+
+    {!isPreviewLoading && itunesPreviewUrl && (
+      <audio className="audio-preview" controls src={itunesPreviewUrl}>
+        Your browser does not support the audio element.
+      </audio>
+    )}
+
+    {!isPreviewLoading && !itunesPreviewUrl && (
+      <p className="preview-unavailable">
+        Audio preview unavailable. Pick the correct track from the options.
+      </p>
+    )}
+  </div>
 )}
 
       <div className="song-options">
         {currentQuestion.options.map((track) => (
           <button
-  key={track.id}
-  className={`song-button ${
-    guess === track.name ? "selected-song" : ""
-  } ${
-    hasAnswered && track.name === currentQuestion.correctTrack.name
-      ? "correct-song"
-      : ""
-  } ${
-    hasAnswered &&
-    guess === track.name &&
-    guess !== currentQuestion.correctTrack.name
-      ? "wrong-song"
-      : ""
-  }`}
-  onClick={() => setGuess(track.name)}
-  disabled={hasAnswered}
->
-  {track.name}
-</button>
+            key={track.id}
+            className={`song-button ${
+              guess === track.name ? "selected-song" : ""
+            } ${
+              hasAnswered && track.name === currentQuestion.correctTrack.name
+                ? "correct-song"
+                : ""
+            } ${
+              hasAnswered &&
+              guess === track.name &&
+              guess !== currentQuestion.correctTrack.name
+                ? "wrong-song"
+                : ""
+            }`}
+            onClick={() => setGuess(track.name)}
+            disabled={hasAnswered}
+          >
+            {track.name}
+          </button>
         ))}
       </div>
 
@@ -230,9 +279,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         </p>
       )}
 
-      {!hasAnswered && (
-  <button onClick={checkAnswer}>Submit Answer</button>
-)}
+      {!hasAnswered && <button onClick={checkAnswer}>Submit Answer</button>}
 
       {hasAnswered && currentQuestionIndex < questions.length - 1 && (
         <button className="next-button" onClick={goToNextQuestion}>
