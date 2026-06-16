@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { searchSpotifyAlbums, type SpotifyAlbum } from "../lib/spotifyApi";
+import type { SpotifyAlbum } from "../lib/spotifyApi";
+import { searchSpotifyAlbums } from "../lib/spotifyApi";
 
 type AlbumSearchProps = {
   onStartQuiz: (album: SpotifyAlbum) => void;
@@ -22,7 +23,7 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
       setIsLoading(true);
       setError("");
       setSubmittedSearch(searchTerm);
-      setSelectedAlbum("");
+      setSelectedAlbum(null);
 
       const results = await searchSpotifyAlbums(searchTerm);
       setAlbums(results);
