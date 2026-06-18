@@ -43,8 +43,12 @@ export async function searchITunesPreview(
 ): Promise<ITunesPreview | null> {
   const searchTerm = `${artistName} ${trackName}`;
 
+  const baseUrl = import.meta.env.PROD
+    ? "/itunes/search"
+    : "https://itunes.apple.com/search";
+
   const url =
-    `https://itunes.apple.com/search?term=${encodeURIComponent(searchTerm)}` +
+    `${baseUrl}?term=${encodeURIComponent(searchTerm)}` +
     `&media=music&entity=song&limit=25&country=US`;
 
   try {
@@ -60,6 +64,7 @@ export async function searchITunesPreview(
     const songsWithPreview = data.results.filter((song) => song.previewUrl);
 
     if (songsWithPreview.length === 0) {
+      console.log("No iTunes previews found for:", searchTerm);
       return null;
     }
 
@@ -73,6 +78,7 @@ export async function searchITunesPreview(
     const bestMatch = rankedSongs[0];
 
     if (!bestMatch || bestMatch.score < 50) {
+      console.log("No strong iTunes match for:", searchTerm, rankedSongs);
       return null;
     }
 
