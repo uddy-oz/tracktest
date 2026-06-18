@@ -32,6 +32,37 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   });
 }
 
+async function addPreviewUrlsToTracks(
+  tracks: SpotifyTrack[],
+  artistName: string
+) {
+  const tracksWithPreviews = await Promise.all(
+    tracks.map(async (track) => {
+      if (track.previewUrl) {
+        return track;
+      }
+
+      try {
+        const preview = await searchITunesPreview(artistName, track.name);
+
+        return {
+          ...track,
+          previewUrl: preview?.previewUrl || "",
+        };
+      } catch (error) {
+        console.error("Could not load preview for:", track.name, error);
+
+        return {
+          ...track,
+          previewUrl: "",
+        };
+      }
+    })
+  );
+
+  return tracksWithPreviews.filter((track) => track.previewUrl);
+}
+
 function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -43,13 +74,9 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [itunesPreviewUrl, setItunesPreviewUrl] = useState<string | null>(null);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   const currentQuestion = questions[currentQuestionIndex];
-  const currentTrackName = currentQuestion?.correctTrack.name || "";
-  const spotifyPreviewUrl = currentQuestion?.correctTrack.previewUrl || null;
-  const audioUrl = spotifyPreviewUrl || itunesPreviewUrl;
+  const previewUrl = currentQuestion?.correctTrack.previewUrl || "";
 
   useEffect(() => {
     async function loadTracks() {
@@ -74,8 +101,18 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
         const cleanedTracks = albumTracks.slice(0, 20);
 
-        setTracks(cleanedTracks);
-        setQuestions(buildQuizQuestions(cleanedTracks));
+        const playableTracks = await addPreviewUrlsToTracks(
+          cleanedTracks,
+          selectedAlbum.artist
+        );
+
+        if (playableTracks.length < 4) {
+          setError("Not enough playable audio previews for this album.");
+          return;
+        }
+
+        setTracks(playableTracks);
+        setQuestions(buildQuizQuestions(playableTracks));
       } catch (error) {
         console.error(error);
         setError("Could not load tracks for this album.");
@@ -85,48 +122,13 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     }
 
     loadTracks();
-  }, [selectedAlbum.id]);
-
-  useEffect(() => {
-    async function loadITunesPreview() {
-      setItunesPreviewUrl(null);
-
-      if (!currentQuestion) {
-        setIsPreviewLoading(false);
-        return;
-      }
-
-      if (spotifyPreviewUrl) {
-        setIsPreviewLoading(false);
-        return;
-      }
-
-      try {
-        setIsPreviewLoading(true);
-
-        const preview = await searchITunesPreview(
-          selectedAlbum.artist,
-          currentTrackName
-        );
-
-        setItunesPreviewUrl(preview?.previewUrl || null);
-      } catch (error) {
-        console.error(error);
-        setItunesPreviewUrl(null);
-      } finally {
-        setIsPreviewLoading(false);
-      }
-    }
-
-    loadITunesPreview();
-  }, [
-    currentQuestionIndex,
-    currentTrackName,
-    spotifyPreviewUrl,
-    selectedAlbum.artist,
-  ]);
+  }, [selectedAlbum.id, selectedAlbum.artist]);
 
   function checkAnswer() {
+    if (!currentQuestion) {
+      return;
+    }
+
     if (guess === "") {
       setMessage("Pick an answer first.");
       return;
@@ -154,7 +156,6 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setGuess("");
     setMessage("");
     setHasAnswered(false);
-    setItunesPreviewUrl(null);
   }
 
   function finishQuiz() {
@@ -168,14 +169,13 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setScore(0);
     setHasAnswered(false);
     setIsQuizComplete(false);
-    setItunesPreviewUrl(null);
     setQuestions(buildQuizQuestions(tracks));
   }
 
   if (isLoading) {
     return (
       <section className="quiz">
-        <h2>Loading tracks...</h2>
+        <h2>Loading playable previews...</h2>
       </section>
     );
   }
@@ -245,23 +245,17 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       </p>
 
       <div className="audio-preview-wrapper">
-        {isPreviewLoading && (
-          <p className="preview-unavailable">Loading audio preview...</p>
-        )}
-
-        {!isPreviewLoading && audioUrl && (
+        {previewUrl ? (
           <audio
-            key={audioUrl}
+            key={previewUrl}
             className="audio-preview"
             controls
             preload="metadata"
-            src={audioUrl}
+            src={previewUrl}
           >
             Your browser does not support the audio element.
           </audio>
-        )}
-
-        {!isPreviewLoading && !audioUrl && (
+        ) : (
           <p className="preview-unavailable">
             Audio preview unavailable. Pick the correct track from the options.
           </p>
