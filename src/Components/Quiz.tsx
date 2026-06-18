@@ -3,7 +3,6 @@ import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
 
-
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
   onRestartApp: () => void;
@@ -47,15 +46,24 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [itunesPreviewUrl, setItunesPreviewUrl] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
- 
   const currentQuestion = questions[currentQuestionIndex];
-  const previewUrl = currentQuestion?.correctTrack.previewUrl;
+  const currentTrackName = currentQuestion?.correctTrack.name || "";
+  const spotifyPreviewUrl = currentQuestion?.correctTrack.previewUrl || null;
+  const audioUrl = spotifyPreviewUrl || itunesPreviewUrl;
 
   useEffect(() => {
     async function loadTracks() {
       try {
         setIsLoading(true);
         setError("");
+        setQuestions([]);
+        setTracks([]);
+        setCurrentQuestionIndex(0);
+        setGuess("");
+        setMessage("");
+        setScore(0);
+        setHasAnswered(false);
+        setIsQuizComplete(false);
 
         const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
 
@@ -80,33 +88,43 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }, [selectedAlbum.id]);
 
   useEffect(() => {
-  async function loadITunesPreview() {
-    if (!currentQuestion || previewUrl) {
+    async function loadITunesPreview() {
       setItunesPreviewUrl(null);
-      setIsPreviewLoading(false);
-      return;
+
+      if (!currentQuestion) {
+        setIsPreviewLoading(false);
+        return;
+      }
+
+      if (spotifyPreviewUrl) {
+        setIsPreviewLoading(false);
+        return;
+      }
+
+      try {
+        setIsPreviewLoading(true);
+
+        const preview = await searchITunesPreview(
+          selectedAlbum.artist,
+          currentTrackName
+        );
+
+        setItunesPreviewUrl(preview?.previewUrl || null);
+      } catch (error) {
+        console.error(error);
+        setItunesPreviewUrl(null);
+      } finally {
+        setIsPreviewLoading(false);
+      }
     }
 
-    try {
-      setIsPreviewLoading(true);
-      setItunesPreviewUrl(null);
-
-      const preview = await searchITunesPreview(
-        selectedAlbum.artist,
-        currentQuestion.correctTrack.name
-      );
-
-      setItunesPreviewUrl(preview?.previewUrl || null);
-    } catch (error) {
-      console.error(error);
-      setItunesPreviewUrl(null);
-    } finally {
-      setIsPreviewLoading(false);
-    }
-  }
-
-  loadITunesPreview();
-}, [currentQuestionIndex, currentQuestion, previewUrl, selectedAlbum.artist]);
+    loadITunesPreview();
+  }, [
+    currentQuestionIndex,
+    currentTrackName,
+    spotifyPreviewUrl,
+    selectedAlbum.artist,
+  ]);
 
   function checkAnswer() {
     if (guess === "") {
@@ -119,11 +137,11 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       return;
     }
 
-    const correctAnswer = questions[currentQuestionIndex].correctTrack.name;
+    const correctAnswer = currentQuestion.correctTrack.name;
 
     if (guess.toLowerCase() === correctAnswer.toLowerCase()) {
       setMessage("Correct. You know ball.");
-      setScore(score + 1);
+      setScore((currentScore) => currentScore + 1);
     } else {
       setMessage(`Wrong. The correct answer was ${correctAnswer}.`);
     }
@@ -132,10 +150,11 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   function goToNextQuestion() {
-    setCurrentQuestionIndex(currentQuestionIndex + 1);
+    setCurrentQuestionIndex((currentIndex) => currentIndex + 1);
     setGuess("");
     setMessage("");
     setHasAnswered(false);
+    setItunesPreviewUrl(null);
   }
 
   function finishQuiz() {
@@ -149,6 +168,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setScore(0);
     setHasAnswered(false);
     setIsQuizComplete(false);
+    setItunesPreviewUrl(null);
     setQuestions(buildQuizQuestions(tracks));
   }
 
@@ -169,7 +189,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     );
   }
 
-  if (questions.length === 0) {
+  if (questions.length === 0 || !currentQuestion) {
     return (
       <section className="quiz">
         <h2>No questions available.</h2>
@@ -224,29 +244,29 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         correct track from <strong>{selectedAlbum.title}</strong>.
       </p>
 
-      {previewUrl ? (
-  <audio className="audio-preview" controls src={previewUrl}>
-    Your browser does not support the audio element.
-  </audio>
-) : (
-  <div className="audio-preview-wrapper">
-    {isPreviewLoading && (
-      <p className="preview-unavailable">Loading audio preview...</p>
-    )}
+      <div className="audio-preview-wrapper">
+        {isPreviewLoading && (
+          <p className="preview-unavailable">Loading audio preview...</p>
+        )}
 
-    {!isPreviewLoading && itunesPreviewUrl && (
-      <audio className="audio-preview" controls src={itunesPreviewUrl}>
-        Your browser does not support the audio element.
-      </audio>
-    )}
+        {!isPreviewLoading && audioUrl && (
+          <audio
+            key={audioUrl}
+            className="audio-preview"
+            controls
+            preload="metadata"
+            src={audioUrl}
+          >
+            Your browser does not support the audio element.
+          </audio>
+        )}
 
-    {!isPreviewLoading && !itunesPreviewUrl && (
-      <p className="preview-unavailable">
-        Audio preview unavailable. Pick the correct track from the options.
-      </p>
-    )}
-  </div>
-)}
+        {!isPreviewLoading && !audioUrl && (
+          <p className="preview-unavailable">
+            Audio preview unavailable. Pick the correct track from the options.
+          </p>
+        )}
+      </div>
 
       <div className="song-options">
         {currentQuestion.options.map((track) => (
