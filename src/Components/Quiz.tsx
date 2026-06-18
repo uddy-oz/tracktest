@@ -34,7 +34,8 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
 
 async function addPreviewUrlsToTracks(
   tracks: SpotifyTrack[],
-  artistName: string
+  artistName: string,
+  albumTitle: string
 ) {
   const tracksWithPreviews = await Promise.all(
     tracks.map(async (track) => {
@@ -43,7 +44,11 @@ async function addPreviewUrlsToTracks(
       }
 
       try {
-        const preview = await searchITunesPreview(artistName, track.name);
+        const preview = await searchITunesPreview(
+          artistName,
+          track.name,
+          albumTitle
+        );
 
         return {
           ...track,
@@ -103,7 +108,8 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
         const playableTracks = await addPreviewUrlsToTracks(
           cleanedTracks,
-          selectedAlbum.artist
+          selectedAlbum.artist,
+          selectedAlbum.title
         );
 
         if (playableTracks.length < 4) {
@@ -122,7 +128,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     }
 
     loadTracks();
-  }, [selectedAlbum.id, selectedAlbum.artist]);
+  }, [selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
 
   function checkAnswer() {
     if (!currentQuestion) {

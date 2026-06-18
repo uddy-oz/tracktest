@@ -42,9 +42,10 @@ function scoreResult(song: ITunesPreview, artistName: string, trackName: string)
 
 export async function searchITunesPreview(
   artistName: string,
-  trackName: string
+  trackName: string,
+  albumTitle = ""
 ): Promise<ITunesPreview | null> {
-  const searchTerm = `${artistName} ${trackName}`;
+  const searchTerm = `${artistName} ${trackName} ${albumTitle}`;
 
   const baseUrl = import.meta.env.PROD
     ? "/itunes/search"
