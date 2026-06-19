@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
-import { searchITunesPreview } from "../lib/itunesApi";
+import {
+  searchITunesAlbumTracks,
+  searchITunesPreview,
+  type ITunesTrackPreview,
+} from "../lib/itunesApi";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
@@ -32,17 +36,30 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   });
 }
 
-async function addPreviewUrlsToTracks(
+function convertITunesTracksToSpotifyTracks(
+  tracks: ITunesTrackPreview[]
+): SpotifyTrack[] {
+  return tracks.map(
+    (track) =>
+      ({
+        id: track.id,
+        name: track.name,
+        previewUrl: track.previewUrl,
+      } as SpotifyTrack)
+  );
+}
+
+async function addPreviewUrlsToSpotifyTracks(
   tracks: SpotifyTrack[],
   artistName: string,
   albumTitle: string
 ) {
-  const tracksWithPreviews = await Promise.all(
-    tracks.map(async (track) => {
-      if (track.previewUrl) {
-        return track;
-      }
+  const tracksWithPreviews: SpotifyTrack[] = [];
 
+  for (const track of tracks) {
+    if (track.previewUrl) {
+      tracksWithPreviews.push(track);
+    } else {
       try {
         const preview = await searchITunesPreview(
           artistName,
@@ -50,22 +67,23 @@ async function addPreviewUrlsToTracks(
           albumTitle
         );
 
-        return {
-          ...track,
-          previewUrl: preview?.previewUrl || "",
-        };
+        if (preview?.previewUrl) {
+          tracksWithPreviews.push({
+            ...track,
+            previewUrl: preview.previewUrl,
+          });
+        }
       } catch (error) {
         console.error("Could not load preview for:", track.name, error);
-
-        return {
-          ...track,
-          previewUrl: "",
-        };
       }
-    })
-  );
+    }
 
-  return tracksWithPreviews.filter((track) => track.previewUrl);
+    if (tracksWithPreviews.length >= 12) {
+      break;
+    }
+  }
+
+  return tracksWithPreviews;
 }
 
 function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
@@ -104,16 +122,27 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
           return;
         }
 
-        const cleanedTracks = albumTracks.slice(0, 20);
+        const cleanedSpotifyTracks = albumTracks.slice(0, 20);
 
-        const playableTracks = await addPreviewUrlsToTracks(
-          cleanedTracks,
+        const iTunesAlbumTracks = await searchITunesAlbumTracks(
           selectedAlbum.artist,
           selectedAlbum.title
         );
 
+        let playableTracks = convertITunesTracksToSpotifyTracks(iTunesAlbumTracks);
+
         if (playableTracks.length < 4) {
-          setError("Not enough playable audio previews for this album.");
+          playableTracks = await addPreviewUrlsToSpotifyTracks(
+            cleanedSpotifyTracks,
+            selectedAlbum.artist,
+            selectedAlbum.title
+          );
+        }
+
+        if (playableTracks.length < 4) {
+          setError(
+            "Not enough playable previews found for this album. Try another album."
+          );
           return;
         }
 
