@@ -19,6 +19,12 @@ function SpotifyCallback({ onSpotifyConnected }: SpotifyCallbackProps) {
 
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
+      const spotifyError = params.get("error");
+
+      if (spotifyError) {
+        setMessage(`Spotify login failed: ${spotifyError}`);
+        return;
+      }
 
       if (!code) {
         setMessage("No Spotify code found.");
@@ -27,13 +33,21 @@ function SpotifyCallback({ onSpotifyConnected }: SpotifyCallbackProps) {
 
       try {
         await getSpotifyAccessToken(code);
-        onSpotifyConnected();
-        setMessage("Spotify connected successfully.");
 
-        window.history.replaceState({}, "", "/");
+        onSpotifyConnected();
+        setMessage("Spotify connected successfully. Redirecting...");
+
+        window.setTimeout(() => {
+          window.location.replace("/");
+        }, 500);
       } catch (error) {
-        console.error(error);
-        setMessage("Spotify connection failed.");
+        console.error("Spotify callback error:", error);
+
+        if (error instanceof Error) {
+          setMessage(`Spotify connection failed: ${error.message}`);
+        } else {
+          setMessage("Spotify connection failed.");
+        }
       }
     }
 
@@ -44,7 +58,7 @@ function SpotifyCallback({ onSpotifyConnected }: SpotifyCallbackProps) {
     <main>
       <h1>{message}</h1>
 
-      <button onClick={() => (window.location.href = "/")}>
+      <button onClick={() => window.location.replace("/")}>
         Back to TrackTest
       </button>
     </main>

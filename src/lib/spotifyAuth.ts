@@ -1,6 +1,14 @@
 const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
 const redirectUri = import.meta.env.VITE_SPOTIFY_REDIRECT_URI;
 
+function getRequiredEnv(value: string | undefined, name: string) {
+  if (!value) {
+    throw new Error(`${name} is missing from your environment variables.`);
+  }
+
+  return value;
+}
+
 function generateRandomString(length: number) {
   const possible =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -36,36 +44,60 @@ function base64UrlEncode(arrayBuffer: ArrayBuffer) {
 }
 
 export async function redirectToSpotifyLogin() {
+  const safeClientId = getRequiredEnv(
+    clientId,
+    "VITE_SPOTIFY_CLIENT_ID"
+  );
+
+  const safeRedirectUri = getRequiredEnv(
+    redirectUri,
+    "VITE_SPOTIFY_REDIRECT_URI"
+  );
+
   const codeVerifier = generateRandomString(64);
   const hashedVerifier = await sha256(codeVerifier);
   const codeChallenge = base64UrlEncode(hashedVerifier);
 
+  localStorage.removeItem("spotify_access_token");
+  localStorage.removeItem("spotify_code_verifier");
   localStorage.setItem("spotify_code_verifier", codeVerifier);
 
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: clientId,
-    scope: "user-read-private",
-    redirect_uri: redirectUri,
+    client_id: safeClientId,
+    scope: "user-read-private user-read-email",
+    redirect_uri: safeRedirectUri,
     code_challenge_method: "S256",
     code_challenge: codeChallenge,
   });
 
-  window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+  window.location.assign(
+    `https://accounts.spotify.com/authorize?${params.toString()}`
+  );
 }
 
 export async function getSpotifyAccessToken(code: string) {
+  const safeClientId = getRequiredEnv(
+    clientId,
+    "VITE_SPOTIFY_CLIENT_ID"
+  );
+
+  const safeRedirectUri = getRequiredEnv(
+    redirectUri,
+    "VITE_SPOTIFY_REDIRECT_URI"
+  );
+
   const codeVerifier = localStorage.getItem("spotify_code_verifier");
 
   if (!codeVerifier) {
-    throw new Error("Missing Spotify code verifier.");
+    throw new Error("Missing Spotify code verifier. Start the login again.");
   }
 
   const body = new URLSearchParams({
-    client_id: clientId,
+    client_id: safeClientId,
     grant_type: "authorization_code",
     code,
-    redirect_uri: redirectUri,
+    redirect_uri: safeRedirectUri,
     code_verifier: codeVerifier,
   });
 
@@ -77,13 +109,21 @@ export async function getSpotifyAccessToken(code: string) {
     body,
   });
 
+  const data = await response.json().catch(() => null);
+
   if (!response.ok) {
-    throw new Error("Failed to get Spotify access token.");
+    console.error("Spotify token error:", data);
+    throw new Error(
+      data?.error_description || data?.error || "Failed to get Spotify access token."
+    );
   }
 
-  const data = await response.json();
+  if (!data?.access_token) {
+    throw new Error("Spotify did not return an access token.");
+  }
 
   localStorage.setItem("spotify_access_token", data.access_token);
+  localStorage.removeItem("spotify_code_verifier");
 
   return data.access_token;
 }
