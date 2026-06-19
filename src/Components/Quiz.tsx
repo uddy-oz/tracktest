@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
-import {
-  searchITunesAlbumTracks,
-  searchITunesPreview,
-  type ITunesTrackPreview,
-} from "../lib/itunesApi";
+import { searchITunesPreview } from "../lib/itunesApi";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
@@ -36,54 +32,42 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   });
 }
 
-function convertITunesTracksToSpotifyTracks(
-  tracks: ITunesTrackPreview[]
-): SpotifyTrack[] {
-  return tracks.map(
-    (track) =>
-      ({
-        id: track.id,
-        name: track.name,
-        previewUrl: track.previewUrl,
-      } as SpotifyTrack)
-  );
-}
-
 async function addPreviewUrlsToSpotifyTracks(
   tracks: SpotifyTrack[],
   artistName: string,
   albumTitle: string
 ) {
-  const tracksWithPreviews: SpotifyTrack[] = [];
+  const playableTracks: SpotifyTrack[] = [];
 
   for (const track of tracks) {
     if (track.previewUrl) {
-      tracksWithPreviews.push(track);
-    } else {
-      try {
-        const preview = await searchITunesPreview(
-          artistName,
-          track.name,
-          albumTitle
-        );
-
-        if (preview?.previewUrl) {
-          tracksWithPreviews.push({
-            ...track,
-            previewUrl: preview.previewUrl,
-          });
-        }
-      } catch (error) {
-        console.error("Could not load preview for:", track.name, error);
-      }
+      playableTracks.push(track);
+      continue;
     }
 
-    if (tracksWithPreviews.length >= 12) {
+    try {
+      const preview = await searchITunesPreview(
+        artistName,
+        track.name,
+        albumTitle
+      );
+
+      if (preview?.previewUrl) {
+        playableTracks.push({
+          ...track,
+          previewUrl: preview.previewUrl,
+        });
+      }
+    } catch (error) {
+      console.error("Could not load preview for:", track.name, error);
+    }
+
+    if (playableTracks.length >= 12) {
       break;
     }
   }
 
-  return tracksWithPreviews;
+  return playableTracks;
 }
 
 function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
@@ -124,24 +108,17 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
         const cleanedSpotifyTracks = albumTracks.slice(0, 20);
 
-        const iTunesAlbumTracks = await searchITunesAlbumTracks(
+        const playableTracks = await addPreviewUrlsToSpotifyTracks(
+          cleanedSpotifyTracks,
           selectedAlbum.artist,
           selectedAlbum.title
         );
 
-        let playableTracks = convertITunesTracksToSpotifyTracks(iTunesAlbumTracks);
-
-        if (playableTracks.length < 4) {
-          playableTracks = await addPreviewUrlsToSpotifyTracks(
-            cleanedSpotifyTracks,
-            selectedAlbum.artist,
-            selectedAlbum.title
-          );
-        }
+        console.log("Playable Spotify tracks:", playableTracks);
 
         if (playableTracks.length < 4) {
           setError(
-            "Not enough playable previews found for this album. Try another album."
+            "Not enough reliable audio previews found for this album. Try another album."
           );
           return;
         }
@@ -210,7 +187,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   if (isLoading) {
     return (
       <section className="quiz">
-        <h2>Loading playable previews...</h2>
+        <h2>Loading reliable previews...</h2>
       </section>
     );
   }
@@ -280,21 +257,15 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       </p>
 
       <div className="audio-preview-wrapper">
-        {previewUrl ? (
-          <audio
-            key={previewUrl}
-            className="audio-preview"
-            controls
-            preload="metadata"
-            src={previewUrl}
-          >
-            Your browser does not support the audio element.
-          </audio>
-        ) : (
-          <p className="preview-unavailable">
-            Audio preview unavailable. Pick the correct track from the options.
-          </p>
-        )}
+        <audio
+          key={previewUrl}
+          className="audio-preview"
+          controls
+          preload="metadata"
+          src={previewUrl}
+        >
+          Your browser does not support the audio element.
+        </audio>
       </div>
 
       <div className="song-options">
