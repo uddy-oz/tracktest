@@ -106,6 +106,14 @@ function isRealQuizAlbum(album: ITunesAlbum) {
     return false;
   }
 
+  if (album.wrapperType !== "collection") {
+    return false;
+  }
+
+  if (album.collectionType && album.collectionType !== "Album") {
+    return false;
+  }
+
   if (title.includes("single")) {
     return false;
   }
@@ -134,12 +142,20 @@ function scoreAlbum(album: ITunesAlbum, query: string) {
     score += 80;
   }
 
+  if (queryText.includes(artistName) && artistName.length > 1) {
+    score += 60;
+  }
+
   if (albumTitle === queryText) {
     score += 90;
   }
 
   if (albumTitle.includes(queryText)) {
     score += 70;
+  }
+
+  if (queryText.includes(albumTitle) && albumTitle.length > 1) {
+    score += 45;
   }
 
   queryWords.forEach((word) => {
@@ -248,9 +264,11 @@ export async function getSpotifyAlbumTracks(
     country,
   });
 
-  const response = await fetch(
-    `${getITunesBaseUrl("lookup")}?${params.toString()}`
-  );
+  const lookupUrl = `${getITunesBaseUrl("lookup")}?${params.toString()}`;
+
+  console.log("Album tracks lookup URL:", lookupUrl);
+
+  const response = await fetch(lookupUrl);
 
   if (!response.ok) {
     throw new Error("Failed to get album tracks.");
