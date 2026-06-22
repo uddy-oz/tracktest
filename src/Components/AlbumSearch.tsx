@@ -29,7 +29,7 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
       setAlbums(results);
     } catch (error) {
       console.error(error);
-      setError("Could not search albums. Make sure Spotify is connected.");
+      setError("Could not search albums. Try again or search another album.");
     } finally {
       setIsLoading(false);
     }

@@ -524,16 +524,12 @@ button:hover {
   }
 }
 .hidden-audio-preview {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
-
-.clip-button {
-  min-width: 220px;
-}
-.hidden-audio-preview {
-  display: none;
-}
-
 .clip-button {
   min-width: 220px;
 }
