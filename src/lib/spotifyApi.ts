@@ -199,9 +199,11 @@ export async function searchSpotifyAlbums(query: string): Promise<SpotifyAlbum[]
       country,
     });
 
-    const response = await fetch(
-      `${getITunesBaseUrl("search")}?${params.toString()}`
-    );
+    const searchUrl = `${getITunesBaseUrl("search")}?${params.toString()}`;
+
+    console.log("Album search URL:", searchUrl);
+
+    const response = await fetch(searchUrl);
 
     if (!response.ok) {
       console.error("iTunes album search failed:", response.status, country);
