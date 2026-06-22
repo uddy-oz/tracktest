@@ -31,6 +31,11 @@ type ITunesTrack = {
   previewUrl?: string;
 };
 
+type RankedAlbum = {
+  album: SpotifyAlbum;
+  score: number;
+};
+
 type ITunesSearchResponse = {
   resultCount: number;
   results: ITunesAlbum[];
@@ -81,6 +86,85 @@ function cleanText(text: string) {
     .trim();
 }
 
+function getWords(text: string) {
+  return cleanText(text)
+    .split(" ")
+    .filter((word) => word.length > 1);
+}
+
+function isRealQuizAlbum(album: ITunesAlbum) {
+  const title = cleanText(album.collectionName || "");
+  const trackCount = album.trackCount || 0;
+
+  if (!album.collectionId || !album.collectionName) {
+    return false;
+  }
+
+  if (title.includes("single")) {
+    return false;
+  }
+
+  if (trackCount > 0 && trackCount < 4) {
+    return false;
+  }
+
+  return true;
+}
+
+function scoreAlbum(album: ITunesAlbum, query: string) {
+  const queryText = cleanText(query);
+  const albumTitle = cleanText(album.collectionName || "");
+  const artistName = cleanText(album.artistName || "");
+  const trackCount = album.trackCount || 0;
+  const queryWords = getWords(query);
+
+  let score = 0;
+
+  if (artistName === queryText) {
+    score += 100;
+  }
+
+  if (artistName.includes(queryText)) {
+    score += 80;
+  }
+
+  if (albumTitle === queryText) {
+    score += 90;
+  }
+
+  if (albumTitle.includes(queryText)) {
+    score += 70;
+  }
+
+  queryWords.forEach((word) => {
+    if (artistName.includes(word)) {
+      score += 20;
+    }
+
+    if (albumTitle.includes(word)) {
+      score += 15;
+    }
+  });
+
+  if (trackCount >= 10) {
+    score += 35;
+  } else if (trackCount >= 7) {
+    score += 25;
+  } else if (trackCount >= 4) {
+    score += 10;
+  }
+
+  if (albumTitle.includes("single")) {
+    score -= 200;
+  }
+
+  if (trackCount > 0 && trackCount < 4) {
+    score -= 150;
+  }
+
+  return score;
+}
+
 function removeDuplicateAlbums(albums: SpotifyAlbum[]) {
   const seenAlbums = new Set<string>();
 
@@ -97,15 +181,15 @@ function removeDuplicateAlbums(albums: SpotifyAlbum[]) {
 }
 
 export async function searchSpotifyAlbums(query: string): Promise<SpotifyAlbum[]> {
-  const countries = ["US", "GB", "CA", "NG"];
-  const allAlbums: SpotifyAlbum[] = [];
+  const countries = ["US", "NG", "GB", "CA", "ZA"];
+  const rankedAlbums: RankedAlbum[] = [];
 
   for (const country of countries) {
     const params = new URLSearchParams({
       term: query,
       media: "music",
       entity: "album",
-      limit: "12",
+      limit: "50",
       country,
     });
 
@@ -120,22 +204,29 @@ export async function searchSpotifyAlbums(query: string): Promise<SpotifyAlbum[]
 
     const data: ITunesSearchResponse = await response.json();
 
-    const albums = data.results
-      .filter((album) => album.collectionId)
-      .map((album) => ({
-        id: makeAlbumId(country, album.collectionId as number),
-        title: album.collectionName || "Unknown album",
-        artist: album.artistName || "Unknown artist",
-        year: album.releaseDate?.slice(0, 4) || "Unknown year",
-        imageUrl: album.artworkUrl100
-          ? improveArtworkUrl(album.artworkUrl100)
-          : "",
-      }));
-
-    allAlbums.push(...albums);
+    data.results
+      .filter(isRealQuizAlbum)
+      .forEach((album) => {
+        rankedAlbums.push({
+          album: {
+            id: makeAlbumId(country, album.collectionId as number),
+            title: album.collectionName || "Unknown album",
+            artist: album.artistName || "Unknown artist",
+            year: album.releaseDate?.slice(0, 4) || "Unknown year",
+            imageUrl: album.artworkUrl100
+              ? improveArtworkUrl(album.artworkUrl100)
+              : "",
+          },
+          score: scoreAlbum(album, query),
+        });
+      });
   }
 
-  return removeDuplicateAlbums(allAlbums).slice(0, 9);
+  const sortedAlbums = rankedAlbums
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.album);
+
+  return removeDuplicateAlbums(sortedAlbums).slice(0, 9);
 }
 
 export async function getSpotifyAlbumTracks(
