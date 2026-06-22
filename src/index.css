@@ -523,3 +523,10 @@ button:hover {
     max-width: 100%;
   }
 }
+.hidden-audio-preview {
+  display: none;
+}
+
+.clip-button {
+  min-width: 220px;
+}

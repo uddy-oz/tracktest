@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
@@ -81,6 +81,13 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isClipPlaying, setIsClipPlaying] = useState(false);
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const clipStartTimeRef = useRef(8);
+  const clipTimerRef = useRef<number | null>(null);
+
+  const CLIP_LENGTH_SECONDS = 5;
 
   const currentQuestion = questions[currentQuestionIndex];
   const previewUrl = currentQuestion?.correctTrack.previewUrl || "";
@@ -98,6 +105,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         setScore(0);
         setHasAnswered(false);
         setIsQuizComplete(false);
+        setIsClipPlaying(false);
 
         const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
 
@@ -136,6 +144,105 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     loadTracks();
   }, [selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
 
+  useEffect(() => {
+    clearClipTimer();
+    setIsClipPlaying(false);
+
+    const audio = audioRef.current;
+
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.load();
+    }
+
+    clipStartTimeRef.current = 8;
+
+    return () => {
+      clearClipTimer();
+    };
+  }, [currentQuestionIndex, previewUrl]);
+
+  function clearClipTimer() {
+    if (clipTimerRef.current !== null) {
+      window.clearTimeout(clipTimerRef.current);
+      clipTimerRef.current = null;
+    }
+  }
+
+  function getRandomClipStart(duration: number) {
+    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 30;
+    const latestStart = Math.max(0, safeDuration - CLIP_LENGTH_SECONDS - 1);
+
+    const minStart = latestStart >= 12 ? 8 : 0;
+    const maxStart = Math.min(22, latestStart);
+
+    if (maxStart <= minStart) {
+      return 0;
+    }
+
+    return Math.floor(Math.random() * (maxStart - minStart + 1)) + minStart;
+  }
+
+  function stopClip() {
+    const audio = audioRef.current;
+
+    clearClipTimer();
+
+    if (audio) {
+      audio.pause();
+      audio.currentTime = clipStartTimeRef.current;
+    }
+
+    setIsClipPlaying(false);
+  }
+
+  async function playFiveSecondClip() {
+    const audio = audioRef.current;
+
+    if (!audio || !previewUrl) {
+      return;
+    }
+
+    try {
+      clearClipTimer();
+
+      const startTime = getRandomClipStart(audio.duration);
+      clipStartTimeRef.current = startTime;
+
+      audio.pause();
+      audio.currentTime = startTime;
+
+      await audio.play();
+
+      setIsClipPlaying(true);
+
+      clipTimerRef.current = window.setTimeout(() => {
+        stopClip();
+      }, CLIP_LENGTH_SECONDS * 1000 + 250);
+    } catch (error) {
+      console.error("Could not play audio clip:", error);
+      setIsClipPlaying(false);
+    }
+  }
+
+  function handleAudioTimeUpdate() {
+    const audio = audioRef.current;
+
+    if (!audio) {
+      return;
+    }
+
+    if (audio.currentTime >= clipStartTimeRef.current + CLIP_LENGTH_SECONDS) {
+      stopClip();
+    }
+  }
+
+  function handleAudioEnded() {
+    clearClipTimer();
+    setIsClipPlaying(false);
+  }
+
   function checkAnswer() {
     if (!currentQuestion) {
       return;
@@ -164,6 +271,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   function goToNextQuestion() {
+    stopClip();
     setCurrentQuestionIndex((currentIndex) => currentIndex + 1);
     setGuess("");
     setMessage("");
@@ -171,10 +279,12 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   function finishQuiz() {
+    stopClip();
     setIsQuizComplete(true);
   }
 
   function restartQuiz() {
+    stopClip();
     setCurrentQuestionIndex(0);
     setGuess("");
     setMessage("");
@@ -196,7 +306,9 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     return (
       <section className="quiz">
         <h2>{error}</h2>
-        <button onClick={onRestartApp}>Choose Another Album</button>
+        <button type="button" onClick={onRestartApp}>
+          Choose Another Album
+        </button>
       </section>
     );
   }
@@ -205,7 +317,9 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     return (
       <section className="quiz">
         <h2>No questions available.</h2>
-        <button onClick={onRestartApp}>Choose Another Album</button>
+        <button type="button" onClick={onRestartApp}>
+          Choose Another Album
+        </button>
       </section>
     );
   }
@@ -226,8 +340,15 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         </p>
 
         <div className="hero-buttons">
-          <button onClick={restartQuiz}>Restart Quiz</button>
-          <button className="secondary-button" onClick={onRestartApp}>
+          <button type="button" onClick={restartQuiz}>
+            Restart Quiz
+          </button>
+
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onRestartApp}
+          >
             Choose Another Album
           </button>
         </div>
@@ -257,20 +378,39 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       </p>
 
       <div className="audio-preview-wrapper">
-        <audio
-          key={previewUrl}
-          className="audio-preview"
-          controls
-          preload="metadata"
-          src={previewUrl}
-        >
-          Your browser does not support the audio element.
-        </audio>
+        {previewUrl ? (
+          <>
+            <audio
+              ref={audioRef}
+              key={previewUrl}
+              className="hidden-audio-preview"
+              preload="auto"
+              src={previewUrl}
+              onTimeUpdate={handleAudioTimeUpdate}
+              onEnded={handleAudioEnded}
+            >
+              Your browser does not support the audio element.
+            </audio>
+
+            <button
+              type="button"
+              className="clip-button"
+              onClick={isClipPlaying ? stopClip : playFiveSecondClip}
+            >
+              {isClipPlaying ? "Stop Clip" : "Play 5 Second Clip"}
+            </button>
+          </>
+        ) : (
+          <p className="preview-unavailable">
+            Audio preview unavailable. Pick the correct track from the options.
+          </p>
+        )}
       </div>
 
       <div className="song-options">
         {currentQuestion.options.map((track) => (
           <button
+            type="button"
             key={track.id}
             className={`song-button ${
               guess === track.name ? "selected-song" : ""
@@ -299,16 +439,20 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         </p>
       )}
 
-      {!hasAnswered && <button onClick={checkAnswer}>Submit Answer</button>}
+      {!hasAnswered && (
+        <button type="button" onClick={checkAnswer}>
+          Submit Answer
+        </button>
+      )}
 
       {hasAnswered && currentQuestionIndex < questions.length - 1 && (
-        <button className="next-button" onClick={goToNextQuestion}>
+        <button type="button" className="next-button" onClick={goToNextQuestion}>
           Next Question
         </button>
       )}
 
       {hasAnswered && currentQuestionIndex === questions.length - 1 && (
-        <button className="next-button" onClick={finishQuiz}>
+        <button type="button" className="next-button" onClick={finishQuiz}>
           Finish Quiz
         </button>
       )}
