@@ -32,44 +32,6 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   });
 }
 
-async function addPreviewUrlsToSpotifyTracks(
-  tracks: SpotifyTrack[],
-  artistName: string,
-  albumTitle: string
-) {
-  const playableTracks: SpotifyTrack[] = [];
-
-  for (const track of tracks) {
-    if (track.previewUrl) {
-      playableTracks.push(track);
-      continue;
-    }
-
-    try {
-      const preview = await searchITunesPreview(
-        artistName,
-        track.name,
-        albumTitle
-      );
-
-      if (preview?.previewUrl) {
-        playableTracks.push({
-          ...track,
-          previewUrl: preview.previewUrl,
-        });
-      }
-    } catch (error) {
-      console.error("Could not load preview for:", track.name, error);
-    }
-
-    if (playableTracks.length >= 12) {
-      break;
-    }
-  }
-
-  return playableTracks;
-}
-
 function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -81,16 +43,20 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isClipPlaying, setIsClipPlaying] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStartTimeRef = useRef(8);
   const clipTimerRef = useRef<number | null>(null);
+  const previewCacheRef = useRef<Record<string, string | null>>({});
 
   const CLIP_LENGTH_SECONDS = 5;
 
   const currentQuestion = questions[currentQuestionIndex];
-  const previewUrl = currentQuestion?.correctTrack.previewUrl || "";
+  const currentTrack = currentQuestion?.correctTrack;
 
   useEffect(() => {
     async function loadTracks() {
@@ -105,7 +71,11 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         setScore(0);
         setHasAnswered(false);
         setIsQuizComplete(false);
+        setPreviewUrl("");
+        setIsPreviewLoading(false);
         setIsClipPlaying(false);
+
+        previewCacheRef.current = {};
 
         const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
 
@@ -116,23 +86,8 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
         const cleanedSpotifyTracks = albumTracks.slice(0, 20);
 
-        const playableTracks = await addPreviewUrlsToSpotifyTracks(
-          cleanedSpotifyTracks,
-          selectedAlbum.artist,
-          selectedAlbum.title
-        );
-
-        console.log("Playable Spotify tracks:", playableTracks);
-
-        if (playableTracks.length < 4) {
-          setError(
-            "Not enough reliable audio previews found for this album. Try another album."
-          );
-          return;
-        }
-
-        setTracks(playableTracks);
-        setQuestions(buildQuizQuestions(playableTracks));
+        setTracks(cleanedSpotifyTracks);
+        setQuestions(buildQuizQuestions(cleanedSpotifyTracks));
       } catch (error) {
         console.error(error);
         setError("Could not load tracks for this album.");
@@ -143,6 +98,72 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
     loadTracks();
   }, [selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadPreviewForCurrentQuestion() {
+      stopClip(false);
+      setPreviewUrl("");
+      setIsPreviewLoading(false);
+
+      if (!currentTrack) {
+        return;
+      }
+
+      if (currentTrack.previewUrl) {
+        setPreviewUrl(currentTrack.previewUrl);
+        return;
+      }
+
+      if (currentTrack.id in previewCacheRef.current) {
+        const cachedPreview = previewCacheRef.current[currentTrack.id];
+        setPreviewUrl(cachedPreview || "");
+        return;
+      }
+
+      try {
+        setIsPreviewLoading(true);
+
+        const preview = await searchITunesPreview(
+          selectedAlbum.artist,
+          currentTrack.name,
+          selectedAlbum.title
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        const foundPreviewUrl = preview?.previewUrl || null;
+
+        previewCacheRef.current[currentTrack.id] = foundPreviewUrl;
+        setPreviewUrl(foundPreviewUrl || "");
+      } catch (error) {
+        console.error("Could not load preview for:", currentTrack.name, error);
+
+        if (isActive) {
+          previewCacheRef.current[currentTrack.id] = null;
+          setPreviewUrl("");
+        }
+      } finally {
+        if (isActive) {
+          setIsPreviewLoading(false);
+        }
+      }
+    }
+
+    loadPreviewForCurrentQuestion();
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    currentQuestionIndex,
+    currentTrack,
+    selectedAlbum.artist,
+    selectedAlbum.title,
+  ]);
 
   useEffect(() => {
     clearClipTimer();
@@ -156,12 +177,10 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       audio.load();
     }
 
-    clipStartTimeRef.current = 8;
-
     return () => {
       clearClipTimer();
     };
-  }, [currentQuestionIndex, previewUrl]);
+  }, [previewUrl, currentQuestionIndex]);
 
   function clearClipTimer() {
     if (clipTimerRef.current !== null) {
@@ -172,26 +191,32 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
   function getRandomClipStart(duration: number) {
     const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 30;
+
     const latestStart = Math.max(0, safeDuration - CLIP_LENGTH_SECONDS - 1);
 
-    const minStart = latestStart >= 12 ? 8 : 0;
-    const maxStart = Math.min(22, latestStart);
+    const possibleStarts = [7, 9, 11, 13, 15, 17, 19, 21].filter(
+      (time) => time <= latestStart
+    );
 
-    if (maxStart <= minStart) {
+    if (possibleStarts.length === 0) {
       return 0;
     }
 
-    return Math.floor(Math.random() * (maxStart - minStart + 1)) + minStart;
+    const randomIndex = Math.floor(Math.random() * possibleStarts.length);
+    return possibleStarts[randomIndex];
   }
 
-  function stopClip() {
+  function stopClip(resetToStart = true) {
     const audio = audioRef.current;
 
     clearClipTimer();
 
     if (audio) {
       audio.pause();
-      audio.currentTime = clipStartTimeRef.current;
+
+      if (resetToStart) {
+        audio.currentTime = clipStartTimeRef.current;
+      }
     }
 
     setIsClipPlaying(false);
@@ -219,7 +244,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
       clipTimerRef.current = window.setTimeout(() => {
         stopClip();
-      }, CLIP_LENGTH_SECONDS * 1000 + 250);
+      }, CLIP_LENGTH_SECONDS * 1000);
     } catch (error) {
       console.error("Could not play audio clip:", error);
       setIsClipPlaying(false);
@@ -271,7 +296,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   function goToNextQuestion() {
-    stopClip();
+    stopClip(false);
     setCurrentQuestionIndex((currentIndex) => currentIndex + 1);
     setGuess("");
     setMessage("");
@@ -279,12 +304,12 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   function finishQuiz() {
-    stopClip();
+    stopClip(false);
     setIsQuizComplete(true);
   }
 
   function restartQuiz() {
-    stopClip();
+    stopClip(false);
     setCurrentQuestionIndex(0);
     setGuess("");
     setMessage("");
@@ -297,7 +322,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   if (isLoading) {
     return (
       <section className="quiz">
-        <h2>Loading reliable previews...</h2>
+        <h2>Loading tracks...</h2>
       </section>
     );
   }
@@ -378,7 +403,11 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       </p>
 
       <div className="audio-preview-wrapper">
-        {previewUrl ? (
+        {isPreviewLoading && (
+          <p className="preview-unavailable">Loading preview...</p>
+        )}
+
+        {!isPreviewLoading && previewUrl && (
           <>
             <audio
               ref={audioRef}
@@ -395,14 +424,17 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
             <button
               type="button"
               className="clip-button"
-              onClick={isClipPlaying ? stopClip : playFiveSecondClip}
+              onClick={isClipPlaying ? () => stopClip() : playFiveSecondClip}
             >
               {isClipPlaying ? "Stop Clip" : "Play 5 Second Clip"}
             </button>
           </>
-        ) : (
+        )}
+
+        {!isPreviewLoading && !previewUrl && (
           <p className="preview-unavailable">
-            Audio preview unavailable. Pick the correct track from the options.
+            Audio preview unavailable for this question. Try answering from the
+            options.
           </p>
         )}
       </div>

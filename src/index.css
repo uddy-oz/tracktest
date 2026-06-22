@@ -530,3 +530,10 @@ button:hover {
 .clip-button {
   min-width: 220px;
 }
+.hidden-audio-preview {
+  display: none;
+}
+
+.clip-button {
+  min-width: 220px;
+}
