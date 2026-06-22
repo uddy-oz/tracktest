@@ -47,9 +47,15 @@ type ITunesLookupResponse = {
 };
 
 function getITunesBaseUrl(path: "search" | "lookup") {
-  return import.meta.env.PROD
-    ? `/itunes/${path}`
-    : `https://itunes.apple.com/${path}`;
+  if (!import.meta.env.PROD) {
+    return `https://itunes.apple.com/${path}`;
+  }
+
+  if (path === "search") {
+    return "/api/itunes-search";
+  }
+
+  return "/api/itunes-lookup";
 }
 
 function makeAlbumId(country: string, collectionId: number) {
