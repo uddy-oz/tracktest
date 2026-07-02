@@ -39,7 +39,7 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
     <section className="album-search">
       <h2>Choose an album</h2>
 
-      <p>Search for an album and TrackTest will turn it into a quiz.</p>
+      <p>Search for an album and TrackTest Arena will turn it into a quiz.</p>
 
       <div className="search-box">
         <input

@@ -59,7 +59,7 @@ function SpotifyCallback({ onSpotifyConnected }: SpotifyCallbackProps) {
       <h1>{message}</h1>
 
       <button onClick={() => window.location.replace("/")}>
-        Back to TrackTest
+        Back to TrackTest Arena
       </button>
     </main>
   );

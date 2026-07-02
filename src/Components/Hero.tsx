@@ -6,8 +6,8 @@ function Hero() {
       <h1>How well do you really know your favorite albums?</h1>
 
       <p className="subtitle">
-        TrackTest turns albums into quick music quizzes. Pick an album, guess the songs,
-        and climb the leaderboard.
+        TrackTest Arena turns albums into quick music quizzes. Pick an album,
+        guess the songs, and climb the leaderboard.
       </p>
 
       <div className="hero-buttons">

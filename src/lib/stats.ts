@@ -255,3 +255,11 @@ export function saveQuizResult(result: Omit<QuizResult, "id" | "datePlayed">) {
 
   return stats;
 }
+
+export function clearTrackTestStats() {
+  try {
+    localStorage.removeItem(STATS_STORAGE_KEY);
+  } catch (error) {
+    console.error("Could not clear TrackTest stats:", error);
+  }
+}

@@ -17,7 +17,7 @@ function Navbar({
 }: NavbarProps) {
   return (
     <nav className="navbar">
-      <h2 className="logo">TrackTest</h2>
+      <h2 className="logo">TrackTest Arena</h2>
 
       <div className="nav-links">
         <button

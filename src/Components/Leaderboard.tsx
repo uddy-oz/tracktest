@@ -1,4 +1,5 @@
-import { getTrackTestStats } from "../lib/stats";
+import { useState } from "react";
+import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
 
 type LeaderboardProps = {
   onPlay: () => void;
@@ -12,20 +13,44 @@ function formatSeconds(value: number) {
   return `${value.toFixed(1)}s`;
 }
 
+function formatStreak(days: number) {
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
 function Leaderboard({ onPlay }: LeaderboardProps) {
-  const stats = getTrackTestStats();
+  const [stats, setStats] = useState(getTrackTestStats);
   const artists = Object.values(stats.artists);
   const albums = Object.values(stats.albums);
-  const mostPlayedArtist = [...artists].sort(
-    (a, b) => b.quizzesPlayed - a.quizzesPlayed
-  )[0];
-  const bestArtistAccuracy = [...artists]
-    .filter((artist) => artist.totalQuestions > 0)
-    .sort((a, b) => b.accuracy - a.accuracy || b.totalPoints - a.totalPoints)[0];
-  const bestAlbumScore = [...albums].sort(
-    (a, b) => b.bestScore - a.bestScore
-  )[0];
+  const topArtists = [...artists]
+    .sort(
+      (a, b) =>
+        b.totalPoints - a.totalPoints ||
+        b.accuracy - a.accuracy ||
+        b.quizzesPlayed - a.quizzesPlayed
+    )
+    .slice(0, 5);
+  const topAlbums = [...albums]
+    .sort(
+      (a, b) =>
+        b.bestScore - a.bestScore ||
+        b.bestAccuracy - a.bestAccuracy ||
+        b.timesPlayed - a.timesPlayed
+    )
+    .slice(0, 5);
   const recentResults = stats.quizResults.slice(0, 5);
+
+  function handleClearStats() {
+    const shouldClear = window.confirm(
+      "Clear all local TrackTest Arena stats on this device?"
+    );
+
+    if (!shouldClear) {
+      return;
+    }
+
+    clearTrackTestStats();
+    setStats(getTrackTestStats());
+  }
 
   return (
     <section className="leaderboard-page">
@@ -49,7 +74,7 @@ function Leaderboard({ onPlay }: LeaderboardProps) {
 
         <div className="stat-card">
           <span>Current Streak</span>
-          <strong>{stats.overall.currentDailyStreak} days</strong>
+          <strong>{formatStreak(stats.overall.currentDailyStreak)}</strong>
         </div>
 
         <div className="stat-card">
@@ -75,42 +100,45 @@ function Leaderboard({ onPlay }: LeaderboardProps) {
 
       <div className="leaderboard-sections">
         <div className="leaderboard-panel">
-          <h2>Most Played Artist</h2>
-          {mostPlayedArtist ? (
-            <p>
-              <strong>{mostPlayedArtist.artistName}</strong>
-              <span>{mostPlayedArtist.quizzesPlayed} quizzes played</span>
-            </p>
+          <h2>Artist Mastery</h2>
+          {topArtists.length > 0 ? (
+            <div className="leaderboard-list">
+              {topArtists.map((artist, index) => (
+                <div className="leaderboard-list-row" key={artist.artistName}>
+                  <span className="rank-number">{index + 1}</span>
+                  <div>
+                    <strong>{artist.artistName}</strong>
+                    <span>{artist.quizzesPlayed} quizzes played</span>
+                  </div>
+                  <span>{artist.accuracy}%</span>
+                  <span>{formatNumber(artist.totalPoints)} pts</span>
+                </div>
+              ))}
+            </div>
           ) : (
             <p>Play a quiz to start building artist stats.</p>
           )}
         </div>
 
         <div className="leaderboard-panel">
-          <h2>Best Artist Accuracy</h2>
-          {bestArtistAccuracy ? (
-            <p>
-              <strong>{bestArtistAccuracy.artistName}</strong>
-              <span>
-                {bestArtistAccuracy.accuracy}% accuracy over{" "}
-                {bestArtistAccuracy.totalQuestions} questions
-              </span>
-            </p>
-          ) : (
-            <p>Artist accuracy will appear after your first quiz.</p>
-          )}
-        </div>
-
-        <div className="leaderboard-panel">
-          <h2>Best Album Score</h2>
-          {bestAlbumScore ? (
-            <p>
-              <strong>{bestAlbumScore.albumName}</strong>
-              <span>
-                {formatNumber(bestAlbumScore.bestScore)} points by{" "}
-                {bestAlbumScore.artistName}
-              </span>
-            </p>
+          <h2>Album Records</h2>
+          {topAlbums.length > 0 ? (
+            <div className="leaderboard-list">
+              {topAlbums.map((album, index) => (
+                <div
+                  className="leaderboard-list-row"
+                  key={`${album.artistName}-${album.albumName}`}
+                >
+                  <span className="rank-number">{index + 1}</span>
+                  <div>
+                    <strong>{album.albumName}</strong>
+                    <span>{album.artistName}</span>
+                  </div>
+                  <span>{formatNumber(album.bestScore)} pts</span>
+                  <span>{album.bestAccuracy}%</span>
+                </div>
+              ))}
+            </div>
           ) : (
             <p>Album scores will appear after your first quiz.</p>
           )}
@@ -139,6 +167,14 @@ function Leaderboard({ onPlay }: LeaderboardProps) {
           </p>
         )}
       </div>
+
+      <button
+        type="button"
+        className="clear-stats-button"
+        onClick={handleClearStats}
+      >
+        Clear Local Stats
+      </button>
     </section>
   );
 }
