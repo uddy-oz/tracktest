@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
+import { saveQuizResult } from "../lib/stats";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
@@ -90,6 +91,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const clipStartTimeRef = useRef(8);
   const clipTimerRef = useRef<number | null>(null);
   const previewCacheRef = useRef<Record<string, string | null>>({});
+  const hasSavedQuizResultRef = useRef(false);
 
   const CLIP_LENGTH_SECONDS = 5;
 
@@ -121,6 +123,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         setAudioFallbackMessage("");
 
         previewCacheRef.current = {};
+        hasSavedQuizResultRef.current = false;
 
         const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
 
@@ -565,6 +568,33 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
   function finishQuiz() {
     stopClip(false);
+
+    if (!hasSavedQuizResultRef.current) {
+      const accuracy =
+        questions.length > 0
+          ? Math.round((correctAnswers / questions.length) * 100)
+          : 0;
+      const averageAnswerTime =
+        questionResults.length > 0
+          ? questionResults.reduce(
+              (total, result) => total + result.answerTimeSeconds,
+              0
+            ) / questionResults.length
+          : 0;
+
+      saveQuizResult({
+        albumName: selectedAlbum.title,
+        artistName: selectedAlbum.artist,
+        totalQuestions: questions.length,
+        correctAnswers,
+        accuracyPercentage: accuracy,
+        finalPoints: totalPoints,
+        averageAnswerTime,
+      });
+
+      hasSavedQuizResultRef.current = true;
+    }
+
     setIsQuizComplete(true);
   }
 
@@ -582,6 +612,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setAudioFallbackMessage("");
     setHasAnswered(false);
     setIsQuizComplete(false);
+    hasSavedQuizResultRef.current = false;
     setQuestions(buildQuizQuestions(tracks));
     setQuizPhase("countdown");
   }
