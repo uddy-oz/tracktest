@@ -13,12 +13,30 @@ type QuizQuestion = {
   options: SpotifyTrack[];
 };
 
+type QuestionResult = {
+  isCorrect: boolean;
+  points: number;
+  answerTimeSeconds: number;
+};
+
+const QUESTION_TIME_SECONDS = 10;
+const MIN_QUESTIONS = 5;
+const MAX_QUESTIONS = 12;
+
 function shuffleArray<T>(array: T[]) {
   return [...array].sort(() => Math.random() - 0.5);
 }
 
+function getQuestionCount(totalPlayableTracks: number) {
+  return Math.min(
+    MAX_QUESTIONS,
+    Math.max(MIN_QUESTIONS, Math.floor(totalPlayableTracks / 2))
+  );
+}
+
 function buildQuizQuestions(tracks: SpotifyTrack[]) {
-  const quizTracks = shuffleArray(tracks).slice(0, 5);
+  const questionCount = getQuestionCount(tracks.length);
+  const quizTracks = shuffleArray(tracks).slice(0, questionCount);
 
   return quizTracks.map((correctTrack) => {
     const wrongOptions = shuffleArray(
@@ -38,7 +56,10 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [guess, setGuess] = useState("");
   const [message, setMessage] = useState("");
-  const [score, setScore] = useState(0);
+  const [totalPoints, setTotalPoints] = useState(0);
+  const [correctAnswers, setCorrectAnswers] = useState(0);
+  const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
+  const [timeRemaining, setTimeRemaining] = useState(QUESTION_TIME_SECONDS);
   const [hasAnswered, setHasAnswered] = useState(false);
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,7 +89,10 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         setCurrentQuestionIndex(0);
         setGuess("");
         setMessage("");
-        setScore(0);
+        setTotalPoints(0);
+        setCorrectAnswers(0);
+        setQuestionResults([]);
+        setTimeRemaining(QUESTION_TIME_SECONDS);
         setHasAnswered(false);
         setIsQuizComplete(false);
         setPreviewUrl("");
@@ -79,12 +103,12 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
         const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
 
-        if (albumTracks.length < 4) {
+        if (albumTracks.length < MIN_QUESTIONS) {
           setError("Not enough tracks for a quiz.");
           return;
         }
 
-        const cleanedSpotifyTracks = albumTracks.slice(0, 20);
+        const cleanedSpotifyTracks = albumTracks;
 
         setTracks(cleanedSpotifyTracks);
         setQuestions(buildQuizQuestions(cleanedSpotifyTracks));
@@ -182,6 +206,30 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     };
   }, [previewUrl, currentQuestionIndex]);
 
+  useEffect(() => {
+    if (isLoading || error || isQuizComplete || hasAnswered || !currentQuestion) {
+      return;
+    }
+
+    const timerId = window.setInterval(() => {
+      setTimeRemaining((currentTime) => Math.max(0, currentTime - 1));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [currentQuestion, error, hasAnswered, isLoading, isQuizComplete]);
+
+  useEffect(() => {
+    if (!currentQuestion || hasAnswered || isQuizComplete) {
+      return;
+    }
+
+    if (timeRemaining === 0) {
+      recordAnswer("", true);
+    }
+  }, [currentQuestion, hasAnswered, isQuizComplete, timeRemaining]);
+
   function clearClipTimer() {
     if (clipTimerRef.current !== null) {
       window.clearTimeout(clipTimerRef.current);
@@ -268,13 +316,20 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setIsClipPlaying(false);
   }
 
-  function checkAnswer() {
-    if (!currentQuestion) {
-      return;
+  function getPointsForAnswer(isCorrect: boolean, remainingSeconds: number) {
+    if (!isCorrect) {
+      return 0;
     }
 
-    if (guess === "") {
-      setMessage("Pick an answer first.");
+    const speedBonus = Math.floor(
+      500 * (remainingSeconds / QUESTION_TIME_SECONDS)
+    );
+
+    return 500 + speedBonus;
+  }
+
+  function recordAnswer(selectedGuess: string, timedOut = false) {
+    if (!currentQuestion) {
       return;
     }
 
@@ -284,15 +339,42 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     }
 
     const correctAnswer = currentQuestion.correctTrack.name;
+    const normalizedGuess = selectedGuess.toLowerCase();
+    const normalizedAnswer = correctAnswer.toLowerCase();
+    const isCorrect = normalizedGuess === normalizedAnswer;
+    const pointsEarned = getPointsForAnswer(isCorrect, timeRemaining);
+    const answerTimeSeconds = QUESTION_TIME_SECONDS - timeRemaining;
 
-    if (guess.toLowerCase() === correctAnswer.toLowerCase()) {
-      setMessage("Correct. You know ball.");
-      setScore((currentScore) => currentScore + 1);
+    stopClip(false);
+
+    if (timedOut) {
+      setMessage(`Time's up. The correct answer was ${correctAnswer}.`);
+    } else if (isCorrect) {
+      setMessage(`Correct. +${pointsEarned} points.`);
+      setCorrectAnswers((currentTotal) => currentTotal + 1);
     } else {
       setMessage(`Wrong. The correct answer was ${correctAnswer}.`);
     }
 
+    setTotalPoints((currentPoints) => currentPoints + pointsEarned);
+    setQuestionResults((currentResults) => [
+      ...currentResults,
+      {
+        isCorrect,
+        points: pointsEarned,
+        answerTimeSeconds,
+      },
+    ]);
     setHasAnswered(true);
+  }
+
+  function checkAnswer() {
+    if (guess === "") {
+      setMessage("Pick an answer first.");
+      return;
+    }
+
+    recordAnswer(guess);
   }
 
   function goToNextQuestion() {
@@ -300,6 +382,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setCurrentQuestionIndex((currentIndex) => currentIndex + 1);
     setGuess("");
     setMessage("");
+    setTimeRemaining(QUESTION_TIME_SECONDS);
     setHasAnswered(false);
   }
 
@@ -313,7 +396,10 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setCurrentQuestionIndex(0);
     setGuess("");
     setMessage("");
-    setScore(0);
+    setTotalPoints(0);
+    setCorrectAnswers(0);
+    setQuestionResults([]);
+    setTimeRemaining(QUESTION_TIME_SECONDS);
     setHasAnswered(false);
     setIsQuizComplete(false);
     setQuestions(buildQuizQuestions(tracks));
@@ -350,17 +436,45 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }
 
   if (isQuizComplete) {
+    const accuracy =
+      questions.length > 0 ? Math.round((correctAnswers / questions.length) * 100) : 0;
+    const averageAnswerTime =
+      questionResults.length > 0
+        ? questionResults.reduce(
+            (total, result) => total + result.answerTimeSeconds,
+            0
+          ) / questionResults.length
+        : 0;
+
     return (
       <section className="quiz">
         <h2>Quiz complete</h2>
 
-        <p className="score">
-          Final score: {score} / {questions.length}
-        </p>
+        <p className="score">Final points: {totalPoints.toLocaleString()}</p>
+
+        <div className="score-breakdown">
+          <p>
+            Correct answers: <strong>{correctAnswers}</strong> /{" "}
+            <strong>{questions.length}</strong>
+          </p>
+          <p>
+            Accuracy: <strong>{accuracy}%</strong>
+          </p>
+          <p>
+            Average answer time:{" "}
+            <strong>{averageAnswerTime.toFixed(1)}s</strong>
+          </p>
+          <p>
+            Album: <strong>{selectedAlbum.title}</strong>
+          </p>
+          <p>
+            Artist: <strong>{selectedAlbum.artist}</strong>
+          </p>
+        </div>
 
         <p className="quiz-message">
-          {score === questions.length
-            ? "Perfect score. Certified album demon."
+          {correctAnswers === questions.length
+            ? "Perfect run. Arena-ready."
             : "Not bad. Run it back and beat your score."}
         </p>
 
@@ -393,9 +507,16 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
       <h2>Guess the song</h2>
 
-      <p className="score">
-        Score: {score} / {questions.length}
-      </p>
+      <p className="score">Points: {totalPoints.toLocaleString()}</p>
+
+      <div className="quiz-status">
+        <span>
+          Correct: {correctAnswers} / {questions.length}
+        </span>
+        <span className={timeRemaining <= 3 && !hasAnswered ? "timer-low" : ""}>
+          Time: {timeRemaining}s
+        </span>
+      </div>
 
       <p className="quiz-clue">
         Question {currentQuestionIndex + 1} of {questions.length}: Pick the
@@ -458,7 +579,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
                 : ""
             }`}
             onClick={() => setGuess(track.name)}
-            disabled={hasAnswered}
+            disabled={hasAnswered || timeRemaining === 0}
           >
             {track.name}
           </button>
@@ -472,7 +593,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       )}
 
       {!hasAnswered && (
-        <button type="button" onClick={checkAnswer}>
+        <button type="button" onClick={checkAnswer} disabled={timeRemaining === 0}>
           Submit Answer
         </button>
       )}
