@@ -1,8 +1,10 @@
 import { useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
 
 type LeaderboardProps = {
   onPlay: () => void;
+  session: Session | null;
 };
 
 function formatNumber(value: number) {
@@ -17,7 +19,7 @@ function formatStreak(days: number) {
   return `${days} ${days === 1 ? "day" : "days"}`;
 }
 
-function Leaderboard({ onPlay }: LeaderboardProps) {
+function Leaderboard({ onPlay, session }: LeaderboardProps) {
   const [stats, setStats] = useState(getTrackTestStats);
   const artists = Object.values(stats.artists);
   const albums = Object.values(stats.albums);
@@ -60,6 +62,11 @@ function Leaderboard({ onPlay }: LeaderboardProps) {
         <p>
           A local leaderboard foundation for artist mastery, album runs, streaks,
           and future Arena rankings.
+        </p>
+        <p className="cloud-sync-message">
+          {session
+            ? "Signed in. Cloud sync coming next."
+            : "Log in to save your stats across devices. Local stats are stored on this browser."}
         </p>
         <button type="button" onClick={onPlay}>
           Back to Play

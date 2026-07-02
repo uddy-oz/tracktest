@@ -1,20 +1,24 @@
+import type { Session } from "@supabase/supabase-js";
+
 type NavbarProps = {
-  onLogin: () => void;
   onLogout: () => void;
+  onShowAuth: () => void;
   onShowPlay: () => void;
   onShowLeaderboard: () => void;
-  isSpotifyConnected: boolean;
-  activeView: "play" | "leaderboard";
+  session: Session | null;
+  activeView: "play" | "leaderboard" | "auth";
 };
 
 function Navbar({
-  onLogin,
   onLogout,
+  onShowAuth,
   onShowPlay,
   onShowLeaderboard,
-  isSpotifyConnected,
+  session,
   activeView,
 }: NavbarProps) {
+  const userEmail = session?.user.email;
+
   return (
     <nav className="navbar">
       <h2 className="logo">TrackTest Arena</h2>
@@ -37,12 +41,21 @@ function Navbar({
           Leaderboard
         </button>
 
-        {isSpotifyConnected ? (
-          <button className="nav-login-button" onClick={onLogout}>
-            Connected
-          </button>
+        {session ? (
+          <>
+            <button
+              type="button"
+              className="nav-link-button account-button"
+              onClick={onShowAuth}
+            >
+              {userEmail || "Account"}
+            </button>
+            <button type="button" className="nav-login-button" onClick={onLogout}>
+              Logout
+            </button>
+          </>
         ) : (
-          <button className="nav-login-button" onClick={onLogin}>
+          <button type="button" className="nav-login-button" onClick={onShowAuth}>
             Login
           </button>
         )}

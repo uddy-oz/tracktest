@@ -138,6 +138,13 @@ button:hover {
   background: transparent;
 }
 
+.account-button {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nav-login-button {
   background: transparent;
   color: #cccccc;
@@ -475,6 +482,10 @@ button:hover {
     min-height: auto;
   }
 
+  .account-button {
+    max-width: 100%;
+  }
+
   .hero,
   .album-search,
   .quiz {
@@ -599,6 +610,18 @@ button:hover {
     font-size: 17px;
   }
 
+  .auth-page {
+    padding: 44px 20px 90px;
+  }
+
+  .auth-panel {
+    padding: 24px;
+  }
+
+  .auth-panel h1 {
+    font-size: 38px;
+  }
+
   .next-button {
     margin-left: 0;
     margin-top: 10px;
@@ -672,6 +695,70 @@ button:hover {
   min-width: 220px;
 }
 
+.auth-page {
+  width: 100%;
+  min-height: 70vh;
+  padding: 104px 24px 64px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: center;
+}
+
+.auth-panel {
+  width: min(100%, 480px);
+  padding: 28px;
+  border: 1px solid #333333;
+  border-radius: 14px;
+  background: #1a1a1a;
+}
+
+.auth-panel h1 {
+  margin: 0 0 16px;
+  font-size: 42px;
+}
+
+.auth-panel p {
+  margin-bottom: 24px;
+}
+
+.auth-panel strong {
+  color: white;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 999px;
+  border: 1px solid #333333;
+  background: #111111;
+  color: white;
+  font-size: 16px;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: white;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.auth-message,
+.cloud-sync-message {
+  color: white;
+  font-size: 16px;
+}
+
 .leaderboard-page {
   width: 100%;
   min-height: 70vh;
@@ -690,6 +777,15 @@ button:hover {
 
 .leaderboard-header p {
   margin-bottom: 24px;
+}
+
+.leaderboard-header .cloud-sync-message {
+  width: min(100%, 640px);
+  margin: 0 auto 24px;
+  padding: 12px 16px;
+  border: 1px solid #333333;
+  border-radius: 14px;
+  background: #1a1a1a;
 }
 
 .leaderboard-grid,

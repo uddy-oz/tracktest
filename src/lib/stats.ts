@@ -154,6 +154,14 @@ export function getTrackTestStats() {
   }
 }
 
+export function setTrackTestStats(stats: TrackTestStats) {
+  try {
+    localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(stats));
+  } catch (error) {
+    console.error("Could not save TrackTest stats:", error);
+  }
+}
+
 export function saveQuizResult(result: Omit<QuizResult, "id" | "datePlayed">) {
   const stats = getTrackTestStats();
   const datePlayed = new Date().toISOString();
@@ -247,11 +255,7 @@ export function saveQuizResult(result: Omit<QuizResult, "id" | "datePlayed">) {
   existingAlbum.lastPlayedDate = playedDateKey;
   stats.albums[albumKey] = existingAlbum;
 
-  try {
-    localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(stats));
-  } catch (error) {
-    console.error("Could not save TrackTest stats:", error);
-  }
+  setTrackTestStats(stats);
 
   return stats;
 }
