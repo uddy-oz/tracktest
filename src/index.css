@@ -295,6 +295,38 @@ button:hover {
   border-color: #ffcc00 !important;
 }
 
+.game-state {
+  min-height: 116px;
+  margin: 0 auto 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.game-state-label {
+  margin: 0 0 8px;
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.game-state-detail {
+  margin: 0;
+  color: #cccccc;
+  font-size: 17px;
+}
+
+.start-countdown {
+  margin: 0;
+  color: #ffcc00;
+  font-size: 72px;
+  line-height: 1;
+  font-weight: 900;
+}
+
 .quiz-clue {
   color: #cccccc;
   margin-bottom: 28px;
@@ -466,6 +498,25 @@ button:hover {
     width: 100%;
     max-width: 340px;
     font-size: 17px;
+  }
+
+  .game-state {
+    min-height: 128px;
+    margin-bottom: 34px;
+  }
+
+  .game-state-label {
+    font-size: 17px;
+  }
+
+  .game-state-detail {
+    max-width: 340px;
+    font-size: 17px;
+    line-height: 1.35;
+  }
+
+  .start-countdown {
+    font-size: 68px;
   }
 
   .quiz-clue {

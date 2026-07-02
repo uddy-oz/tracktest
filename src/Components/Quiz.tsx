@@ -19,7 +19,16 @@ type QuestionResult = {
   answerTimeSeconds: number;
 };
 
+type QuizPhase =
+  | "preparing"
+  | "countdown"
+  | "audioBlocked"
+  | "answering"
+  | "reveal";
+
 const QUESTION_TIME_SECONDS = 10;
+const START_COUNTDOWN_SECONDS = 3;
+const REVEAL_COUNTDOWN_SECONDS = 5;
 const MIN_QUESTIONS = 5;
 const MAX_QUESTIONS = 12;
 
@@ -60,6 +69,13 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [correctAnswers, setCorrectAnswers] = useState(0);
   const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
   const [timeRemaining, setTimeRemaining] = useState(QUESTION_TIME_SECONDS);
+  const [startCountdown, setStartCountdown] = useState(
+    START_COUNTDOWN_SECONDS
+  );
+  const [revealCountdown, setRevealCountdown] = useState(
+    REVEAL_COUNTDOWN_SECONDS
+  );
+  const [quizPhase, setQuizPhase] = useState<QuizPhase>("preparing");
   const [hasAnswered, setHasAnswered] = useState(false);
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,6 +84,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isClipPlaying, setIsClipPlaying] = useState(false);
+  const [audioFallbackMessage, setAudioFallbackMessage] = useState("");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStartTimeRef = useRef(8);
@@ -93,11 +110,15 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         setCorrectAnswers(0);
         setQuestionResults([]);
         setTimeRemaining(QUESTION_TIME_SECONDS);
+        setStartCountdown(START_COUNTDOWN_SECONDS);
+        setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+        setQuizPhase("preparing");
         setHasAnswered(false);
         setIsQuizComplete(false);
         setPreviewUrl("");
         setIsPreviewLoading(false);
         setIsClipPlaying(false);
+        setAudioFallbackMessage("");
 
         previewCacheRef.current = {};
 
@@ -112,6 +133,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
 
         setTracks(cleanedSpotifyTracks);
         setQuestions(buildQuizQuestions(cleanedSpotifyTracks));
+        setQuizPhase("countdown");
       } catch (error) {
         console.error(error);
         setError("Could not load tracks for this album.");
@@ -207,7 +229,74 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   }, [previewUrl, currentQuestionIndex]);
 
   useEffect(() => {
-    if (isLoading || error || isQuizComplete || hasAnswered || !currentQuestion) {
+    if (
+      quizPhase !== "countdown" ||
+      isLoading ||
+      error ||
+      isQuizComplete ||
+      !currentQuestion ||
+      startCountdown === 0
+    ) {
+      return;
+    }
+
+    const timerId = window.setInterval(() => {
+      setStartCountdown((currentTime) => Math.max(0, currentTime - 1));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [
+    currentQuestion,
+    error,
+    isLoading,
+    isQuizComplete,
+    quizPhase,
+    startCountdown,
+  ]);
+
+  useEffect(() => {
+    if (
+      quizPhase !== "countdown" ||
+      startCountdown !== 0 ||
+      isQuizComplete ||
+      !currentQuestion
+    ) {
+      return;
+    }
+
+    const startTimerId = window.setTimeout(() => {
+      if (isPreviewLoading) {
+        setQuizPhase("preparing");
+        return;
+      }
+
+      void startAnswerRound(false);
+    }, 600);
+
+    return () => {
+      window.clearTimeout(startTimerId);
+    };
+  }, [
+    currentQuestion,
+    isPreviewLoading,
+    isQuizComplete,
+    previewUrl,
+    quizPhase,
+    startCountdown,
+  ]);
+
+  useEffect(() => {
+    if (quizPhase !== "preparing" || isPreviewLoading || !currentQuestion) {
+      return;
+    }
+
+    void startAnswerRound(false);
+  }, [currentQuestion, isPreviewLoading, previewUrl, quizPhase]);
+
+  useEffect(() => {
+    if (quizPhase !== "answering" || isQuizComplete || !currentQuestion) {
       return;
     }
 
@@ -218,17 +307,60 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     return () => {
       window.clearInterval(timerId);
     };
-  }, [currentQuestion, error, hasAnswered, isLoading, isQuizComplete]);
+  }, [currentQuestion, isQuizComplete, quizPhase]);
 
   useEffect(() => {
-    if (!currentQuestion || hasAnswered || isQuizComplete) {
+    if (
+      quizPhase !== "answering" ||
+      !currentQuestion ||
+      hasAnswered ||
+      isQuizComplete
+    ) {
       return;
     }
 
     if (timeRemaining === 0) {
       recordAnswer("", true);
     }
-  }, [currentQuestion, hasAnswered, isQuizComplete, timeRemaining]);
+  }, [
+    currentQuestion,
+    hasAnswered,
+    isQuizComplete,
+    quizPhase,
+    timeRemaining,
+  ]);
+
+  useEffect(() => {
+    if (quizPhase !== "reveal" || isQuizComplete || !currentQuestion) {
+      return;
+    }
+
+    const timerId = window.setInterval(() => {
+      setRevealCountdown((currentTime) => Math.max(0, currentTime - 1));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [currentQuestion, isQuizComplete, quizPhase]);
+
+  useEffect(() => {
+    if (
+      quizPhase !== "reveal" ||
+      revealCountdown !== 0 ||
+      isQuizComplete ||
+      !currentQuestion
+    ) {
+      return;
+    }
+
+    advanceAfterReveal();
+  }, [
+    currentQuestion,
+    isQuizComplete,
+    quizPhase,
+    revealCountdown,
+  ]);
 
   function clearClipTimer() {
     if (clipTimerRef.current !== null) {
@@ -274,7 +406,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     const audio = audioRef.current;
 
     if (!audio || !previewUrl) {
-      return;
+      return false;
     }
 
     try {
@@ -293,9 +425,12 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       clipTimerRef.current = window.setTimeout(() => {
         stopClip();
       }, CLIP_LENGTH_SECONDS * 1000);
+
+      return true;
     } catch (error) {
       console.error("Could not play audio clip:", error);
       setIsClipPlaying(false);
+      return false;
     }
   }
 
@@ -328,12 +463,61 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     return 500 + speedBonus;
   }
 
+  async function startAnswerRound(isManualStart: boolean) {
+    if (!currentQuestion || quizPhase === "answering" || quizPhase === "reveal") {
+      return;
+    }
+
+    setAudioFallbackMessage("");
+
+    if (previewUrl) {
+      const didPlay = await playFiveSecondClip();
+
+      if (!didPlay) {
+        setQuizPhase("audioBlocked");
+        setAudioFallbackMessage(
+          isManualStart
+            ? "Audio is still blocked. Try the button again."
+            : "Click to play audio and continue."
+        );
+        return;
+      }
+    }
+
+    setTimeRemaining(QUESTION_TIME_SECONDS);
+    setQuizPhase("answering");
+  }
+
+  function resetQuestionFlow() {
+    stopClip(false);
+    setGuess("");
+    setMessage("");
+    setTimeRemaining(QUESTION_TIME_SECONDS);
+    setStartCountdown(START_COUNTDOWN_SECONDS);
+    setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+    setAudioFallbackMessage("");
+    setHasAnswered(false);
+    setQuizPhase("countdown");
+  }
+
+  function advanceAfterReveal() {
+    stopClip(false);
+
+    if (currentQuestionIndex >= questions.length - 1) {
+      finishQuiz();
+      return;
+    }
+
+    setCurrentQuestionIndex((currentIndex) => currentIndex + 1);
+    resetQuestionFlow();
+  }
+
   function recordAnswer(selectedGuess: string, timedOut = false) {
     if (!currentQuestion) {
       return;
     }
 
-    if (hasAnswered) {
+    if (hasAnswered || quizPhase !== "answering") {
       setMessage("You already answered this question.");
       return;
     }
@@ -366,24 +550,17 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       },
     ]);
     setHasAnswered(true);
+    setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+    setQuizPhase("reveal");
   }
 
-  function checkAnswer() {
-    if (guess === "") {
-      setMessage("Pick an answer first.");
+  function handleAnswerSelect(selectedGuess: string) {
+    if (quizPhase !== "answering" || hasAnswered) {
       return;
     }
 
-    recordAnswer(guess);
-  }
-
-  function goToNextQuestion() {
-    stopClip(false);
-    setCurrentQuestionIndex((currentIndex) => currentIndex + 1);
-    setGuess("");
-    setMessage("");
-    setTimeRemaining(QUESTION_TIME_SECONDS);
-    setHasAnswered(false);
+    setGuess(selectedGuess);
+    recordAnswer(selectedGuess);
   }
 
   function finishQuiz() {
@@ -400,9 +577,13 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setCorrectAnswers(0);
     setQuestionResults([]);
     setTimeRemaining(QUESTION_TIME_SECONDS);
+    setStartCountdown(START_COUNTDOWN_SECONDS);
+    setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+    setAudioFallbackMessage("");
     setHasAnswered(false);
     setIsQuizComplete(false);
     setQuestions(buildQuizQuestions(tracks));
+    setQuizPhase("countdown");
   }
 
   if (isLoading) {
@@ -513,9 +694,60 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         <span>
           Correct: {correctAnswers} / {questions.length}
         </span>
-        <span className={timeRemaining <= 3 && !hasAnswered ? "timer-low" : ""}>
+        <span
+          className={
+            timeRemaining <= 3 && quizPhase === "answering" ? "timer-low" : ""
+          }
+        >
           Time: {timeRemaining}s
         </span>
+      </div>
+
+      <div className="game-state">
+        {quizPhase === "preparing" && (
+          <>
+            <p className="game-state-label">Preparing question</p>
+            <p className="game-state-detail">Getting the clip ready...</p>
+          </>
+        )}
+
+        {quizPhase === "countdown" && (
+          <>
+            <p className="game-state-label">Get ready</p>
+            <p className="start-countdown">
+              {startCountdown === 0 ? "GO" : startCountdown}
+            </p>
+          </>
+        )}
+
+        {quizPhase === "audioBlocked" && (
+          <>
+            <p className="game-state-label">Audio needs a tap</p>
+            <p className="game-state-detail">
+              {audioFallbackMessage || "Click to play audio and continue."}
+            </p>
+          </>
+        )}
+
+        {quizPhase === "answering" && (
+          <>
+            <p className="game-state-label">Answer now</p>
+            <p className="game-state-detail">
+              {isClipPlaying
+                ? "Clip is playing. Faster correct answers score more."
+                : "Faster correct answers score more."}
+            </p>
+          </>
+        )}
+
+        {quizPhase === "reveal" && (
+          <>
+            <p className="game-state-label">Reveal</p>
+            <p className="game-state-detail">
+              Next question in {revealCountdown}s
+            </p>
+          </>
+        )}
       </div>
 
       <p className="quiz-clue">
@@ -524,35 +756,35 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       </p>
 
       <div className="audio-preview-wrapper">
-        {isPreviewLoading && (
+        {isPreviewLoading && quizPhase === "preparing" && (
           <p className="preview-unavailable">Loading preview...</p>
         )}
 
         {!isPreviewLoading && previewUrl && (
-          <>
-            <audio
-              ref={audioRef}
-              key={previewUrl}
-              className="hidden-audio-preview"
-              preload="auto"
-              src={previewUrl}
-              onTimeUpdate={handleAudioTimeUpdate}
-              onEnded={handleAudioEnded}
-            >
-              Your browser does not support the audio element.
-            </audio>
-
-            <button
-              type="button"
-              className="clip-button"
-              onClick={isClipPlaying ? () => stopClip() : playFiveSecondClip}
-            >
-              {isClipPlaying ? "Stop Clip" : "Play 5 Second Clip"}
-            </button>
-          </>
+          <audio
+            ref={audioRef}
+            key={previewUrl}
+            className="hidden-audio-preview"
+            preload="auto"
+            src={previewUrl}
+            onTimeUpdate={handleAudioTimeUpdate}
+            onEnded={handleAudioEnded}
+          >
+            Your browser does not support the audio element.
+          </audio>
         )}
 
-        {!isPreviewLoading && !previewUrl && (
+        {quizPhase === "audioBlocked" && previewUrl && (
+          <button
+            type="button"
+            className="clip-button"
+            onClick={() => void startAnswerRound(true)}
+          >
+            Click to play audio and continue
+          </button>
+        )}
+
+        {!isPreviewLoading && !previewUrl && quizPhase !== "countdown" && (
           <p className="preview-unavailable">
             Audio preview unavailable for this question. Try answering from the
             options.
@@ -578,8 +810,8 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
                 ? "wrong-song"
                 : ""
             }`}
-            onClick={() => setGuess(track.name)}
-            disabled={hasAnswered || timeRemaining === 0}
+            onClick={() => handleAnswerSelect(track.name)}
+            disabled={quizPhase !== "answering" || hasAnswered}
           >
             {track.name}
           </button>
@@ -590,24 +822,6 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         <p className="selected-guess">
           Your guess: <strong>{guess}</strong>
         </p>
-      )}
-
-      {!hasAnswered && (
-        <button type="button" onClick={checkAnswer} disabled={timeRemaining === 0}>
-          Submit Answer
-        </button>
-      )}
-
-      {hasAnswered && currentQuestionIndex < questions.length - 1 && (
-        <button type="button" className="next-button" onClick={goToNextQuestion}>
-          Next Question
-        </button>
-      )}
-
-      {hasAnswered && currentQuestionIndex === questions.length - 1 && (
-        <button type="button" className="next-button" onClick={finishQuiz}>
-          Finish Quiz
-        </button>
       )}
 
       {message && <p className="quiz-message">{message}</p>}
