@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
 import { saveQuizResult } from "../lib/stats";
 import { saveQuizResultToCloud } from "../lib/cloudStats";
+import { pickGrade, pickHype, type HypeEvent } from "../lib/hype";
+import { sounds } from "../lib/sounds";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
@@ -35,6 +37,9 @@ const START_COUNTDOWN_SECONDS = 3;
 const REVEAL_COUNTDOWN_SECONDS = 5;
 const MIN_QUESTIONS = 5;
 const MAX_QUESTIONS = 12;
+const RING_RADIUS = 54;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+const CONFETTI_COLORS = ["#7c5cff", "#2ee66b", "#ff4fa0", "#f2f0ea", "#ffcf4d"];
 
 function shuffleArray<T>(array: T[]) {
   return [...array].sort(() => Math.random() - 0.5);
@@ -90,6 +95,12 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isClipPlaying, setIsClipPlaying] = useState(false);
   const [audioFallbackMessage, setAudioFallbackMessage] = useState("");
+  const [isMuted, setIsMuted] = useState(sounds.isMuted());
+  const [displayPoints, setDisplayPoints] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [revealMessage, setRevealMessage] = useState("");
+  const [flash, setFlash] = useState<"good" | "bad" | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStartTimeRef = useRef(8);
@@ -101,6 +112,33 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
   const currentQuestion = questions[currentQuestionIndex];
   const currentTrack = currentQuestion?.correctTrack;
+  const lastResult = questionResults[questionResults.length - 1];
+  const timerProgress = Math.max(0, timeRemaining / QUESTION_TIME_SECONDS);
+  const ringOffset = RING_CIRCUMFERENCE * (1 - timerProgress);
+  const shouldShowDanger =
+    quizPhase === "answering" && timeRemaining <= 3 && !hasAnswered;
+  const activePoints = isQuizComplete ? displayPoints : totalPoints;
+
+  const confettiPieces = useMemo(
+    () =>
+      Array.from({ length: 34 }, (_, index) => ({
+        id: index,
+        left: `${Math.round(Math.random() * 100)}%`,
+        delay: `${(index % 12) * 0.08}s`,
+        color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
+      })),
+    []
+  );
+
+  const burstPieces = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, index) => ({
+        id: index,
+        rotation: `${index * 30}deg`,
+        color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
+      })),
+    [currentQuestionIndex]
+  );
 
   useEffect(() => {
     async function loadTracks() {
@@ -113,8 +151,13 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         setGuess("");
         setMessage("");
         setTotalPoints(0);
+        setDisplayPoints(0);
         setCorrectAnswers(0);
         setQuestionResults([]);
+        setStreak(0);
+        setBestStreak(0);
+        setRevealMessage("");
+        setFlash(null);
         setTimeRemaining(QUESTION_TIME_SECONDS);
         setStartCountdown(START_COUNTDOWN_SECONDS);
         setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
@@ -370,6 +413,73 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     revealCountdown,
   ]);
 
+  useEffect(() => {
+    if (quizPhase !== "countdown" || isQuizComplete || !currentQuestion) {
+      return;
+    }
+
+    if (startCountdown > 0) {
+      sounds.tick();
+      return;
+    }
+
+    sounds.go();
+  }, [currentQuestion, isQuizComplete, quizPhase, startCountdown]);
+
+  useEffect(() => {
+    if (
+      quizPhase === "answering" &&
+      timeRemaining > 0 &&
+      timeRemaining <= 3 &&
+      !hasAnswered
+    ) {
+      sounds.tick();
+    }
+  }, [hasAnswered, quizPhase, timeRemaining]);
+
+  useEffect(() => {
+    if (!flash) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setFlash(null);
+    }, 650);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [flash]);
+
+  useEffect(() => {
+    if (!isQuizComplete) {
+      setDisplayPoints(totalPoints);
+      return;
+    }
+
+    const startTime = performance.now();
+    const duration = 850;
+    let animationFrame = 0;
+
+    function animateScore(now: number) {
+      const progress = Math.min(1, (now - startTime) / duration);
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+
+      setDisplayPoints(Math.round(totalPoints * easedProgress));
+
+      if (progress < 1) {
+        animationFrame = window.requestAnimationFrame(animateScore);
+      }
+    }
+
+    setDisplayPoints(0);
+    animationFrame = window.requestAnimationFrame(animateScore);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [isQuizComplete, totalPoints]);
+
   function clearClipTimer() {
     if (clipTimerRef.current !== null) {
       window.clearTimeout(clipTimerRef.current);
@@ -504,6 +614,8 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     setStartCountdown(START_COUNTDOWN_SECONDS);
     setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
     setAudioFallbackMessage("");
+    setRevealMessage("");
+    setFlash(null);
     setHasAnswered(false);
     setQuizPhase("countdown");
   }
@@ -533,21 +645,57 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     const correctAnswer = currentQuestion.correctTrack.name;
     const normalizedGuess = selectedGuess.toLowerCase();
     const normalizedAnswer = correctAnswer.toLowerCase();
-    const isCorrect = normalizedGuess === normalizedAnswer;
+    const isCorrect = !timedOut && normalizedGuess === normalizedAnswer;
     const pointsEarned = getPointsForAnswer(isCorrect, timeRemaining);
     const answerTimeSeconds = QUESTION_TIME_SECONDS - timeRemaining;
+    let nextStreak = streak;
+    let hypeEvent: HypeEvent = "wrong";
 
     stopClip(false);
 
     if (timedOut) {
       setMessage(`Time's up. The correct answer was ${correctAnswer}.`);
+      hypeEvent = "timeout";
+      nextStreak = 0;
+      setStreak(0);
+      setFlash("bad");
+      sounds.wrong();
     } else if (isCorrect) {
       setMessage(`Correct. +${pointsEarned} points.`);
       setCorrectAnswers((currentTotal) => currentTotal + 1);
+      nextStreak = streak + 1;
+      hypeEvent =
+        nextStreak >= 5
+          ? "bigStreak"
+          : answerTimeSeconds <= 2
+            ? "speed"
+            : nextStreak >= 2
+              ? "streak"
+              : questionResults.length === 0
+                ? "firstCorrect"
+                : lastResult && !lastResult.isCorrect
+                  ? "comeback"
+                  : "correct";
+
+      setStreak(nextStreak);
+      setBestStreak((currentBest) => Math.max(currentBest, nextStreak));
+      setFlash("good");
+
+      if (nextStreak >= 3) {
+        sounds.streak();
+      } else {
+        sounds.correct();
+      }
     } else {
       setMessage(`Wrong. The correct answer was ${correctAnswer}.`);
+      hypeEvent = streak >= 2 ? "streakLost" : "wrong";
+      nextStreak = 0;
+      setStreak(0);
+      setFlash("bad");
+      sounds.wrong();
     }
 
+    setRevealMessage(pickHype(hypeEvent, nextStreak));
     setTotalPoints((currentPoints) => currentPoints + pointsEarned);
     setQuestionResults((currentResults) => [
       ...currentResults,
@@ -573,6 +721,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
   function finishQuiz() {
     stopClip(false);
+    sounds.complete();
 
     if (!hasSavedQuizResultRef.current) {
       const accuracy =
@@ -633,8 +782,13 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     setGuess("");
     setMessage("");
     setTotalPoints(0);
+    setDisplayPoints(0);
     setCorrectAnswers(0);
     setQuestionResults([]);
+    setStreak(0);
+    setBestStreak(0);
+    setRevealMessage("");
+    setFlash(null);
     setTimeRemaining(QUESTION_TIME_SECONDS);
     setStartCountdown(START_COUNTDOWN_SECONDS);
     setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
@@ -645,6 +799,10 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     hasSavedQuizResultRef.current = false;
     setQuestions(buildQuizQuestions(tracks));
     setQuizPhase("countdown");
+  }
+
+  function handleToggleMute() {
+    setIsMuted(sounds.toggleMuted());
   }
 
   if (isLoading) {
@@ -689,10 +847,27 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         : 0;
 
     return (
-      <section className="quiz">
-        <h2>Quiz complete</h2>
+      <section className="quiz quiz-complete">
+        <div className="confetti-field" aria-hidden="true">
+          {confettiPieces.map((piece) => (
+            <span
+              key={piece.id}
+              className="confetti-piece"
+              style={{
+                backgroundColor: piece.color,
+                left: piece.left,
+                animationDelay: piece.delay,
+              }}
+            />
+          ))}
+        </div>
 
-        <p className="score">Final points: {totalPoints.toLocaleString()}</p>
+        <h2>Quiz complete</h2>
+        <p className="grade-word">{pickGrade(accuracy)}</p>
+
+        <p className="score score-hero">
+          Final points: {activePoints.toLocaleString()}
+        </p>
 
         <div className="score-breakdown">
           <p>
@@ -705,6 +880,9 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
           <p>
             Average answer time:{" "}
             <strong>{averageAnswerTime.toFixed(1)}s</strong>
+          </p>
+          <p>
+            Best streak: <strong>{bestStreak}</strong>
           </p>
           <p>
             Album: <strong>{selectedAlbum.title}</strong>
@@ -742,7 +920,10 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   }
 
   return (
-    <section className="quiz">
+    <section className={`quiz quiz-live quiz-phase-${quizPhase}`}>
+      {flash && <div className={`quiz-flash quiz-flash-${flash}`} />}
+      {shouldShowDanger && <div className="danger-vignette" />}
+
       {selectedAlbum.imageUrl && (
         <img
           className="quiz-album-cover"
@@ -753,7 +934,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
       <h2>Guess the song</h2>
 
-      <p className="score">Points: {totalPoints.toLocaleString()}</p>
+      <p className="score score-live">Points: {totalPoints.toLocaleString()}</p>
 
       <div className="quiz-status">
         <span>
@@ -766,6 +947,17 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         >
           Time: {timeRemaining}s
         </span>
+        <span className={streak >= 2 ? "streak-chip streak-active" : "streak-chip"}>
+          Streak: {streak}
+        </span>
+        <button
+          type="button"
+          className="mute-toggle"
+          onClick={handleToggleMute}
+          aria-pressed={isMuted}
+        >
+          {isMuted ? "Sound off" : "Sound on"}
+        </button>
       </div>
 
       <div className="game-state">
@@ -782,6 +974,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
             <p className="start-countdown">
               {startCountdown === 0 ? "GO" : startCountdown}
             </p>
+            <p className="game-state-detail">Clip starts on go.</p>
           </>
         )}
 
@@ -797,6 +990,23 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         {quizPhase === "answering" && (
           <>
             <p className="game-state-label">Answer now</p>
+            <div
+              className={`timer-ring ${timeRemaining <= 3 ? "timer-ring-low" : ""}`}
+              aria-label={`${timeRemaining} seconds remaining`}
+            >
+              <svg viewBox="0 0 128 128" aria-hidden="true">
+                <circle className="timer-ring-bg" cx="64" cy="64" r={RING_RADIUS} />
+                <circle
+                  className="timer-ring-fg"
+                  cx="64"
+                  cy="64"
+                  r={RING_RADIUS}
+                  strokeDasharray={RING_CIRCUMFERENCE}
+                  strokeDashoffset={ringOffset}
+                />
+              </svg>
+              <span>{timeRemaining}</span>
+            </div>
             <p className="game-state-detail">
               {isClipPlaying
                 ? "Clip is playing. Faster correct answers score more."
@@ -808,6 +1018,35 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         {quizPhase === "reveal" && (
           <>
             <p className="game-state-label">Reveal</p>
+            {lastResult?.isCorrect ? (
+              <>
+                <div className="correct-burst" aria-hidden="true">
+                  {burstPieces.map((piece) => (
+                    <span
+                      key={piece.id}
+                      style={{
+                        backgroundColor: piece.color,
+                        transform: `rotate(${piece.rotation}) translateY(-38px)`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="points-pop">+{lastResult.points}</p>
+              </>
+            ) : (
+              <p className="reveal-answer">
+                Correct answer: <strong>{currentQuestion.correctTrack.name}</strong>
+              </p>
+            )}
+            {revealMessage && (
+              <p
+                className={`hype-message ${
+                  lastResult?.isCorrect ? "hype-good" : "hype-bad"
+                }`}
+              >
+                {revealMessage}
+              </p>
+            )}
             <p className="game-state-detail">
               Next question in {revealCountdown}s
             </p>
