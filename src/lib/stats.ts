@@ -257,7 +257,7 @@ export function saveQuizResult(result: Omit<QuizResult, "id" | "datePlayed">) {
 
   setTrackTestStats(stats);
 
-  return stats;
+  return quizResult;
 }
 
 export function clearTrackTestStats() {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { FormEvent } from "react";
 import type { SpotifyAlbum } from "../lib/spotifyApi";
 import { searchSpotifyAlbums } from "../lib/spotifyApi";
 
@@ -9,13 +10,15 @@ type AlbumSearchProps = {
 function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
- const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  async function handleSearch() {
-    if (searchTerm.trim() === "") {
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (searchTerm.trim() === "" || isLoading) {
       return;
     }
 
@@ -35,51 +38,77 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
     }
   }
 
+  function handleSelectAlbum(album: SpotifyAlbum) {
+    setSelectedAlbum(album.id === selectedAlbum?.id ? null : album);
+  }
+
   return (
-    <section className="album-search">
-      <h2>Choose an album</h2>
+    <section className="album-search" id="album-search">
+      <p className="eyebrow">Step one</p>
+      <h2>Pick your battlefield</h2>
 
-      <p>Search for an album and TrackTest Arena will turn it into a quiz.</p>
+      <p className="section-sub">
+        Search any album. Select one. TrackTest Arena will build the quiz.
+      </p>
 
-      <div className="search-box">
+      <form className="search-box" onSubmit={handleSearch}>
         <input
-          type="text"
-          placeholder="Search for an album..."
+          type="search"
+          placeholder="Album or artist..."
           value={searchTerm}
+          aria-label="Search for an album or artist"
           onChange={(event) => setSearchTerm(event.target.value)}
         />
 
-        <button onClick={handleSearch}>
+        <button type="submit" disabled={isLoading}>
           {isLoading ? "Searching..." : "Search"}
         </button>
-      </div>
+      </form>
 
       {error && <p className="search-result">{error}</p>}
 
-      {submittedSearch && !error && (
+      {submittedSearch && !error && !isLoading && albums.length === 0 && (
+        <p className="search-result">
+          Nothing found for: <strong>{submittedSearch}</strong>
+        </p>
+      )}
+
+      {submittedSearch && !error && albums.length > 0 && (
         <>
           <p className="search-result">
             Showing results for: <strong>{submittedSearch}</strong>
           </p>
 
           <div className="album-grid">
-            {albums.map((album) => (
+            {albums.map((album, index) => (
               <button
-                className="album-card"
+                type="button"
+                className={`album-card ${
+                  selectedAlbum?.id === album.id ? "selected-card" : ""
+                }`}
+                style={{ animationDelay: `${index * 60}ms` }}
                 key={album.id}
-                onClick={() => setSelectedAlbum(album)}
+                onClick={() => handleSelectAlbum(album)}
+                aria-pressed={selectedAlbum?.id === album.id}
               >
+                <span className="card-check" aria-hidden>
+                  OK
+                </span>
+
                 {album.imageUrl && (
-                  <img
-                    className="album-cover"
-                    src={album.imageUrl}
-                    alt={`${album.title} cover`}
-                  />
+                  <span className="album-cover-frame">
+                    <img
+                      className="album-cover"
+                      src={album.imageUrl}
+                      alt={`${album.title} cover`}
+                      loading="lazy"
+                    />
+                  </span>
                 )}
 
                 <h3>{album.title}</h3>
                 <p>{album.artist}</p>
-                <span>{album.year}</span>
+                <span className="album-year">{album.year}</span>
               </button>
             ))}
           </div>
@@ -87,16 +116,21 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
       )}
 
       {selectedAlbum && (
-  <div className="selected-album">
-    <p>
-      Selected album: <strong>{selectedAlbum.title}</strong>
-    </p>
+        <div className="start-bar">
+          {selectedAlbum.imageUrl && (
+            <img src={selectedAlbum.imageUrl} alt="" aria-hidden />
+          )}
 
-    <button onClick={() => onStartQuiz(selectedAlbum)}>
-      Start Quiz
-    </button>
-  </div>
-)}
+          <div className="start-bar-info">
+            <strong>{selectedAlbum.title}</strong>
+            <span>{selectedAlbum.artist}</span>
+          </div>
+
+          <button type="button" onClick={() => onStartQuiz(selectedAlbum)}>
+            Start Quiz
+          </button>
+        </div>
+      )}
     </section>
   );
 }

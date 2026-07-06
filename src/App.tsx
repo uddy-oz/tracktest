@@ -55,6 +55,14 @@ function App() {
     restartApp();
   }
 
+  function scrollToAlbumSearch() {
+    const searchSection = document.getElementById("album-search");
+    const searchInput = searchSection?.querySelector("input");
+
+    searchSection?.scrollIntoView({ behavior: "smooth" });
+    searchInput?.focus({ preventScroll: true });
+  }
+
   function showLeaderboard() {
     setSelectedAlbum(null);
     setIsQuizStarted(false);
@@ -102,13 +110,20 @@ function App() {
 
       {activeView === "play" && !isQuizStarted && (
         <>
-          <Hero />
+          <Hero
+            onStartPlaying={scrollToAlbumSearch}
+            onViewLeaderboard={showLeaderboard}
+          />
           <AlbumSearch onStartQuiz={startQuiz} />
         </>
       )}
 
       {activeView === "play" && isQuizStarted && selectedAlbum && (
-        <Quiz selectedAlbum={selectedAlbum} onRestartApp={restartApp} />
+        <Quiz
+          selectedAlbum={selectedAlbum}
+          onRestartApp={restartApp}
+          user={session?.user || null}
+        />
       )}
 
       {activeView === "leaderboard" && (

@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
 import { saveQuizResult } from "../lib/stats";
+import { saveQuizResultToCloud } from "../lib/cloudStats";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
   onRestartApp: () => void;
+  user: User | null;
 };
 
 type QuizQuestion = {
@@ -60,7 +63,7 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   });
 }
 
-function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
+function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -81,6 +84,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
   const [isQuizComplete, setIsQuizComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [cloudSaveMessage, setCloudSaveMessage] = useState("");
 
   const [previewUrl, setPreviewUrl] = useState("");
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
@@ -117,6 +121,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
         setQuizPhase("preparing");
         setHasAnswered(false);
         setIsQuizComplete(false);
+        setCloudSaveMessage("");
         setPreviewUrl("");
         setIsPreviewLoading(false);
         setIsClipPlaying(false);
@@ -582,7 +587,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
             ) / questionResults.length
           : 0;
 
-      saveQuizResult({
+      const savedResult = saveQuizResult({
         albumName: selectedAlbum.title,
         artistName: selectedAlbum.artist,
         totalQuestions: questions.length,
@@ -593,6 +598,30 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
       });
 
       hasSavedQuizResultRef.current = true;
+
+      if (user) {
+        setCloudSaveMessage("Saving result to cloud...");
+
+        saveQuizResultToCloud(user, savedResult)
+          .then((result) => {
+            if (result.ok) {
+              setCloudSaveMessage("Cloud save complete.");
+              return;
+            }
+
+            setCloudSaveMessage(
+              `Local stats saved. Cloud save failed: ${result.reason}`
+            );
+          })
+          .catch((error) => {
+            console.error("Cloud save failed:", error);
+            setCloudSaveMessage(
+              "Local stats saved. Cloud save failed unexpectedly."
+            );
+          });
+      } else {
+        setCloudSaveMessage("Local stats saved on this browser.");
+      }
     }
 
     setIsQuizComplete(true);
@@ -612,6 +641,7 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
     setAudioFallbackMessage("");
     setHasAnswered(false);
     setIsQuizComplete(false);
+    setCloudSaveMessage("");
     hasSavedQuizResultRef.current = false;
     setQuestions(buildQuizQuestions(tracks));
     setQuizPhase("countdown");
@@ -689,6 +719,10 @@ function Quiz({ selectedAlbum, onRestartApp }: QuizProps) {
             ? "Perfect run. Arena-ready."
             : "Not bad. Run it back and beat your score."}
         </p>
+
+        {cloudSaveMessage && (
+          <p className="cloud-save-message">{cloudSaveMessage}</p>
+        )}
 
         <div className="hero-buttons">
           <button type="button" onClick={restartQuiz}>
