@@ -30,11 +30,14 @@ type QuizPhase =
   | "countdown"
   | "audioBlocked"
   | "answering"
+  | "correctHold"
   | "reveal";
 
 const QUESTION_TIME_SECONDS = 10;
 const START_COUNTDOWN_SECONDS = 3;
-const REVEAL_COUNTDOWN_SECONDS = 5;
+const REVEAL_NEXT_QUESTION_DELAY_MS = 2500;
+const REVEAL_COUNTDOWN_SECONDS = Math.ceil(REVEAL_NEXT_QUESTION_DELAY_MS / 1000);
+const CORRECT_ANSWER_SONG_HOLD_MS = 3000;
 const MIN_QUESTIONS = 5;
 const MAX_QUESTIONS = 12;
 const RING_RADIUS = 54;
@@ -48,7 +51,7 @@ function shuffleArray<T>(array: T[]) {
 function getQuestionCount(totalPlayableTracks: number) {
   return Math.min(
     MAX_QUESTIONS,
-    Math.max(MIN_QUESTIONS, Math.floor(totalPlayableTracks / 2))
+    Math.max(MIN_QUESTIONS, Math.floor(totalPlayableTracks / 2) + 1)
   );
 }
 
@@ -121,6 +124,8 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStartTimeRef = useRef(8);
   const clipTimerRef = useRef<number | null>(null);
+  const correctAnswerHoldTimerRef = useRef<number | null>(null);
+  const isCorrectAnswerHoldRef = useRef(false);
   const previewCacheRef = useRef<Record<string, string | null>>({});
   const hasSavedQuizResultRef = useRef(false);
 
@@ -281,6 +286,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
   useEffect(() => {
     clearClipTimer();
+    clearCorrectAnswerHoldTimer();
     setIsClipPlaying(false);
 
     const audio = audioRef.current;
@@ -293,6 +299,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
     return () => {
       clearClipTimer();
+      clearCorrectAnswerHoldTimer();
     };
   }, [previewUrl, currentQuestionIndex]);
 
@@ -403,9 +410,12 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
       return;
     }
 
+    const revealEndsAt = Date.now() + REVEAL_NEXT_QUESTION_DELAY_MS;
+
     const timerId = window.setInterval(() => {
-      setRevealCountdown((currentTime) => Math.max(0, currentTime - 1));
-    }, 1000);
+      const remainingMs = Math.max(0, revealEndsAt - Date.now());
+      setRevealCountdown(Math.ceil(remainingMs / 1000));
+    }, 250);
 
     return () => {
       window.clearInterval(timerId);
@@ -497,11 +507,27 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     };
   }, [isQuizComplete, totalPoints]);
 
+  useEffect(() => {
+    return () => {
+      clearClipTimer();
+      clearCorrectAnswerHoldTimer();
+    };
+  }, []);
+
   function clearClipTimer() {
     if (clipTimerRef.current !== null) {
       window.clearTimeout(clipTimerRef.current);
       clipTimerRef.current = null;
     }
+  }
+
+  function clearCorrectAnswerHoldTimer() {
+    if (correctAnswerHoldTimerRef.current !== null) {
+      window.clearTimeout(correctAnswerHoldTimerRef.current);
+      correctAnswerHoldTimerRef.current = null;
+    }
+
+    isCorrectAnswerHoldRef.current = false;
   }
 
   function getRandomClipStart(duration: number) {
@@ -525,6 +551,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     const audio = audioRef.current;
 
     clearClipTimer();
+    clearCorrectAnswerHoldTimer();
 
     if (audio) {
       audio.pause();
@@ -576,7 +603,10 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
       return;
     }
 
-    if (audio.currentTime >= clipStartTimeRef.current + CLIP_LENGTH_SECONDS) {
+    if (
+      audio.currentTime >= clipStartTimeRef.current + CLIP_LENGTH_SECONDS &&
+      !isCorrectAnswerHoldRef.current
+    ) {
       stopClip();
     }
   }
@@ -599,7 +629,12 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   }
 
   async function startAnswerRound(isManualStart: boolean) {
-    if (!currentQuestion || quizPhase === "answering" || quizPhase === "reveal") {
+    if (
+      !currentQuestion ||
+      quizPhase === "answering" ||
+      quizPhase === "correctHold" ||
+      quizPhase === "reveal"
+    ) {
       return;
     }
 
@@ -621,6 +656,25 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
     setTimeRemaining(QUESTION_TIME_SECONDS);
     setQuizPhase("answering");
+  }
+
+  function startRevealCountdown() {
+    setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+    setQuizPhase("reveal");
+  }
+
+  function holdCorrectAnswerClipBeforeReveal() {
+    clearClipTimer();
+    clearCorrectAnswerHoldTimer();
+    isCorrectAnswerHoldRef.current = true;
+    setQuizPhase("correctHold");
+
+    correctAnswerHoldTimerRef.current = window.setTimeout(() => {
+      correctAnswerHoldTimerRef.current = null;
+      isCorrectAnswerHoldRef.current = false;
+      stopClip(false);
+      startRevealCountdown();
+    }, CORRECT_ANSWER_SONG_HOLD_MS);
   }
 
   function resetQuestionFlow() {
@@ -668,9 +722,8 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     let nextStreak = streak;
     let hypeEvent: HypeEvent = "wrong";
 
-    stopClip(false);
-
     if (timedOut) {
+      stopClip(false);
       setMessage(`Time's up. The correct answer was ${correctAnswer}.`);
       hypeEvent = "timeout";
       nextStreak = 0;
@@ -704,6 +757,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         sounds.correct();
       }
     } else {
+      stopClip(false);
       setMessage(`Wrong. The correct answer was ${correctAnswer}.`);
       hypeEvent = streak >= 2 ? "streakLost" : "wrong";
       nextStreak = 0;
@@ -723,8 +777,13 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
       },
     ]);
     setHasAnswered(true);
-    setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
-    setQuizPhase("reveal");
+
+    if (isCorrect) {
+      holdCorrectAnswerClipBeforeReveal();
+      return;
+    }
+
+    startRevealCountdown();
   }
 
   function handleAnswerSelect(selectedGuess: string) {
@@ -1047,6 +1106,17 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
                 ? "Clip is playing. Faster correct answers score more."
                 : "Faster correct answers score more."}
             </p>
+          </>
+        )}
+
+        {quizPhase === "correctHold" && (
+          <>
+            <p className="game-state-label">Correct</p>
+            <p className="points-pop">+{lastResult?.points || 0}</p>
+            {revealMessage && (
+              <p className="hype-message hype-good">{revealMessage}</p>
+            )}
+            <p className="game-state-detail">Let it play...</p>
           </>
         )}
 
