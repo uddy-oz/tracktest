@@ -68,6 +68,22 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   });
 }
 
+function getStreakRewardLabel(currentStreak: number) {
+  if (currentStreak >= 10) {
+    return "Legendary Streak";
+  }
+
+  if (currentStreak >= 5) {
+    return "On Fire";
+  }
+
+  if (currentStreak >= 3) {
+    return "Hot Streak";
+  }
+
+  return "";
+}
+
 function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -118,6 +134,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   const shouldShowDanger =
     quizPhase === "answering" && timeRemaining <= 3 && !hasAnswered;
   const activePoints = isQuizComplete ? displayPoints : totalPoints;
+  const streakRewardLabel = getStreakRewardLabel(streak);
 
   const confettiPieces = useMemo(
     () =>
@@ -695,7 +712,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
       sounds.wrong();
     }
 
-    setRevealMessage(pickHype(hypeEvent, nextStreak));
+    setRevealMessage(getStreakRewardLabel(nextStreak) || pickHype(hypeEvent, nextStreak));
     setTotalPoints((currentPoints) => currentPoints + pointsEarned);
     setQuestionResults((currentResults) => [
       ...currentResults,
@@ -721,7 +738,13 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
   function finishQuiz() {
     stopClip(false);
-    sounds.complete();
+    const isPerfectRun = questions.length > 0 && correctAnswers === questions.length;
+
+    if (isPerfectRun) {
+      sounds.perfectRun();
+    } else {
+      sounds.complete();
+    }
 
     if (!hasSavedQuizResultRef.current) {
       const accuracy =
@@ -838,6 +861,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   if (isQuizComplete) {
     const accuracy =
       questions.length > 0 ? Math.round((correctAnswers / questions.length) * 100) : 0;
+    const isPerfectRun = questions.length > 0 && correctAnswers === questions.length;
     const averageAnswerTime =
       questionResults.length > 0
         ? questionResults.reduce(
@@ -847,7 +871,9 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         : 0;
 
     return (
-      <section className="quiz quiz-complete">
+      <section
+        className={`quiz quiz-complete ${isPerfectRun ? "quiz-perfect-run" : ""}`}
+      >
         <div className="confetti-field" aria-hidden="true">
           {confettiPieces.map((piece) => (
             <span
@@ -862,8 +888,10 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
           ))}
         </div>
 
-        <h2>Quiz complete</h2>
-        <p className="grade-word">{pickGrade(accuracy)}</p>
+        <h2>{isPerfectRun ? "Perfect Run" : "Quiz complete"}</h2>
+        <p className={`grade-word ${isPerfectRun ? "gold-badge" : ""}`}>
+          {isPerfectRun ? "Perfect Run Celebration" : pickGrade(accuracy)}
+        </p>
 
         <p className="score score-hero">
           Final points: {activePoints.toLocaleString()}
@@ -882,7 +910,10 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
             <strong>{averageAnswerTime.toFixed(1)}s</strong>
           </p>
           <p>
-            Best streak: <strong>{bestStreak}</strong>
+            Best streak:{" "}
+            <strong className={isPerfectRun ? "gold-text" : ""}>
+              {bestStreak}
+            </strong>
           </p>
           <p>
             Album: <strong>{selectedAlbum.title}</strong>
@@ -893,8 +924,8 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         </div>
 
         <p className="quiz-message">
-          {correctAnswers === questions.length
-            ? "Perfect run. Arena-ready."
+          {isPerfectRun
+            ? "Every question clean. Arena-ready."
             : "Not bad. Run it back and beat your score."}
         </p>
 
@@ -947,8 +978,12 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         >
           Time: {timeRemaining}s
         </span>
-        <span className={streak >= 2 ? "streak-chip streak-active" : "streak-chip"}>
-          Streak: {streak}
+        <span
+          className={`streak-chip ${streak >= 2 ? "streak-active" : ""} ${
+            streakRewardLabel ? "streak-reward" : ""
+          } ${streak >= 10 ? "streak-legendary" : ""}`}
+        >
+          {streakRewardLabel ? `${streakRewardLabel}: ${streak}` : `Streak: ${streak}`}
         </span>
         <button
           type="button"

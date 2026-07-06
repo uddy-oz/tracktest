@@ -102,4 +102,14 @@ export const sounds = {
       tone(frequency, index * 0.08, 0.14, "triangle", 0.07);
     });
   },
+
+  perfectRun() {
+    [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98].forEach(
+      (frequency, index) => {
+        tone(frequency, index * 0.065, 0.16, "triangle", 0.085);
+      }
+    );
+    tone(1046.5, 0.42, 0.24, "square", 0.05);
+    tone(1567.98, 0.48, 0.28, "square", 0.045);
+  },
 };
