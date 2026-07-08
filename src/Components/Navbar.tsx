@@ -1,4 +1,5 @@
 import type { Session } from "@supabase/supabase-js";
+import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
 
 type NavbarProps = {
   onLogout: () => void;
@@ -6,6 +7,7 @@ type NavbarProps = {
   onShowPlay: () => void;
   onShowLeaderboard: () => void;
   session: Session | null;
+  profile: UserProfile | null;
   activeView: "play" | "leaderboard" | "auth";
 };
 
@@ -15,9 +17,14 @@ function Navbar({
   onShowPlay,
   onShowLeaderboard,
   session,
+  profile,
   activeView,
 }: NavbarProps) {
-  const userEmail = session?.user.email;
+  const accountLabel = profile?.username
+    ? getProfileDisplayLabel(profile, session?.user.email)
+    : session
+      ? "Set username"
+      : "Account";
 
   return (
     <nav className="navbar">
@@ -48,7 +55,7 @@ function Navbar({
               className="nav-link-button account-button"
               onClick={onShowAuth}
             >
-              {userEmail || "Account"}
+              {accountLabel}
             </button>
             <button type="button" className="nav-login-button" onClick={onLogout}>
               Logout

@@ -8,6 +8,7 @@ import SpotifyCallback from "./Components/SpotifyCallback";
 import Leaderboard from "./Components/Leaderboard";
 import AuthPage from "./Components/AuthPage";
 import { supabase } from "./lib/supabaseClient";
+import { ensureUserProfile, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
@@ -18,6 +19,8 @@ function App() {
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [isQuizStarted, setIsQuizStarted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -38,6 +41,41 @@ function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadProfile() {
+      if (!session?.user) {
+        setProfile(null);
+        setIsProfileLoading(false);
+        return;
+      }
+
+      setIsProfileLoading(true);
+
+      const { profile: nextProfile, error } = await ensureUserProfile(
+        session.user
+      );
+
+      if (!isActive) {
+        return;
+      }
+
+      if (error) {
+        console.error("Could not load profile:", error);
+      }
+
+      setProfile(nextProfile);
+      setIsProfileLoading(false);
+    }
+
+    void loadProfile();
+
+    return () => {
+      isActive = false;
+    };
+  }, [session]);
 
   function startQuiz(album: SpotifyAlbum) {
     setActiveView("play");
@@ -80,12 +118,14 @@ function App() {
 
     if (!supabase) {
       setSession(null);
+      setProfile(null);
       setTrackTestStats(localStatsSnapshot);
       return;
     }
 
     await supabase.auth.signOut({ scope: "local" });
     setSession(null);
+    setProfile(null);
     setTrackTestStats(localStatsSnapshot);
   }
 
@@ -105,6 +145,7 @@ function App() {
         onShowPlay={showPlay}
         onShowLeaderboard={showLeaderboard}
         session={session}
+        profile={profile}
         activeView={activeView}
       />
 
@@ -130,7 +171,15 @@ function App() {
         <Leaderboard onPlay={showPlay} session={session} />
       )}
 
-      {activeView === "auth" && <AuthPage session={session} onPlay={showPlay} />}
+      {activeView === "auth" && (
+        <AuthPage
+          session={session}
+          profile={profile}
+          isProfileLoading={isProfileLoading}
+          onProfileSaved={setProfile}
+          onPlay={showPlay}
+        />
+      )}
     </>
   );
 }

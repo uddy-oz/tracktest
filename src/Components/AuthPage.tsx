@@ -1,17 +1,35 @@
 import { useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import {
+  getProfileDisplayLabel,
+  normalizeUsername,
+  saveUserProfile,
+  type UserProfile,
+} from "../lib/profiles";
 import { isSupabaseConfigured, supabase } from "../lib/supabaseClient";
 
 type AuthPageProps = {
   session: Session | null;
+  profile: UserProfile | null;
+  isProfileLoading: boolean;
+  onProfileSaved: (profile: UserProfile) => void;
   onPlay: () => void;
 };
 
-function AuthPage({ session, onPlay }: AuthPageProps) {
+function AuthPage({
+  session,
+  profile,
+  isProfileLoading,
+  onProfileSaved,
+  onPlay,
+}: AuthPageProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   async function handleSignUp() {
     if (!supabase) {
@@ -65,19 +83,103 @@ function AuthPage({ session, onPlay }: AuthPageProps) {
     }
   }
 
+  async function handleSaveProfile() {
+    if (!session?.user) {
+      setMessage("Log in before saving a profile.");
+      return;
+    }
+
+    try {
+      setIsSavingProfile(true);
+      setMessage("");
+
+      const { profile: savedProfile, error } = await saveUserProfile(
+        session.user,
+        username,
+        displayName
+      );
+
+      if (error || !savedProfile) {
+        setMessage(error || "Could not save profile.");
+        return;
+      }
+
+      onProfileSaved(savedProfile);
+      setUsername("");
+      setDisplayName("");
+      setMessage("Profile saved.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
   if (session) {
+    const hasUsername = Boolean(profile?.username);
+    const accountLabel = getProfileDisplayLabel(profile, session.user.email);
+
     return (
       <section className="auth-page">
         <div className="auth-panel">
           <p className="eyebrow">Account</p>
-          <h1>Signed in</h1>
-          <p>
-            You are signed in as <strong>{session.user.email}</strong>. Cloud
-            stat sync is coming next.
-          </p>
-          <button type="button" onClick={onPlay}>
-            Back to Play
-          </button>
+          {isProfileLoading ? (
+            <>
+              <h1>Loading profile</h1>
+              <p>Getting your Arena profile ready...</p>
+            </>
+          ) : hasUsername ? (
+            <>
+              <h1>{accountLabel}</h1>
+              <p>
+                Signed in as <strong>{session.user.email}</strong>. Your Arena
+                name is ready for future leaderboards.
+              </p>
+              <button type="button" onClick={onPlay}>
+                Back to Play
+              </button>
+            </>
+          ) : (
+            <>
+              <h1>Set your username</h1>
+              <p>
+                Pick the name future leaderboards will show. Usernames are
+                lowercase, unique, and use letters, numbers, or underscores.
+              </p>
+
+              <div className="auth-form profile-setup-form">
+                <input
+                  type="text"
+                  placeholder="username"
+                  value={username}
+                  onChange={(event) =>
+                    setUsername(normalizeUsername(event.target.value))
+                  }
+                  maxLength={20}
+                />
+                <input
+                  type="text"
+                  placeholder="Display name optional"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  maxLength={40}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSaveProfile}
+                  disabled={isSavingProfile}
+                >
+                  {isSavingProfile ? "Saving..." : "Save Profile"}
+                </button>
+              </div>
+
+              <p className="profile-rules">
+                3 to 20 characters. Lowercase letters, numbers, and underscore
+                only.
+              </p>
+            </>
+          )}
+
+          {message && <p className="auth-message">{message}</p>}
         </div>
       </section>
     );

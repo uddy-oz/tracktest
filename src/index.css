@@ -1502,6 +1502,22 @@ button:hover {
   border-color: white;
 }
 
+.profile-setup-form {
+  margin-top: 20px;
+}
+
+.profile-setup-form input:focus {
+  border-color: var(--arena-accent-bright);
+  box-shadow: 0 0 0 3px var(--arena-accent-soft);
+}
+
+.profile-rules {
+  margin: 16px 0 0;
+  color: var(--arena-muted);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
 .auth-actions {
   display: flex;
   justify-content: center;
