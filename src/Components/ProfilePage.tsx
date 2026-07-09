@@ -193,7 +193,10 @@ function ProfilePage({
   const showcaseBadges = getShowcaseBadges(badges);
   const tier = calculatePlayerTier(badges);
   const unlockedBadgeCount = badges.filter((badge) => badge.unlocked).length;
-  const topArtists = Object.values(profileState.stats.artists)
+  const artistStats = Object.values(profileState.stats.artists);
+  const albumStats = Object.values(profileState.stats.albums);
+  const hasStats = profileState.stats.overall.totalQuizzesPlayed > 0;
+  const topArtists = artistStats
     .sort(
       (a, b) =>
         b.totalPoints - a.totalPoints ||
@@ -201,7 +204,7 @@ function ProfilePage({
         b.quizzesPlayed - a.quizzesPlayed
     )
     .slice(0, SECTION_LIMIT);
-  const topAlbums = Object.values(profileState.stats.albums)
+  const topAlbums = albumStats
     .sort(
       (a, b) =>
         b.bestScore - a.bestScore ||
@@ -329,32 +332,42 @@ function ProfilePage({
         </p>
       )}
 
-      <div className="leaderboard-grid profile-stats-grid">
-        <div className="stat-card">
-          <span>Total Points</span>
-          <strong>{formatNumber(profileState.stats.overall.totalPoints)}</strong>
+      <section className="profile-overview-section">
+        <div className="profile-section-header">
+          <div>
+            <p className="eyebrow">Player Overview</p>
+            <h2>Career Stats</h2>
+          </div>
+          <span>{profileState.source === "cloud" ? "Cloud stats" : "Local fallback"}</span>
         </div>
-        <div className="stat-card">
-          <span>Best Quiz Score</span>
-          <strong>{formatNumber(profileState.stats.overall.bestScore)}</strong>
+
+        <div className="leaderboard-grid profile-stats-grid">
+          <div className="stat-card">
+            <span>Total Points</span>
+            <strong>{formatNumber(profileState.stats.overall.totalPoints)}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Best Quiz Score</span>
+            <strong>{formatNumber(profileState.stats.overall.bestScore)}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Quizzes Played</span>
+            <strong>{profileState.stats.overall.totalQuizzesPlayed}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Overall Accuracy</span>
+            <strong>{profileState.stats.overall.overallAccuracy}%</strong>
+          </div>
+          <div className="stat-card">
+            <span>Average Answer Time</span>
+            <strong>{formatSeconds(profileState.stats.overall.averageAnswerTime)}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Current Daily Streak</span>
+            <strong>{formatStreak(profileState.stats.overall.currentDailyStreak)}</strong>
+          </div>
         </div>
-        <div className="stat-card">
-          <span>Quizzes Played</span>
-          <strong>{profileState.stats.overall.totalQuizzesPlayed}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Overall Accuracy</span>
-          <strong>{profileState.stats.overall.overallAccuracy}%</strong>
-        </div>
-        <div className="stat-card">
-          <span>Average Answer Time</span>
-          <strong>{formatSeconds(profileState.stats.overall.averageAnswerTime)}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Current Daily Streak</span>
-          <strong>{formatStreak(profileState.stats.overall.currentDailyStreak)}</strong>
-        </div>
-      </div>
+      </section>
 
       <section className="badge-section profile-showcase">
         <div className="badge-section-header">
@@ -375,14 +388,22 @@ function ProfilePage({
           </div>
         ) : (
           <p className="empty-stats">
-            Finish quizzes to start filling your badge showcase.
+            {isPublicProfile
+              ? "This player has not unlocked featured achievements yet."
+              : "Finish quizzes to start filling your badge showcase."}
           </p>
         )}
       </section>
 
       <div className="leaderboard-sections profile-sections">
         <div className="leaderboard-panel">
-          <h2>Artist Mastery</h2>
+          <div className="profile-panel-heading">
+            <div>
+              <p className="eyebrow">Artist Mastery</p>
+              <h2>Top Artists</h2>
+            </div>
+            {artistStats.length > SECTION_LIMIT && <span>Showing top 6</span>}
+          </div>
           {topArtists.length > 0 ? (
             <div className="leaderboard-list">
               {topArtists.map((artist, index) => (
@@ -398,12 +419,22 @@ function ProfilePage({
               ))}
             </div>
           ) : (
-            <p>Play a quiz to start building artist mastery.</p>
+            <p>
+              {isPublicProfile
+                ? "This player has not built artist mastery yet."
+                : "Play a quiz to start building artist mastery."}
+            </p>
           )}
         </div>
 
         <div className="leaderboard-panel">
-          <h2>Best Album Scores</h2>
+          <div className="profile-panel-heading">
+            <div>
+              <p className="eyebrow">Album Records</p>
+              <h2>Best Album Scores</h2>
+            </div>
+            {albumStats.length > SECTION_LIMIT && <span>Showing top 6</span>}
+          </div>
           {topAlbums.length > 0 ? (
             <div className="leaderboard-list">
               {topAlbums.map((album, index) => (
@@ -422,13 +453,25 @@ function ProfilePage({
               ))}
             </div>
           ) : (
-            <p>Album records appear after you complete quizzes.</p>
+            <p>
+              {isPublicProfile
+                ? "This player has not set album records yet."
+                : "Album records appear after you complete quizzes."}
+            </p>
           )}
         </div>
       </div>
 
       <div className="recent-results profile-recent-results">
-        <h2>Recent Quiz Results</h2>
+        <div className="profile-panel-heading">
+          <div>
+            <p className="eyebrow">Recent Quiz Results</p>
+            <h2>Latest Runs</h2>
+          </div>
+          {profileState.stats.quizResults.length > RECENT_LIMIT && (
+            <span>Showing latest 5</span>
+          )}
+        </div>
         {recentResults.length > 0 ? (
           <div className="results-table">
             {recentResults.map((result) => (
@@ -446,7 +489,11 @@ function ProfilePage({
           </div>
         ) : (
           <p className="empty-stats">
-            Your latest quiz results will appear here.
+            {hasStats
+              ? "Recent quiz history is still warming up."
+              : isPublicProfile
+                ? "This player has not completed a cloud-saved quiz yet."
+                : "Your latest quiz results will appear here."}
           </p>
         )}
       </div>
