@@ -103,6 +103,13 @@ export const sounds = {
     });
   },
 
+  achievement() {
+    [587.33, 739.99, 880, 1174.66].forEach((frequency, index) => {
+      tone(frequency, index * 0.07, 0.14, "triangle", 0.075);
+    });
+    tone(1760, 0.33, 0.2, "sine", 0.045);
+  },
+
   perfectRun() {
     [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98].forEach(
       (frequency, index) => {

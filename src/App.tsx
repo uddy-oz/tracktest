@@ -8,6 +8,9 @@ import SpotifyCallback from "./Components/SpotifyCallback";
 import Leaderboard from "./Components/Leaderboard";
 import AuthPage from "./Components/AuthPage";
 import { supabase } from "./lib/supabaseClient";
+import { getArenaBadges } from "./lib/badges";
+import { fetchCloudBadgeStats } from "./lib/cloudBadgeStats";
+import { getCompactPlayerBadges, type CompactPlayerBadge } from "./lib/playerIdentity";
 import { ensureUserProfile, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
@@ -21,6 +24,9 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [identityBadges, setIdentityBadges] = useState<
+    CompactPlayerBadge[] | null
+  >(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -45,37 +51,85 @@ function App() {
   useEffect(() => {
     let isActive = true;
 
-    async function loadProfile() {
+    async function loadIdentityBadges() {
+      if (!session?.user) {
+        const localStats = getTrackTestStats();
+        setIdentityBadges(
+          getCompactPlayerBadges(localStats, getArenaBadges(localStats))
+        );
+        return;
+      }
+
+      setIdentityBadges(null);
+
+      const { data, error } = await fetchCloudBadgeStats(session.user);
+
+      if (error || !data) {
+        console.error("Could not load cloud badge stats:", error);
+        const localStats = getTrackTestStats();
+        setIdentityBadges(
+          getCompactPlayerBadges(localStats, getArenaBadges(localStats))
+        );
+        return;
+      }
+
+      setIdentityBadges(getCompactPlayerBadges(data, getArenaBadges(data)));
+    }
+
+    async function loadAccountData() {
       if (!session?.user) {
         setProfile(null);
         setIsProfileLoading(false);
+        await loadIdentityBadges();
         return;
       }
 
       setIsProfileLoading(true);
 
-      const { profile: nextProfile, error } = await ensureUserProfile(
-        session.user
-      );
+      const profileResult = await ensureUserProfile(session.user);
+      await loadIdentityBadges();
 
       if (!isActive) {
         return;
       }
 
-      if (error) {
-        console.error("Could not load profile:", error);
+      if (profileResult.error) {
+        console.error("Could not load profile:", profileResult.error);
       }
 
-      setProfile(nextProfile);
+      setProfile(profileResult.profile);
       setIsProfileLoading(false);
     }
 
-    void loadProfile();
+    void loadAccountData();
 
     return () => {
       isActive = false;
     };
   }, [session]);
+
+  async function refreshIdentityBadges() {
+    if (!session?.user) {
+      const localStats = getTrackTestStats();
+      setIdentityBadges(
+        getCompactPlayerBadges(localStats, getArenaBadges(localStats))
+      );
+      return;
+    }
+
+    const { data, error } = await fetchCloudBadgeStats(session.user);
+
+    if (error || !data) {
+      console.error("Could not refresh cloud badge stats:", error);
+      const localStats = getTrackTestStats();
+      setIdentityBadges(
+        getCompactPlayerBadges(localStats, getArenaBadges(localStats))
+      );
+      return;
+    }
+
+    setIdentityBadges(getCompactPlayerBadges(data, getArenaBadges(data)));
+  }
 
   function startQuiz(album: SpotifyAlbum) {
     setActiveView("play");
@@ -119,6 +173,7 @@ function App() {
     if (!supabase) {
       setSession(null);
       setProfile(null);
+      setIdentityBadges(null);
       setTrackTestStats(localStatsSnapshot);
       return;
     }
@@ -126,6 +181,7 @@ function App() {
     await supabase.auth.signOut({ scope: "local" });
     setSession(null);
     setProfile(null);
+    setIdentityBadges(null);
     setTrackTestStats(localStatsSnapshot);
   }
 
@@ -146,6 +202,7 @@ function App() {
         onShowLeaderboard={showLeaderboard}
         session={session}
         profile={profile}
+        identityBadges={identityBadges}
         activeView={activeView}
       />
 
@@ -163,6 +220,7 @@ function App() {
         <Quiz
           selectedAlbum={selectedAlbum}
           onRestartApp={restartApp}
+          onStatsUpdated={refreshIdentityBadges}
           user={session?.user || null}
         />
       )}

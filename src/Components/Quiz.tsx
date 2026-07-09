@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
+import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
-import { saveQuizResult } from "../lib/stats";
+import { getTrackTestStats, saveQuizResult } from "../lib/stats";
 import { saveQuizResultToCloud } from "../lib/cloudStats";
+import { getArenaBadges, type ArenaBadge } from "../lib/badges";
+import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import { pickGrade, pickHype, type HypeEvent } from "../lib/hype";
 import { sounds } from "../lib/sounds";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
   onRestartApp: () => void;
+  onStatsUpdated?: () => void;
   user: User | null;
 };
 
@@ -87,7 +91,20 @@ function getStreakRewardLabel(currentStreak: number) {
   return "";
 }
 
-function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
+function getNewlyUnlockedBadges(
+  previousBadges: ArenaBadge[],
+  nextBadges: ArenaBadge[]
+) {
+  const previousUnlockedIds = new Set(
+    previousBadges.filter((badge) => badge.unlocked).map((badge) => badge.id)
+  );
+
+  return nextBadges.filter(
+    (badge) => badge.unlocked && !previousUnlockedIds.has(badge.id)
+  );
+}
+
+function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -120,6 +137,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
   const [bestStreak, setBestStreak] = useState(0);
   const [revealMessage, setRevealMessage] = useState("");
   const [flash, setFlash] = useState<"good" | "bad" | null>(null);
+  const [earnedBadgeQueue, setEarnedBadgeQueue] = useState<ArenaBadge[]>([]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStartTimeRef = useRef(8);
@@ -180,6 +198,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         setBestStreak(0);
         setRevealMessage("");
         setFlash(null);
+        setEarnedBadgeQueue([]);
         setTimeRemaining(QUESTION_TIME_SECONDS);
         setStartCountdown(START_COUNTDOWN_SECONDS);
         setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
@@ -809,6 +828,12 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     }
 
     if (!hasSavedQuizResultRef.current) {
+      const localBadgesBefore = getArenaBadges(getTrackTestStats());
+      const cloudBadgesBeforePromise = user
+        ? fetchCloudBadgeStats(user)
+            .then(({ data }) => (data ? getArenaBadges(data) : null))
+            .catch(() => null)
+        : Promise.resolve(null);
       const accuracy =
         questions.length > 0
           ? Math.round((correctAnswers / questions.length) * 100)
@@ -831,30 +856,60 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
         averageAnswerTime,
       });
 
+      const localBadgesAfter = getArenaBadges(getTrackTestStats());
       hasSavedQuizResultRef.current = true;
 
       if (user) {
         setCloudSaveMessage("Saving result to cloud...");
 
         saveQuizResultToCloud(user, savedResult)
-          .then((result) => {
+          .then(async (result) => {
             if (result.ok) {
               setCloudSaveMessage("Cloud save complete.");
+              const cloudBadgesBefore = await cloudBadgesBeforePromise;
+              const { data: cloudStatsAfter } = await fetchCloudBadgeStats(user);
+
+              if (cloudBadgesBefore && cloudStatsAfter) {
+                enqueueEarnedBadges(
+                  getNewlyUnlockedBadges(
+                    cloudBadgesBefore,
+                    getArenaBadges(cloudStatsAfter)
+                  )
+                );
+              } else {
+                enqueueEarnedBadges(
+                  getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
+                );
+              }
+
+              void onStatsUpdated?.();
               return;
             }
 
             setCloudSaveMessage(
               `Local stats saved. Cloud save failed: ${result.reason}`
             );
+            enqueueEarnedBadges(
+              getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
+            );
+            void onStatsUpdated?.();
           })
           .catch((error) => {
             console.error("Cloud save failed:", error);
             setCloudSaveMessage(
               "Local stats saved. Cloud save failed unexpectedly."
             );
+            enqueueEarnedBadges(
+              getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
+            );
+            void onStatsUpdated?.();
           });
       } else {
         setCloudSaveMessage("Local stats saved on this browser.");
+        enqueueEarnedBadges(
+          getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
+        );
+        void onStatsUpdated?.();
       }
     }
 
@@ -874,6 +929,7 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
     setBestStreak(0);
     setRevealMessage("");
     setFlash(null);
+    setEarnedBadgeQueue([]);
     setTimeRemaining(QUESTION_TIME_SECONDS);
     setStartCountdown(START_COUNTDOWN_SECONDS);
     setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
@@ -888,6 +944,18 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
   function handleToggleMute() {
     setIsMuted(sounds.toggleMuted());
+  }
+
+  function enqueueEarnedBadges(badges: ArenaBadge[]) {
+    if (badges.length === 0) {
+      return;
+    }
+
+    setEarnedBadgeQueue((currentQueue) => [...currentQueue, ...badges]);
+  }
+
+  function dismissEarnedBadge() {
+    setEarnedBadgeQueue((currentQueue) => currentQueue.slice(1));
   }
 
   if (isLoading) {
@@ -936,6 +1004,11 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
       <section
         className={`quiz quiz-complete ${isPerfectRun ? "quiz-perfect-run" : ""}`}
       >
+        <BadgeEarnedPopup
+          badge={earnedBadgeQueue[0] || null}
+          onDone={dismissEarnedBadge}
+        />
+
         <div className="confetti-field" aria-hidden="true">
           {confettiPieces.map((piece) => (
             <span
