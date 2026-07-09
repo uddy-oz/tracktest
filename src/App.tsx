@@ -18,8 +18,21 @@ import type { SpotifyAlbum } from "./lib/spotifyApi";
 
 type AppView = "play" | "leaderboard" | "auth" | "profile";
 
+function getProfileUsernameFromPath() {
+  const match = window.location.pathname.match(/^\/profile\/([^/]+)\/?$/);
+
+  return match ? decodeURIComponent(match[1]).toLowerCase() : null;
+}
+
+function getInitialView(): AppView {
+  return getProfileUsernameFromPath() ? "profile" : "play";
+}
+
 function App() {
-  const [activeView, setActiveView] = useState<AppView>("play");
+  const [activeView, setActiveView] = useState<AppView>(getInitialView);
+  const [publicProfileUsername, setPublicProfileUsername] = useState<
+    string | null
+  >(getProfileUsernameFromPath);
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [isQuizStarted, setIsQuizStarted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -46,6 +59,23 @@ function App() {
 
     return () => {
       subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePopState() {
+      const username = getProfileUsernameFromPath();
+
+      setSelectedAlbum(null);
+      setIsQuizStarted(false);
+      setPublicProfileUsername(username);
+      setActiveView(username ? "profile" : "play");
+    }
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
     };
   }, []);
 
@@ -133,12 +163,16 @@ function App() {
   }
 
   function startQuiz(album: SpotifyAlbum) {
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
     setActiveView("play");
     setSelectedAlbum(album);
     setIsQuizStarted(true);
   }
 
   function restartApp() {
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
     setActiveView("play");
     setSelectedAlbum(null);
     setIsQuizStarted(false);
@@ -157,21 +191,46 @@ function App() {
   }
 
   function showLeaderboard() {
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("leaderboard");
   }
 
   function showAuth() {
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("auth");
   }
 
   function showProfile() {
+    if (profile?.username) {
+      showPublicProfile(profile.username);
+      return;
+    }
+
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView(session ? "profile" : "auth");
+  }
+
+  function showPublicProfile(username: string) {
+    const normalizedUsername = username.toLowerCase();
+
+    window.history.pushState(
+      {},
+      "",
+      `/profile/${encodeURIComponent(normalizedUsername)}`
+    );
+    setPublicProfileUsername(normalizedUsername);
+    setSelectedAlbum(null);
+    setIsQuizStarted(false);
+    setActiveView("profile");
   }
 
   async function logoutSupabase() {
@@ -234,7 +293,11 @@ function App() {
       )}
 
       {activeView === "leaderboard" && (
-        <Leaderboard onPlay={showPlay} session={session} />
+        <Leaderboard
+          onPlay={showPlay}
+          session={session}
+          onOpenProfile={showPublicProfile}
+        />
       )}
 
       {activeView === "auth" && (
@@ -252,8 +315,10 @@ function App() {
           session={session}
           profile={profile}
           identityBadges={identityBadges}
+          publicUsername={publicProfileUsername}
           onShowAuth={showAuth}
           onPlay={showPlay}
+          onBackToLeaderboard={showLeaderboard}
         />
       )}
     </>

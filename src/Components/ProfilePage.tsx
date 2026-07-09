@@ -10,6 +10,7 @@ import {
 } from "../lib/playerIdentity";
 import {
   fetchCurrentUserProfileStats,
+  fetchPublicProfileByUsername,
   type PublicProfileStatsSource,
 } from "../lib/publicProfile";
 import {
@@ -23,8 +24,10 @@ type ProfilePageProps = {
   session: Session | null;
   profile: UserProfile | null;
   identityBadges: CompactPlayerBadge[] | null;
+  publicUsername?: string | null;
   onShowAuth: () => void;
   onPlay: () => void;
+  onBackToLeaderboard: () => void;
 };
 
 type ProfileState = {
@@ -32,6 +35,7 @@ type ProfileState = {
   stats: TrackTestStats;
   source: PublicProfileStatsSource;
   error: string | null;
+  notFound: boolean;
 };
 
 const SECTION_LIMIT = 6;
@@ -110,21 +114,48 @@ function ProfilePage({
   session,
   profile,
   identityBadges,
+  publicUsername = null,
   onShowAuth,
   onPlay,
+  onBackToLeaderboard,
 }: ProfilePageProps) {
   const [profileState, setProfileState] = useState<ProfileState>(() => ({
     displayInfo: null,
     stats: getTrackTestStats(),
     source: "localFallback",
     error: null,
+    notFound: false,
   }));
-  const [isLoading, setIsLoading] = useState(Boolean(session?.user));
+  const [isLoading, setIsLoading] = useState(
+    Boolean(session?.user || publicUsername)
+  );
+  const isPublicProfile = Boolean(publicUsername);
 
   useEffect(() => {
     let isActive = true;
 
     async function loadProfile() {
+      if (publicUsername) {
+        setIsLoading(true);
+        const publicProfileState = await fetchPublicProfileByUsername(
+          publicUsername
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        setProfileState({
+          displayInfo: publicProfileState.displayInfo,
+          stats: publicProfileState.stats || getTrackTestStats(),
+          source: "cloud",
+          error: publicProfileState.error,
+          notFound: publicProfileState.notFound,
+        });
+        setIsLoading(false);
+        return;
+      }
+
       if (!session?.user) {
         setIsLoading(false);
         return;
@@ -137,7 +168,10 @@ function ProfilePage({
         return;
       }
 
-      setProfileState(nextProfileState);
+      setProfileState({
+        ...nextProfileState,
+        notFound: false,
+      });
       setIsLoading(false);
     }
 
@@ -146,13 +180,16 @@ function ProfilePage({
     return () => {
       isActive = false;
     };
-  }, [session]);
+  }, [publicUsername, session]);
 
   const badges = useMemo(
     () => getArenaBadges(profileState.stats),
     [profileState.stats]
   );
-  const playerBadges = identityBadges || getCompactPlayerBadges(profileState.stats, badges);
+  const playerBadges =
+    !isPublicProfile && identityBadges
+      ? identityBadges
+      : getCompactPlayerBadges(profileState.stats, badges);
   const showcaseBadges = getShowcaseBadges(badges);
   const tier = calculatePlayerTier(badges);
   const unlockedBadgeCount = badges.filter((badge) => badge.unlocked).length;
@@ -174,12 +211,17 @@ function ProfilePage({
     .slice(0, SECTION_LIMIT);
   const recentResults = profileState.stats.quizResults.slice(0, RECENT_LIMIT);
   const displayName =
-    profile?.displayName ||
+    (isPublicProfile ? null : profile?.displayName) ||
     profileState.displayInfo?.displayName ||
-    getProfileDisplayLabel(profile, session?.user.email);
-  const username = profile?.username || profileState.displayInfo?.username;
+    (isPublicProfile
+      ? "Unknown Player"
+      : getProfileDisplayLabel(profile, session?.user.email));
+  const username =
+    (isPublicProfile ? null : profile?.username) ||
+    profileState.displayInfo?.username ||
+    publicUsername;
 
-  if (!session) {
+  if (!session && !isPublicProfile) {
     return (
       <section className="profile-page">
         <div className="profile-empty">
@@ -202,7 +244,7 @@ function ProfilePage({
     );
   }
 
-  if (profile && !profile.username) {
+  if (!isPublicProfile && profile && !profile.username) {
     return (
       <section className="profile-page">
         <div className="profile-empty">
@@ -227,11 +269,45 @@ function ProfilePage({
     );
   }
 
+  if (isPublicProfile && profileState.notFound) {
+    return (
+      <section className="profile-page">
+        <div className="profile-empty">
+          <p className="eyebrow">Public Profile</p>
+          <h1>Profile not found</h1>
+          <p>
+            No Arena player exists with the username @{publicUsername}.
+          </p>
+          <button type="button" onClick={onBackToLeaderboard}>
+            Back to Leaderboard
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (isPublicProfile && profileState.error) {
+    return (
+      <section className="profile-page">
+        <div className="profile-empty">
+          <p className="eyebrow">Public Profile</p>
+          <h1>Profile unavailable</h1>
+          <p>{profileState.error}</p>
+          <button type="button" onClick={onBackToLeaderboard}>
+            Back to Leaderboard
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="profile-page">
       <div className="profile-hero">
         <div>
-          <p className="eyebrow">Player Profile</p>
+          <p className="eyebrow">
+            {isPublicProfile ? "Public Profile" : "Player Profile"}
+          </p>
           <h1>{displayName}</h1>
           <div className="profile-handle-row">
             {username && <p className="profile-handle">@{username}</p>}
@@ -246,7 +322,7 @@ function ProfilePage({
         </div>
       </div>
 
-      {profileState.source === "localFallback" && profileState.error && (
+      {!isPublicProfile && profileState.source === "localFallback" && profileState.error && (
         <p className="profile-source-note">
           Cloud profile stats could not load, so this view is showing local stats
           from this browser.

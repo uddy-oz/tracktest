@@ -1766,6 +1766,28 @@ button:hover {
   flex-wrap: wrap;
 }
 
+.player-profile-link {
+  min-height: 0;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(167, 139, 250, 0.42);
+  text-underline-offset: 3px;
+}
+
+.player-profile-link:hover {
+  background: transparent;
+  color: var(--arena-accent-bright);
+  text-decoration-color: var(--arena-accent-bright);
+}
+
 .player-identity-badges {
   display: inline-flex;
   align-items: center;

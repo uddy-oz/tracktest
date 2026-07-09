@@ -18,6 +18,7 @@ import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
 type LeaderboardProps = {
   onPlay: () => void;
   session: Session | null;
+  onOpenProfile: (username: string) => void;
 };
 
 type LeaderboardTab = "global" | "myStats";
@@ -47,14 +48,30 @@ function PlayerLabel({
   playerName,
   username,
   badges = [],
+  onOpenProfile,
 }: {
   playerName: string;
   username: string | null;
   badges?: CompactPlayerBadge[];
+  onOpenProfile?: (username: string) => void;
 }) {
+  const label = username ? `${playerName} (@${username})` : playerName;
+  const nameContent =
+    username && onOpenProfile ? (
+      <button
+        type="button"
+        className="player-profile-link"
+        onClick={() => onOpenProfile(username)}
+      >
+        {label}
+      </button>
+    ) : (
+      <span>{label}</span>
+    );
+
   return (
     <span className="player-label">
-      <span>{username ? `${playerName} (@${username})` : playerName}</span>
+      {nameContent}
       <PlayerIdentityBadges badges={badges} compact />
     </span>
   );
@@ -76,7 +93,7 @@ function LimitNote({
   return <p className="leaderboard-limit-note">{label}</p>;
 }
 
-function Leaderboard({ onPlay, session }: LeaderboardProps) {
+function Leaderboard({ onPlay, session, onOpenProfile }: LeaderboardProps) {
   const [activeTab, setActiveTab] = useState<LeaderboardTab>("global");
   const [stats, setStats] = useState(getTrackTestStats);
   const [globalData, setGlobalData] = useState<GlobalLeaderboardData | null>(
@@ -189,6 +206,7 @@ function Leaderboard({ onPlay, session }: LeaderboardProps) {
           data={globalData}
           error={globalError}
           isLoading={isGlobalLoading}
+          onOpenProfile={onOpenProfile}
         />
       ) : (
         <MyStats
@@ -214,10 +232,12 @@ function GlobalArena({
   data,
   error,
   isLoading,
+  onOpenProfile,
 }: {
   data: GlobalLeaderboardData | null;
   error: string;
   isLoading: boolean;
+  onOpenProfile: (username: string) => void;
 }) {
   if (isLoading) {
     return <p className="empty-stats">Loading Global Arena...</p>;
@@ -246,6 +266,7 @@ function GlobalArena({
                       <PlayerLabel
                         playerName={entry.playerName}
                         username={entry.username}
+                        onOpenProfile={onOpenProfile}
                         badges={
                           getRankFormBadge(index + 1)
                             ? [getRankFormBadge(index + 1)!]
@@ -277,6 +298,7 @@ function GlobalArena({
                       <PlayerLabel
                         playerName={entry.playerName}
                         username={entry.username}
+                        onOpenProfile={onOpenProfile}
                         badges={
                           getRankFormBadge(index + 1)
                             ? [getRankFormBadge(index + 1)!]
@@ -317,6 +339,7 @@ function GlobalArena({
                       <PlayerLabel
                         playerName={entry.playerName}
                         username={entry.username}
+                        onOpenProfile={onOpenProfile}
                         badges={
                           getRankFormBadge(index + 1)
                             ? [getRankFormBadge(index + 1)!]
@@ -358,6 +381,7 @@ function GlobalArena({
                       <PlayerLabel
                         playerName={entry.playerName}
                         username={entry.username}
+                        onOpenProfile={onOpenProfile}
                         badges={
                           getRankFormBadge(index + 1)
                             ? [getRankFormBadge(index + 1)!]
@@ -397,6 +421,7 @@ function GlobalArena({
                     <PlayerLabel
                       playerName={entry.playerName}
                       username={entry.username}
+                      onOpenProfile={onOpenProfile}
                       badges={[]}
                     />
                   </span>
