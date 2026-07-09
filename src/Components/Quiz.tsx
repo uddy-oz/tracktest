@@ -532,19 +532,22 @@ function Quiz({ selectedAlbum, onRestartApp, user }: QuizProps) {
 
   function getRandomClipStart(duration: number) {
     const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 30;
+    const latestStart = Math.max(0, safeDuration - CLIP_LENGTH_SECONDS);
+    const preferredStart = 6;
+    const preferredEnd = Math.min(22, latestStart);
 
-    const latestStart = Math.max(0, safeDuration - CLIP_LENGTH_SECONDS - 1);
-
-    const possibleStarts = [7, 9, 11, 13, 15, 17, 19, 21].filter(
-      (time) => time <= latestStart
-    );
-
-    if (possibleStarts.length === 0) {
-      return 0;
+    // iTunes previews do not include lyric/title timestamps. Starting later in
+    // the preview reduces obvious title giveaways, but cannot fully guarantee
+    // the title or hook will be avoided.
+    if (preferredEnd >= preferredStart) {
+      return preferredStart + Math.random() * (preferredEnd - preferredStart);
     }
 
-    const randomIndex = Math.floor(Math.random() * possibleStarts.length);
-    return possibleStarts[randomIndex];
+    if (latestStart > 1) {
+      return 1 + Math.random() * (latestStart - 1);
+    }
+
+    return 0;
   }
 
   function stopClip(resetToStart = true) {

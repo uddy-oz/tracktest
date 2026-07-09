@@ -1570,6 +1570,32 @@ button:hover {
   background: #1a1a1a;
 }
 
+.leaderboard-tabs {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 24px;
+  padding: 6px;
+  display: flex;
+  gap: 6px;
+  border: 1px solid var(--arena-border);
+  border-radius: 999px;
+  background: rgba(26, 26, 34, 0.9);
+}
+
+.leaderboard-tabs button {
+  padding: 10px 18px;
+  background: transparent;
+  color: var(--arena-muted);
+  border: 1px solid transparent;
+}
+
+.leaderboard-tabs button:hover,
+.leaderboard-tabs button.active {
+  color: var(--arena-ink);
+  background: var(--arena-accent-soft);
+  border-color: rgba(124, 92, 255, 0.45);
+}
+
 .leaderboard-grid,
 .leaderboard-sections {
   width: min(100%, 960px);
@@ -1586,6 +1612,10 @@ button:hover {
 .leaderboard-sections {
   grid-template-columns: repeat(2, 1fr);
   margin-bottom: 32px;
+}
+
+.global-leaderboard-sections {
+  align-items: start;
 }
 
 .stat-card,
