@@ -1,5 +1,9 @@
 import type { Session } from "@supabase/supabase-js";
 import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
+import PlayerIdentityBadges from "./PlayerIdentityBadges";
+import { getArenaBadges } from "../lib/badges";
+import { getCompactPlayerBadges } from "../lib/playerIdentity";
+import { getTrackTestStats } from "../lib/stats";
 
 type NavbarProps = {
   onLogout: () => void;
@@ -25,6 +29,10 @@ function Navbar({
     : session
       ? "Set username"
       : "Account";
+  const localStats = getTrackTestStats();
+  const accountBadges = session
+    ? getCompactPlayerBadges(localStats, getArenaBadges(localStats))
+    : [];
 
   return (
     <nav className="navbar">
@@ -55,7 +63,8 @@ function Navbar({
               className="nav-link-button account-button"
               onClick={onShowAuth}
             >
-              {accountLabel}
+              <span>{accountLabel}</span>
+              <PlayerIdentityBadges badges={accountBadges} compact />
             </button>
             <button type="button" className="nav-login-button" onClick={onLogout}>
               Logout

@@ -4,6 +4,15 @@ import {
   fetchGlobalLeaderboard,
   type GlobalLeaderboardData,
 } from "../lib/globalLeaderboard";
+import BadgeGrid from "./BadgeGrid";
+import { getArenaBadges, getRecentUnlockedBadge } from "../lib/badges";
+import { getDailyGoalFoundation, type DailyGoal } from "../lib/dailyGoals";
+import PlayerIdentityBadges from "./PlayerIdentityBadges";
+import {
+  getCompactPlayerBadges,
+  getRankFormBadge,
+  type CompactPlayerBadge,
+} from "../lib/playerIdentity";
 import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
 
 type LeaderboardProps = {
@@ -32,8 +41,21 @@ function formatDate(value: string) {
   });
 }
 
-function playerLabel(playerName: string, username: string | null) {
-  return username ? `${playerName} (@${username})` : playerName;
+function PlayerLabel({
+  playerName,
+  username,
+  badges = [],
+}: {
+  playerName: string;
+  username: string | null;
+  badges?: CompactPlayerBadge[];
+}) {
+  return (
+    <span className="player-label">
+      <span>{username ? `${playerName} (@${username})` : playerName}</span>
+      <PlayerIdentityBadges badges={badges} compact />
+    </span>
+  );
 }
 
 function Leaderboard({ onPlay, session }: LeaderboardProps) {
@@ -89,6 +111,10 @@ function Leaderboard({ onPlay, session }: LeaderboardProps) {
     )
     .slice(0, 5);
   const recentResults = stats.quizResults.slice(0, 5);
+  const badges = getArenaBadges(stats);
+  const recentBadge = getRecentUnlockedBadge(badges);
+  const playerBadges = getCompactPlayerBadges(stats, badges);
+  const dailyGoals = getDailyGoalFoundation(stats);
 
   function handleClearStats() {
     const shouldClear = window.confirm(
@@ -152,6 +178,10 @@ function Leaderboard({ onPlay, session }: LeaderboardProps) {
           topArtists={topArtists}
           topAlbums={topAlbums}
           recentResults={recentResults}
+          badges={badges}
+          recentBadge={recentBadge}
+          playerBadges={playerBadges}
+          dailyGoals={dailyGoals}
           onClearStats={handleClearStats}
         />
       )}
@@ -191,7 +221,17 @@ function GlobalArena({
                 <div className="leaderboard-list-row" key={entry.userId}>
                   <span className="rank-number">{index + 1}</span>
                   <div>
-                    <strong>{playerLabel(entry.playerName, entry.username)}</strong>
+                    <strong>
+                      <PlayerLabel
+                        playerName={entry.playerName}
+                        username={entry.username}
+                        badges={
+                          getRankFormBadge(index + 1)
+                            ? [getRankFormBadge(index + 1)!]
+                            : []
+                        }
+                      />
+                    </strong>
                     <span>{entry.quizzesPlayed} quizzes played</span>
                   </div>
                   <span>{formatNumber(entry.totalPoints)} pts</span>
@@ -212,7 +252,17 @@ function GlobalArena({
                 <div className="leaderboard-list-row" key={entry.userId}>
                   <span className="rank-number">{index + 1}</span>
                   <div>
-                    <strong>{playerLabel(entry.playerName, entry.username)}</strong>
+                    <strong>
+                      <PlayerLabel
+                        playerName={entry.playerName}
+                        username={entry.username}
+                        badges={
+                          getRankFormBadge(index + 1)
+                            ? [getRankFormBadge(index + 1)!]
+                            : []
+                        }
+                      />
+                    </strong>
                     <span>
                       {entry.quizzesPlayed} quizzes, {entry.totalQuestions} questions
                     </span>
@@ -240,7 +290,16 @@ function GlobalArena({
                   <div>
                     <strong>{entry.albumName}</strong>
                     <span>
-                      {entry.artistName} - {playerLabel(entry.playerName, entry.username)}
+                      {entry.artistName} -{" "}
+                      <PlayerLabel
+                        playerName={entry.playerName}
+                        username={entry.username}
+                        badges={
+                          getRankFormBadge(index + 1)
+                            ? [getRankFormBadge(index + 1)!]
+                            : []
+                        }
+                      />
                     </span>
                   </div>
                   <span>{formatNumber(entry.bestScore)} pts</span>
@@ -265,7 +324,17 @@ function GlobalArena({
                   <span className="rank-number">{index + 1}</span>
                   <div>
                     <strong>{entry.artistName}</strong>
-                    <span>{playerLabel(entry.playerName, entry.username)}</span>
+                    <span>
+                      <PlayerLabel
+                        playerName={entry.playerName}
+                        username={entry.username}
+                        badges={
+                          getRankFormBadge(index + 1)
+                            ? [getRankFormBadge(index + 1)!]
+                            : []
+                        }
+                      />
+                    </span>
                   </div>
                   <span>{formatNumber(entry.totalPoints)} pts</span>
                   <span>{entry.accuracy}%</span>
@@ -287,7 +356,12 @@ function GlobalArena({
                 <div>
                   <strong>{entry.albumName}</strong>
                   <span>
-                    {entry.artistName} - {playerLabel(entry.playerName, entry.username)}
+                    {entry.artistName} -{" "}
+                    <PlayerLabel
+                      playerName={entry.playerName}
+                      username={entry.username}
+                      badges={[]}
+                    />
                   </span>
                 </div>
                 <span>{formatNumber(entry.finalPoints)} pts</span>
@@ -308,16 +382,79 @@ function MyStats({
   topArtists,
   topAlbums,
   recentResults,
+  badges,
+  recentBadge,
+  playerBadges,
+  dailyGoals,
   onClearStats,
 }: {
   stats: ReturnType<typeof getTrackTestStats>;
   topArtists: ReturnType<typeof getTrackTestStats>["artists"][string][];
   topAlbums: ReturnType<typeof getTrackTestStats>["albums"][string][];
   recentResults: ReturnType<typeof getTrackTestStats>["quizResults"];
+  badges: ReturnType<typeof getArenaBadges>;
+  recentBadge: ReturnType<typeof getRecentUnlockedBadge>;
+  playerBadges: CompactPlayerBadge[];
+  dailyGoals: DailyGoal[];
   onClearStats: () => void;
 }) {
   return (
     <>
+      <section className="player-identity-panel">
+        <div>
+          <p className="eyebrow">Player Identity</p>
+          <h2>Arena Identity Badges</h2>
+          <p>
+            Up to three compact badges can sit beside your username: player tier,
+            current form, and active streak.
+          </p>
+        </div>
+        <PlayerIdentityBadges badges={playerBadges} />
+      </section>
+
+      <BadgeGrid badges={badges} recentBadge={recentBadge} />
+
+      <section className="daily-goals-panel">
+        <div className="badge-section-header">
+          <div>
+            <p className="eyebrow">Daily Goals</p>
+            <h2>Goal Foundation</h2>
+          </div>
+          <span>Frontend-ready</span>
+        </div>
+
+        <div className="daily-goal-list">
+          {dailyGoals.map((goal) => {
+            const progress = Math.min(
+              100,
+              Math.round((goal.progress / goal.target) * 100)
+            );
+
+            return (
+              <article
+                className={`daily-goal ${goal.complete ? "complete" : ""}`}
+                key={goal.id}
+              >
+                <div>
+                  <strong>{goal.title}</strong>
+                  <span>
+                    {goal.mode} - {goal.description}
+                  </span>
+                </div>
+                <div className="badge-progress">
+                  <div>
+                    <span style={{ width: `${progress}%` }} />
+                  </div>
+                  <small>
+                    {goal.progress} / {goal.target}
+                  </small>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
       <div className="leaderboard-grid">
         <div className="stat-card">
           <span>Total Points</span>
