@@ -425,6 +425,12 @@ button:hover {
   color: white;
 }
 
+.album-result-count {
+  margin: -12px 0 0;
+  color: var(--arena-muted) !important;
+  font-size: 15px;
+}
+
 .album-grid {
   margin: 40px auto 0;
   display: grid;
@@ -530,6 +536,19 @@ button:hover {
   font-size: 12px !important;
   font-weight: 700;
   letter-spacing: 1px;
+}
+
+.view-more-albums {
+  margin-top: 28px;
+  background: transparent;
+  color: var(--arena-ink);
+  border: 1px solid rgba(124, 92, 255, 0.45);
+  box-shadow: 0 0 28px rgba(124, 92, 255, 0.12);
+}
+
+.view-more-albums:hover {
+  background: var(--arena-accent-soft);
+  color: white;
 }
 
 .selected-album {
@@ -2213,6 +2232,12 @@ button:hover {
 .leaderboard-list {
   display: grid;
   gap: 10px;
+}
+
+.leaderboard-limit-note {
+  margin: 6px 0 0;
+  color: var(--arena-muted) !important;
+  font-size: 14px !important;
 }
 
 .leaderboard-list-row {

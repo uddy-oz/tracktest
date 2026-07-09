@@ -21,6 +21,8 @@ type LeaderboardProps = {
 };
 
 type LeaderboardTab = "global" | "myStats";
+const LEADERBOARD_SECTION_LIMIT = 6;
+const RECENT_RESULTS_LIMIT = 5;
 
 function formatNumber(value: number) {
   return value.toLocaleString();
@@ -56,6 +58,22 @@ function PlayerLabel({
       <PlayerIdentityBadges badges={badges} compact />
     </span>
   );
+}
+
+function LimitNote({
+  total,
+  limit,
+  label,
+}: {
+  total: number;
+  limit: number;
+  label: string;
+}) {
+  if (total <= limit) {
+    return null;
+  }
+
+  return <p className="leaderboard-limit-note">{label}</p>;
 }
 
 function Leaderboard({ onPlay, session }: LeaderboardProps) {
@@ -101,7 +119,7 @@ function Leaderboard({ onPlay, session }: LeaderboardProps) {
         b.accuracy - a.accuracy ||
         b.quizzesPlayed - a.quizzesPlayed
     )
-    .slice(0, 5);
+    .slice(0, LEADERBOARD_SECTION_LIMIT);
   const topAlbums = [...albums]
     .sort(
       (a, b) =>
@@ -109,8 +127,8 @@ function Leaderboard({ onPlay, session }: LeaderboardProps) {
         b.bestAccuracy - a.bestAccuracy ||
         b.timesPlayed - a.timesPlayed
     )
-    .slice(0, 5);
-  const recentResults = stats.quizResults.slice(0, 5);
+    .slice(0, LEADERBOARD_SECTION_LIMIT);
+  const recentResults = stats.quizResults.slice(0, RECENT_RESULTS_LIMIT);
   const badges = getArenaBadges(stats);
   const recentBadge = getRecentUnlockedBadge(badges);
   const playerBadges = getCompactPlayerBadges(stats, badges);
@@ -178,6 +196,9 @@ function Leaderboard({ onPlay, session }: LeaderboardProps) {
           topArtists={topArtists}
           topAlbums={topAlbums}
           recentResults={recentResults}
+          artistTotalCount={artists.length}
+          albumTotalCount={albums.length}
+          recentTotalCount={stats.quizResults.length}
           badges={badges}
           recentBadge={recentBadge}
           playerBadges={playerBadges}
@@ -281,7 +302,9 @@ function GlobalArena({
           <h2>Best Album Scores</h2>
           {data.bestAlbumScores.length > 0 ? (
             <div className="leaderboard-list">
-              {data.bestAlbumScores.map((entry, index) => (
+              {data.bestAlbumScores
+                .slice(0, LEADERBOARD_SECTION_LIMIT)
+                .map((entry, index) => (
                 <div
                   className="leaderboard-list-row"
                   key={`${entry.userId}-${entry.artistName}-${entry.albumName}`}
@@ -306,6 +329,11 @@ function GlobalArena({
                   <span>{entry.bestAccuracy}%</span>
                 </div>
               ))}
+              <LimitNote
+                total={data.bestAlbumScores.length}
+                limit={LEADERBOARD_SECTION_LIMIT}
+                label={`Showing top ${LEADERBOARD_SECTION_LIMIT}`}
+              />
             </div>
           ) : (
             <p>Album records will appear after cloud-saved quizzes.</p>
@@ -316,7 +344,9 @@ function GlobalArena({
           <h2>Artist Masters</h2>
           {data.artistMasters.length > 0 ? (
             <div className="leaderboard-list">
-              {data.artistMasters.map((entry, index) => (
+              {data.artistMasters
+                .slice(0, LEADERBOARD_SECTION_LIMIT)
+                .map((entry, index) => (
                 <div
                   className="leaderboard-list-row"
                   key={`${entry.userId}-${entry.artistName}`}
@@ -340,6 +370,11 @@ function GlobalArena({
                   <span>{entry.accuracy}%</span>
                 </div>
               ))}
+              <LimitNote
+                total={data.artistMasters.length}
+                limit={LEADERBOARD_SECTION_LIMIT}
+                label={`Showing top ${LEADERBOARD_SECTION_LIMIT}`}
+              />
             </div>
           ) : (
             <p>Artist mastery rankings will appear after cloud stats save.</p>
@@ -351,7 +386,9 @@ function GlobalArena({
         <h2>Recent Perfect Runs</h2>
         {data.recentPerfectRuns.length > 0 ? (
           <div className="results-table">
-            {data.recentPerfectRuns.map((entry) => (
+            {data.recentPerfectRuns
+              .slice(0, RECENT_RESULTS_LIMIT)
+              .map((entry) => (
               <div className="result-row" key={entry.id}>
                 <div>
                   <strong>{entry.albumName}</strong>
@@ -368,6 +405,11 @@ function GlobalArena({
                 <span>{formatDate(entry.playedAt)}</span>
               </div>
             ))}
+            <LimitNote
+              total={data.recentPerfectRuns.length}
+              limit={RECENT_RESULTS_LIMIT}
+              label={`Showing latest ${RECENT_RESULTS_LIMIT}`}
+            />
           </div>
         ) : (
           <p className="empty-stats">No perfect runs have hit the Arena yet.</p>
@@ -382,6 +424,9 @@ function MyStats({
   topArtists,
   topAlbums,
   recentResults,
+  artistTotalCount,
+  albumTotalCount,
+  recentTotalCount,
   badges,
   recentBadge,
   playerBadges,
@@ -392,6 +437,9 @@ function MyStats({
   topArtists: ReturnType<typeof getTrackTestStats>["artists"][string][];
   topAlbums: ReturnType<typeof getTrackTestStats>["albums"][string][];
   recentResults: ReturnType<typeof getTrackTestStats>["quizResults"];
+  artistTotalCount: number;
+  albumTotalCount: number;
+  recentTotalCount: number;
   badges: ReturnType<typeof getArenaBadges>;
   recentBadge: ReturnType<typeof getRecentUnlockedBadge>;
   playerBadges: CompactPlayerBadge[];
@@ -503,6 +551,11 @@ function MyStats({
                   <span>{formatNumber(artist.totalPoints)} pts</span>
                 </div>
               ))}
+              <LimitNote
+                total={artistTotalCount}
+                limit={LEADERBOARD_SECTION_LIMIT}
+                label={`Showing top ${LEADERBOARD_SECTION_LIMIT}`}
+              />
             </div>
           ) : (
             <p>Play a quiz to start building artist stats.</p>
@@ -527,6 +580,11 @@ function MyStats({
                   <span>{album.bestAccuracy}%</span>
                 </div>
               ))}
+              <LimitNote
+                total={albumTotalCount}
+                limit={LEADERBOARD_SECTION_LIMIT}
+                label={`Showing top ${LEADERBOARD_SECTION_LIMIT}`}
+              />
             </div>
           ) : (
             <p>Album scores will appear after your first quiz.</p>
@@ -549,6 +607,11 @@ function MyStats({
                 <span>{result.accuracyPercentage}%</span>
               </div>
             ))}
+            <LimitNote
+              total={recentTotalCount}
+              limit={RECENT_RESULTS_LIMIT}
+              label={`Showing latest ${RECENT_RESULTS_LIMIT}`}
+            />
           </div>
         ) : (
           <p className="empty-stats">

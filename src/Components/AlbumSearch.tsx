@@ -7,13 +7,21 @@ type AlbumSearchProps = {
   onStartQuiz: (album: SpotifyAlbum) => void;
 };
 
+const ALBUMS_PER_PAGE = 12;
+const MAX_VISIBLE_ALBUMS = 48;
+
 function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
+  const [visibleAlbumCount, setVisibleAlbumCount] = useState(ALBUMS_PER_PAGE);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
+  const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
+  const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,6 +35,7 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
       setError("");
       setSubmittedSearch(searchTerm);
       setSelectedAlbum(null);
+      setVisibleAlbumCount(ALBUMS_PER_PAGE);
 
       const results = await searchSpotifyAlbums(searchTerm);
       setAlbums(results);
@@ -40,6 +49,12 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
 
   function handleSelectAlbum(album: SpotifyAlbum) {
     setSelectedAlbum(album.id === selectedAlbum?.id ? null : album);
+  }
+
+  function handleViewMoreAlbums() {
+    setVisibleAlbumCount((currentCount) =>
+      Math.min(currentCount + ALBUMS_PER_PAGE, MAX_VISIBLE_ALBUMS, albums.length)
+    );
   }
 
   return (
@@ -78,9 +93,12 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
           <p className="search-result">
             Showing results for: <strong>{submittedSearch}</strong>
           </p>
+          <p className="album-result-count">
+            Showing {visibleAlbums.length} of {cappedAlbums.length} results
+          </p>
 
           <div className="album-grid">
-            {albums.map((album, index) => (
+            {visibleAlbums.map((album, index) => (
               <button
                 type="button"
                 className={`album-card ${
@@ -112,6 +130,16 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
               </button>
             ))}
           </div>
+
+          {hasMoreAlbums && (
+            <button
+              type="button"
+              className="view-more-albums"
+              onClick={handleViewMoreAlbums}
+            >
+              View more albums
+            </button>
+          )}
         </>
       )}
 
