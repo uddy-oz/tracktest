@@ -7,6 +7,7 @@ import Quiz from "./Components/Quiz";
 import SpotifyCallback from "./Components/SpotifyCallback";
 import Leaderboard from "./Components/Leaderboard";
 import AuthPage from "./Components/AuthPage";
+import ProfilePage from "./Components/ProfilePage";
 import { supabase } from "./lib/supabaseClient";
 import { getArenaBadges } from "./lib/badges";
 import { fetchCloudBadgeStats } from "./lib/cloudBadgeStats";
@@ -15,7 +16,7 @@ import { ensureUserProfile, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
-type AppView = "play" | "leaderboard" | "auth";
+type AppView = "play" | "leaderboard" | "auth" | "profile";
 
 function App() {
   const [activeView, setActiveView] = useState<AppView>("play");
@@ -167,6 +168,12 @@ function App() {
     setActiveView("auth");
   }
 
+  function showProfile() {
+    setSelectedAlbum(null);
+    setIsQuizStarted(false);
+    setActiveView(session ? "profile" : "auth");
+  }
+
   async function logoutSupabase() {
     const localStatsSnapshot = getTrackTestStats();
 
@@ -200,6 +207,7 @@ function App() {
         onLogout={logoutSupabase}
         onShowPlay={showPlay}
         onShowLeaderboard={showLeaderboard}
+        onShowProfile={showProfile}
         session={session}
         profile={profile}
         identityBadges={identityBadges}
@@ -235,6 +243,16 @@ function App() {
           profile={profile}
           isProfileLoading={isProfileLoading}
           onProfileSaved={setProfile}
+          onPlay={showPlay}
+        />
+      )}
+
+      {activeView === "profile" && (
+        <ProfilePage
+          session={session}
+          profile={profile}
+          identityBadges={identityBadges}
+          onShowAuth={showAuth}
           onPlay={showPlay}
         />
       )}

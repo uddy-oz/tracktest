@@ -8,10 +8,11 @@ type NavbarProps = {
   onShowAuth: () => void;
   onShowPlay: () => void;
   onShowLeaderboard: () => void;
+  onShowProfile: () => void;
   session: Session | null;
   profile: UserProfile | null;
   identityBadges: CompactPlayerBadge[] | null;
-  activeView: "play" | "leaderboard" | "auth";
+  activeView: "play" | "leaderboard" | "auth" | "profile";
 };
 
 function Navbar({
@@ -19,6 +20,7 @@ function Navbar({
   onShowAuth,
   onShowPlay,
   onShowLeaderboard,
+  onShowProfile,
   session,
   profile,
   identityBadges,
@@ -57,8 +59,10 @@ function Navbar({
           <>
             <button
               type="button"
-              className="nav-link-button account-button"
-              onClick={onShowAuth}
+              className={`nav-link-button account-button ${
+                activeView === "profile" || activeView === "auth" ? "active" : ""
+              }`}
+              onClick={profile?.username ? onShowProfile : onShowAuth}
             >
               <span>{accountLabel}</span>
               {identityBadges && (

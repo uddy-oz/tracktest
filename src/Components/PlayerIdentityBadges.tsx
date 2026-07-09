@@ -10,6 +10,22 @@ function PlayerIdentityBadges({ badges, compact = false }: PlayerIdentityBadgesP
     return null;
   }
 
+  function getBadgeSymbol(badge: CompactPlayerBadge) {
+    if (badge.kind === "form") {
+      return "🔥";
+    }
+
+    if (badge.kind === "dailyStreak") {
+      return "↯";
+    }
+
+    if (badge.kind === "winningStreak") {
+      return "♛";
+    }
+
+    return "";
+  }
+
   return (
     <span className={`player-identity-badges ${compact ? "compact" : ""}`}>
       {badges.slice(0, 3).map((badge) => (
@@ -20,6 +36,11 @@ function PlayerIdentityBadges({ badges, compact = false }: PlayerIdentityBadgesP
           title={badge.title}
           key={badge.id}
         >
+          {getBadgeSymbol(badge) && (
+            <span className="identity-badge-symbol" aria-hidden="true">
+              {getBadgeSymbol(badge)}
+            </span>
+          )}
           {badge.label}
         </span>
       ))}
