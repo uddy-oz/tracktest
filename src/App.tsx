@@ -8,6 +8,7 @@ import SpotifyCallback from "./Components/SpotifyCallback";
 import Leaderboard from "./Components/Leaderboard";
 import AuthPage from "./Components/AuthPage";
 import ProfilePage from "./Components/ProfilePage";
+import ArenaPage from "./Components/ArenaPage";
 import { supabase } from "./lib/supabaseClient";
 import { getArenaBadges } from "./lib/badges";
 import { fetchCloudBadgeStats } from "./lib/cloudBadgeStats";
@@ -16,7 +17,7 @@ import { ensureUserProfile, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
-type AppView = "play" | "leaderboard" | "auth" | "profile";
+type AppView = "play" | "leaderboard" | "arena" | "auth" | "profile";
 
 function getProfileUsernameFromPath() {
   const match = window.location.pathname.match(/^\/profile\/([^/]+)\/?$/);
@@ -198,6 +199,14 @@ function App() {
     setActiveView("leaderboard");
   }
 
+  function showArena() {
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
+    setSelectedAlbum(null);
+    setIsQuizStarted(false);
+    setActiveView("arena");
+  }
+
   function showAuth() {
     window.history.pushState({}, "", "/");
     setPublicProfileUsername(null);
@@ -266,6 +275,7 @@ function App() {
         onLogout={logoutSupabase}
         onShowPlay={showPlay}
         onShowLeaderboard={showLeaderboard}
+        onShowArena={showArena}
         onShowProfile={showProfile}
         session={session}
         profile={profile}
@@ -299,6 +309,8 @@ function App() {
           onOpenProfile={showPublicProfile}
         />
       )}
+
+      {activeView === "arena" && <ArenaPage onPlay={showPlay} />}
 
       {activeView === "auth" && (
         <AuthPage
