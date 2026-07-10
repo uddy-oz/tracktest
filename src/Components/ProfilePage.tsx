@@ -4,6 +4,11 @@ import BadgeCard from "./BadgeCard";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 import { getArenaBadges, type ArenaBadge } from "../lib/badges";
 import {
+  fetchCurrentUserFeaturedBadgeIds,
+  saveCurrentUserFeaturedBadgeIds,
+  sanitizeFeaturedBadgeIds,
+} from "../lib/featuredBadges";
+import {
   calculatePlayerTier,
   getCompactPlayerBadges,
   type CompactPlayerBadge,
@@ -33,6 +38,7 @@ type ProfilePageProps = {
 type ProfileState = {
   displayInfo: ProfileDisplayInfo | null;
   stats: TrackTestStats;
+  featuredBadgeIds: string[];
   source: PublicProfileStatsSource;
   error: string | null;
   notFound: boolean;
@@ -122,6 +128,7 @@ function ProfilePage({
   const [profileState, setProfileState] = useState<ProfileState>(() => ({
     displayInfo: null,
     stats: getTrackTestStats(),
+    featuredBadgeIds: [],
     source: "localFallback",
     error: null,
     notFound: false,
@@ -129,6 +136,9 @@ function ProfilePage({
   const [isLoading, setIsLoading] = useState(
     Boolean(session?.user || publicUsername)
   );
+  const [isEditingFeaturedBadges, setIsEditingFeaturedBadges] = useState(false);
+  const [featuredBadgeDraft, setFeaturedBadgeDraft] = useState<string[]>([]);
+  const [featuredBadgeMessage, setFeaturedBadgeMessage] = useState("");
   const isPublicProfile = Boolean(publicUsername);
 
   useEffect(() => {
@@ -148,6 +158,7 @@ function ProfilePage({
         setProfileState({
           displayInfo: publicProfileState.displayInfo,
           stats: publicProfileState.stats || getTrackTestStats(),
+          featuredBadgeIds: publicProfileState.featuredBadgeIds,
           source: "cloud",
           error: publicProfileState.error,
           notFound: publicProfileState.notFound,
@@ -163,6 +174,10 @@ function ProfilePage({
 
       setIsLoading(true);
       const nextProfileState = await fetchCurrentUserProfileStats(session.user);
+      const featuredBadgeResult = await fetchCurrentUserFeaturedBadgeIds(
+        session.user,
+        nextProfileState.displayInfo.username
+      );
 
       if (!isActive) {
         return;
@@ -170,6 +185,7 @@ function ProfilePage({
 
       setProfileState({
         ...nextProfileState,
+        featuredBadgeIds: featuredBadgeResult.badgeIds,
         notFound: false,
       });
       setIsLoading(false);
@@ -190,9 +206,20 @@ function ProfilePage({
     !isPublicProfile && identityBadges
       ? identityBadges
       : getCompactPlayerBadges(profileState.stats, badges);
-  const showcaseBadges = getShowcaseBadges(badges);
   const tier = calculatePlayerTier(badges);
-  const unlockedBadgeCount = badges.filter((badge) => badge.unlocked).length;
+  const unlockedBadges = badges.filter((badge) => badge.unlocked);
+  const unlockedBadgeIds = new Set(unlockedBadges.map((badge) => badge.id));
+  const customFeaturedBadgeIds = sanitizeFeaturedBadgeIds(
+    profileState.featuredBadgeIds,
+    unlockedBadgeIds
+  );
+  const showcaseBadges =
+    customFeaturedBadgeIds.length > 0
+      ? customFeaturedBadgeIds
+          .map((badgeId) => badges.find((badge) => badge.id === badgeId))
+          .filter((badge): badge is ArenaBadge => Boolean(badge))
+      : getShowcaseBadges(badges);
+  const unlockedBadgeCount = unlockedBadges.length;
   const artistStats = Object.values(profileState.stats.artists);
   const albumStats = Object.values(profileState.stats.albums);
   const hasStats = profileState.stats.overall.totalQuizzesPlayed > 0;
@@ -223,6 +250,64 @@ function ProfilePage({
     (isPublicProfile ? null : profile?.username) ||
     profileState.displayInfo?.username ||
     publicUsername;
+  const isOwnProfile = Boolean(
+    session?.user &&
+      username &&
+      profile?.username &&
+      username.toLowerCase() === profile.username.toLowerCase()
+  );
+
+  function startEditingFeaturedBadges() {
+    setFeaturedBadgeDraft(customFeaturedBadgeIds);
+    setFeaturedBadgeMessage("");
+    setIsEditingFeaturedBadges(true);
+  }
+
+  function toggleFeaturedBadge(badgeId: string) {
+    setFeaturedBadgeDraft((currentBadgeIds) => {
+      if (currentBadgeIds.includes(badgeId)) {
+        return currentBadgeIds.filter((currentBadgeId) => currentBadgeId !== badgeId);
+      }
+
+      if (currentBadgeIds.length >= SECTION_LIMIT) {
+        return currentBadgeIds;
+      }
+
+      return [...currentBadgeIds, badgeId];
+    });
+  }
+
+  async function saveFeaturedBadges(nextBadgeIds = featuredBadgeDraft) {
+    if (!session?.user) {
+      return;
+    }
+
+    const sanitizedBadgeIds = sanitizeFeaturedBadgeIds(
+      nextBadgeIds,
+      unlockedBadgeIds
+    );
+    const { error } = await saveCurrentUserFeaturedBadgeIds({
+      user: session.user,
+      username,
+      badgeIds: sanitizedBadgeIds,
+    });
+
+    setProfileState((currentProfileState) => ({
+      ...currentProfileState,
+      featuredBadgeIds: sanitizedBadgeIds,
+    }));
+    setFeaturedBadgeDraft(sanitizedBadgeIds);
+    setFeaturedBadgeMessage(
+      error
+        ? "Saved locally. Run the featured badges SQL to sync publicly."
+        : "Featured badges saved."
+    );
+    setIsEditingFeaturedBadges(false);
+  }
+
+  function clearFeaturedBadges() {
+    void saveFeaturedBadges([]);
+  }
 
   if (!session && !isPublicProfile) {
     return (
@@ -379,6 +464,70 @@ function ProfilePage({
             {unlockedBadgeCount} of {badges.length} unlocked
           </span>
         </div>
+        {isOwnProfile && unlockedBadgeCount > 0 && (
+          <div className="featured-badge-actions">
+            <button type="button" onClick={startEditingFeaturedBadges}>
+              Edit Featured Badges
+            </button>
+            {customFeaturedBadgeIds.length > 0 && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={clearFeaturedBadges}
+              >
+                Use Default
+              </button>
+            )}
+          </div>
+        )}
+        {featuredBadgeMessage && (
+          <p className="featured-badge-message">{featuredBadgeMessage}</p>
+        )}
+        {isEditingFeaturedBadges && (
+          <div className="featured-badge-editor">
+            <div className="profile-panel-heading">
+              <div>
+                <p className="eyebrow">Unlocked Badges</p>
+                <h2>Choose up to 6</h2>
+              </div>
+              <span>{featuredBadgeDraft.length} / 6 selected</span>
+            </div>
+            <div className="featured-badge-picker">
+              {unlockedBadges.map((badge) => {
+                const isSelected = featuredBadgeDraft.includes(badge.id);
+                const isDisabled =
+                  !isSelected && featuredBadgeDraft.length >= SECTION_LIMIT;
+
+                return (
+                  <button
+                    type="button"
+                    className={`featured-badge-option ${
+                      isSelected ? "selected" : ""
+                    }`}
+                    disabled={isDisabled}
+                    onClick={() => toggleFeaturedBadge(badge.id)}
+                    key={badge.id}
+                  >
+                    <strong>{badge.title}</strong>
+                    <span>{badge.category} - {badge.tier}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="featured-badge-actions">
+              <button type="button" onClick={() => void saveFeaturedBadges()}>
+                Save Featured Badges
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setIsEditingFeaturedBadges(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {showcaseBadges.length > 0 ? (
           <div className="badge-grid profile-showcase-grid">

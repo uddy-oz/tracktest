@@ -1730,6 +1730,79 @@ button:hover {
   margin-bottom: 28px;
 }
 
+.featured-badge-actions {
+  margin: 0 0 18px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.featured-badge-actions button {
+  min-height: 42px;
+  padding: 10px 16px;
+  font-size: 14px;
+}
+
+.featured-badge-message {
+  margin: 0 0 18px;
+  color: var(--arena-muted);
+  font-size: 15px;
+}
+
+.featured-badge-editor {
+  margin-bottom: 22px;
+  padding: 18px;
+  border: 1px solid rgba(124, 92, 255, 0.28);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.14), transparent 34%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.featured-badge-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.featured-badge-option {
+  min-height: 92px;
+  padding: 14px;
+  display: grid;
+  gap: 5px;
+  align-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(16, 16, 24, 0.9);
+  color: var(--arena-ink);
+  text-align: left;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms var(--arena-ease);
+}
+
+.featured-badge-option:hover:not(:disabled),
+.featured-badge-option.selected {
+  border-color: var(--arena-accent-bright);
+  background: var(--arena-accent-soft);
+  box-shadow: 0 0 24px rgba(124, 92, 255, 0.16);
+  transform: translateY(-2px);
+}
+
+.featured-badge-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.featured-badge-option strong {
+  color: white;
+  font-size: 15px;
+}
+
+.featured-badge-option span {
+  color: var(--arena-muted);
+  font-size: 13px;
+}
+
 .profile-showcase-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2591,6 +2664,10 @@ button:hover {
   }
 
   .profile-showcase-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .featured-badge-picker {
     grid-template-columns: 1fr;
   }
 

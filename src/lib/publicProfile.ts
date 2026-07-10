@@ -1,5 +1,6 @@
 import type { User } from "@supabase/supabase-js";
 import { fetchCloudBadgeStats } from "./cloudBadgeStats";
+import { getLocalFeaturedBadgeIds } from "./featuredBadges";
 import { supabase } from "./supabaseClient";
 import { fetchProfileDisplayInfo, type ProfileDisplayInfo } from "./profiles";
 import {
@@ -22,6 +23,7 @@ export type CurrentUserProfileStats = {
 export type PublicProfileStats = {
   displayInfo: ProfileDisplayInfo | null;
   stats: TrackTestStats | null;
+  featuredBadgeIds: string[];
   error: string | null;
   notFound: boolean;
 };
@@ -30,6 +32,7 @@ type PublicProfileSummaryRow = {
   user_id: string;
   display_name: string | null;
   username: string | null;
+  featured_badge_ids?: string[] | null;
   total_quizzes_played: number | null;
   total_correct_answers: number | null;
   total_questions_answered: number | null;
@@ -108,6 +111,7 @@ export async function fetchPublicProfileByUsername(
     return {
       displayInfo: null,
       stats: null,
+      featuredBadgeIds: [],
       error: "Supabase is not configured yet.",
       notFound: false,
     };
@@ -124,6 +128,7 @@ export async function fetchPublicProfileByUsername(
     return {
       displayInfo: null,
       stats: null,
+      featuredBadgeIds: [],
       error: summaryError.message,
       notFound: false,
     };
@@ -133,6 +138,7 @@ export async function fetchPublicProfileByUsername(
     return {
       displayInfo: null,
       stats: null,
+      featuredBadgeIds: [],
       error: null,
       notFound: true,
     };
@@ -172,6 +178,7 @@ export async function fetchPublicProfileByUsername(
     return {
       displayInfo: mapPublicDisplayInfo(summaryRow),
       stats: null,
+      featuredBadgeIds: getPublicFeaturedBadgeIds(summaryRow),
       error: firstError.message,
       notFound: false,
     };
@@ -179,6 +186,7 @@ export async function fetchPublicProfileByUsername(
 
   return {
     displayInfo: mapPublicDisplayInfo(summaryRow),
+    featuredBadgeIds: getPublicFeaturedBadgeIds(summaryRow),
     stats: buildPublicTrackTestStats(
       summaryRow,
       (recentResults.data || []) as PublicQuizResultRow[],
@@ -188,6 +196,14 @@ export async function fetchPublicProfileByUsername(
     error: null,
     notFound: false,
   };
+}
+
+function getPublicFeaturedBadgeIds(row: PublicProfileSummaryRow) {
+  if (Array.isArray(row.featured_badge_ids) && row.featured_badge_ids.length > 0) {
+    return row.featured_badge_ids;
+  }
+
+  return getLocalFeaturedBadgeIds(row.username);
 }
 
 function buildPublicTrackTestStats(
