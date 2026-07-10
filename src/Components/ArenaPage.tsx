@@ -7,7 +7,6 @@ import {
   fetchOpenDuelRooms,
   finishDuelRoom,
   joinDuelRoom,
-  markPlayerReady,
   saveDuelPlayerResult,
   type ArenaRoom,
   type DuelQuizQuestion,
@@ -79,6 +78,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
   const [duelScore, setDuelScore] = useState(0);
   const [duelCorrectAnswers, setDuelCorrectAnswers] = useState(0);
   const [duelAnswerTimes, setDuelAnswerTimes] = useState<number[]>([]);
+  const [duelStreak, setDuelStreak] = useState(0);
   const [duelTimeRemaining, setDuelTimeRemaining] = useState(QUESTION_TIME_SECONDS);
   const [duelSelectedAnswer, setDuelSelectedAnswer] = useState("");
   const [isDuelFinished, setIsDuelFinished] = useState(false);
@@ -278,21 +278,13 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     setMessage(error || "Room refreshed.");
   }
 
-  async function handleReadyForDuel() {
+  async function handleStartDuel() {
     if (!session?.user || !activeRoom) {
       return;
     }
 
     setIsPreparingDuel(true);
     setMessage("");
-
-    const readyResult = await markPlayerReady(activeRoom.id, session.user);
-
-    if (readyResult.error) {
-      setMessage(readyResult.error);
-      setIsPreparingDuel(false);
-      return;
-    }
 
     const { room: freshRoom, error } = await fetchArenaRoom(activeRoom.id);
 
@@ -302,11 +294,19 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
       return;
     }
 
-    const allPlayersReady =
-      freshRoom.players.length >= 2 &&
-      freshRoom.players.every((player) => player.isReady);
+    if (freshRoom.hostUserId !== session.user.id) {
+      setMessage("Only the host can start the Duel.");
+      setIsPreparingDuel(false);
+      return;
+    }
 
-    if (allPlayersReady && freshRoom.quizQuestions.length === 0) {
+    if (freshRoom.players.length < 2) {
+      setMessage("Waiting for a second player.");
+      setIsPreparingDuel(false);
+      return;
+    }
+
+    if (freshRoom.quizQuestions.length === 0) {
       try {
         const tracks = await getSpotifyAlbumTracks(freshRoom.albumId);
 
@@ -320,7 +320,8 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
         const activatedRoom = await activateDuelRoom(freshRoom.id, questions);
 
         setActiveRoom(activatedRoom.room || freshRoom);
-        setMessage(activatedRoom.error || "Both players ready. Duel started.");
+        resetDuelLocalState();
+        setMessage(activatedRoom.error || "Duel started.");
       } catch (loadError) {
         console.error(loadError);
         setMessage("Could not prepare Duel questions.");
@@ -330,8 +331,14 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
       return;
     }
 
-    setActiveRoom(freshRoom);
-    setMessage("Ready. Waiting for opponent.");
+    const activatedRoom = await activateDuelRoom(
+      freshRoom.id,
+      freshRoom.quizQuestions
+    );
+
+    setActiveRoom(activatedRoom.room || freshRoom);
+    resetDuelLocalState();
+    setMessage(activatedRoom.error || "Duel started.");
     setIsPreparingDuel(false);
   }
 
@@ -400,11 +407,13 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     const nextScore = duelScore + points;
     const nextCorrectAnswers = duelCorrectAnswers + (isCorrect ? 1 : 0);
     const nextAnswerTimes = [...duelAnswerTimes, answerTime];
+    const nextStreak = isCorrect ? duelStreak + 1 : 0;
 
     setDuelSelectedAnswer(answer || "Timed out");
     setDuelScore(nextScore);
     setDuelCorrectAnswers(nextCorrectAnswers);
     setDuelAnswerTimes(nextAnswerTimes);
+    setDuelStreak(nextStreak);
 
     window.setTimeout(() => {
       if (duelQuestionIndex >= activeRoom.quizQuestions.length - 1) {
@@ -425,6 +434,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     setDuelScore(0);
     setDuelCorrectAnswers(0);
     setDuelAnswerTimes([]);
+    setDuelStreak(0);
     setDuelTimeRemaining(QUESTION_TIME_SECONDS);
     setDuelSelectedAnswer("");
     setIsDuelFinished(false);
@@ -456,11 +466,32 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
 
       if (bothPlayersFinished) {
         const sortedPlayers = [...activeRoom.players].sort(
-          (a, b) => b.finalScore - a.finalScore
+          (a, b) => {
+            const accuracyA =
+              a.totalQuestions > 0 ? a.correctAnswers / a.totalQuestions : 0;
+            const accuracyB =
+              b.totalQuestions > 0 ? b.correctAnswers / b.totalQuestions : 0;
+
+            return (
+              b.finalScore - a.finalScore ||
+              accuracyB - accuracyA ||
+              a.averageAnswerTime - b.averageAnswerTime
+            );
+          }
         );
+        const firstAccuracy =
+          sortedPlayers[0].totalQuestions > 0
+            ? sortedPlayers[0].correctAnswers / sortedPlayers[0].totalQuestions
+            : 0;
+        const secondAccuracy =
+          sortedPlayers[1].totalQuestions > 0
+            ? sortedPlayers[1].correctAnswers / sortedPlayers[1].totalQuestions
+            : 0;
         const isDraw =
           sortedPlayers.length >= 2 &&
-          sortedPlayers[0].finalScore === sortedPlayers[1].finalScore;
+          sortedPlayers[0].finalScore === sortedPlayers[1].finalScore &&
+          firstAccuracy === secondAccuracy &&
+          sortedPlayers[0].averageAnswerTime === sortedPlayers[1].averageAnswerTime;
 
         return (
           <section className="duel-room-screen">
@@ -493,6 +524,9 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
                       <p>
                         {player.finalScore.toLocaleString()} pts - {accuracy}%
                       </p>
+                      <small>
+                        Avg time: {player.averageAnswerTime.toFixed(1)}s
+                      </small>
                     </div>
                   );
                 })}
@@ -541,6 +575,14 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
               </div>
             </div>
 
+            <div className="quiz-status duel-game-status">
+              <span>Score: {duelScore.toLocaleString()}</span>
+              <span>
+                Correct: {duelCorrectAnswers} / {activeRoom.quizQuestions.length}
+              </span>
+              <span>Streak: {duelStreak}</span>
+            </div>
+
             {question.correctTrack.previewUrl ? (
               <audio
                 controls
@@ -565,6 +607,11 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
                     duelSelectedAnswer &&
                     option.name === question.correctTrack.name
                       ? "correct-song"
+                      : ""
+                  } ${
+                    duelSelectedAnswer === option.name &&
+                    option.name !== question.correctTrack.name
+                      ? "wrong-song"
                       : ""
                   }`}
                   key={option.id}
@@ -619,30 +666,31 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
               <span>Host</span>
               <strong>{hostPlayer?.displayName || "Arena host"}</strong>
               {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
-              {hostPlayer?.isReady && <small>Ready</small>}
             </div>
             <div className="duel-player-card">
               <span>Joined Player</span>
               <strong>{guestPlayer?.displayName || "Waiting for rival"}</strong>
               {guestPlayer?.username && <p>@{guestPlayer.username}</p>}
-              {guestPlayer?.isReady && <small>Ready</small>}
             </div>
           </div>
 
-          {currentPlayer && !currentPlayer.isReady && (
+          {activeRoom.hostUserId === session?.user.id ? (
             <button
               type="button"
               className="duel-start-button"
               disabled={activeRoom.players.length < 2 || isPreparingDuel}
-              onClick={() => void handleReadyForDuel()}
+              onClick={() => void handleStartDuel()}
             >
-              {isPreparingDuel ? "Preparing..." : "Ready"}
+              {isPreparingDuel ? "Preparing..." : "Start Duel"}
             </button>
+          ) : (
+            <p className="arena-note">
+              Waiting for the host to start the Duel.
+            </p>
           )}
-          {currentPlayer?.isReady && <p className="arena-note">You are ready.</p>}
           <p className="arena-note">
-            Both players must press Ready. When both are ready, the same shared
-            question set starts for everyone.
+            The host starts once both players are in. Both players receive the
+            same shared question set.
           </p>
         </section>
       );
