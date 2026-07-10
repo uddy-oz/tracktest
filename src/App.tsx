@@ -310,7 +310,14 @@ function App() {
         />
       )}
 
-      {activeView === "arena" && <ArenaPage onPlay={showPlay} />}
+      {activeView === "arena" && (
+        <ArenaPage
+          session={session}
+          profile={profile}
+          onPlay={showPlay}
+          onLogin={showAuth}
+        />
+      )}
 
       {activeView === "auth" && (
         <AuthPage
