@@ -1,13 +1,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
+  activateDuelRoom,
   createDuelRoom,
+  fetchArenaRoom,
   fetchOpenDuelRooms,
+  finishDuelRoom,
   joinDuelRoom,
+  markPlayerReady,
+  saveDuelPlayerResult,
   type ArenaRoom,
+  type DuelQuizQuestion,
 } from "../lib/arenaRooms";
 import type { UserProfile } from "../lib/profiles";
-import { searchSpotifyAlbums, type SpotifyAlbum } from "../lib/spotifyApi";
+import {
+  getSpotifyAlbumTracks,
+  searchSpotifyAlbums,
+  type SpotifyAlbum,
+  type SpotifyTrack,
+} from "../lib/spotifyApi";
 
 const arenaModes = [
   {
@@ -42,6 +53,9 @@ const arenaModes = [
 ];
 
 const ALBUMS_PER_PAGE = 8;
+const QUESTION_TIME_SECONDS = 10;
+const MIN_QUESTIONS = 5;
+const MAX_QUESTIONS = 12;
 
 type ArenaPageProps = {
   session: Session | null;
@@ -61,6 +75,14 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const [duelQuestionIndex, setDuelQuestionIndex] = useState(0);
+  const [duelScore, setDuelScore] = useState(0);
+  const [duelCorrectAnswers, setDuelCorrectAnswers] = useState(0);
+  const [duelAnswerTimes, setDuelAnswerTimes] = useState<number[]>([]);
+  const [duelTimeRemaining, setDuelTimeRemaining] = useState(QUESTION_TIME_SECONDS);
+  const [duelSelectedAnswer, setDuelSelectedAnswer] = useState("");
+  const [isDuelFinished, setIsDuelFinished] = useState(false);
+  const [isPreparingDuel, setIsPreparingDuel] = useState(false);
 
   useEffect(() => {
     if (isDuelOpen) {
@@ -68,12 +90,89 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     }
   }, [isDuelOpen]);
 
-  async function loadOpenRooms() {
+  useEffect(() => {
+    if (!activeRoom || activeRoom.status !== "active" || isDuelFinished) {
+      return;
+    }
+
+    setDuelTimeRemaining(QUESTION_TIME_SECONDS);
+    setDuelSelectedAnswer("");
+  }, [activeRoom?.id, activeRoom?.status, duelQuestionIndex, isDuelFinished]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.status !== "active" ||
+      isDuelFinished ||
+      duelSelectedAnswer
+    ) {
+      return;
+    }
+
+    const timerId = window.setInterval(() => {
+      setDuelTimeRemaining((currentTime) => Math.max(0, currentTime - 1));
+    }, 1000);
+
+    return () => window.clearInterval(timerId);
+  }, [activeRoom, duelSelectedAnswer, isDuelFinished]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.status !== "active" ||
+      isDuelFinished ||
+      duelSelectedAnswer ||
+      duelTimeRemaining > 0
+    ) {
+      return;
+    }
+
+    handleDuelAnswer("");
+  }, [activeRoom, duelSelectedAnswer, duelTimeRemaining, isDuelFinished]);
+
+  function shuffleArray<T>(array: T[]) {
+    return [...array].sort(() => Math.random() - 0.5);
+  }
+
+  function getQuestionCount(totalPlayableTracks: number) {
+    return Math.min(
+      MAX_QUESTIONS,
+      Math.max(MIN_QUESTIONS, Math.floor(totalPlayableTracks / 2) + 1)
+    );
+  }
+
+  function buildDuelQuestions(tracks: SpotifyTrack[]): DuelQuizQuestion[] {
+    const questionCount = getQuestionCount(tracks.length);
+    const quizTracks = shuffleArray(tracks).slice(0, questionCount);
+
+    return quizTracks.map((correctTrack) => {
+      const wrongOptions = shuffleArray(
+        tracks.filter((track) => track.id !== correctTrack.id)
+      ).slice(0, 3);
+
+      return {
+        correctTrack,
+        options: shuffleArray([correctTrack, ...wrongOptions]),
+      };
+    });
+  }
+
+  function getPointsForAnswer(isCorrect: boolean, remainingSeconds: number) {
+    if (!isCorrect) {
+      return 0;
+    }
+
+    return 500 + Math.floor(500 * (remainingSeconds / QUESTION_TIME_SECONDS));
+  }
+
+  async function loadOpenRooms(showErrors = true) {
     setIsLoadingRooms(true);
     const { rooms: nextRooms, error } = await fetchOpenDuelRooms();
 
     setRooms(nextRooms);
-    setMessage(error || "");
+    if (showErrors) {
+      setMessage(error || "");
+    }
     setIsLoadingRooms(false);
   }
 
@@ -120,16 +219,33 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
 
     if (room) {
       setActiveRoom(room);
-      await loadOpenRooms();
+      await loadOpenRooms(false);
     }
 
-    setMessage(error || "");
+    setMessage(error || (room ? "Duel room created." : "Failed to create room."));
     setIsCreatingRoom(false);
   }
 
   async function handleJoinRoom(room: ArenaRoom) {
     if (!session?.user) {
       onLogin();
+      return;
+    }
+
+    const isAlreadyInRoom = room.players.some(
+      (player) => player.userId === session.user.id
+    );
+
+    if (isAlreadyInRoom) {
+      const { room: freshRoom, error } = await fetchArenaRoom(room.id);
+
+      setActiveRoom(freshRoom || room);
+      setMessage(error || "Entered room.");
+      return;
+    }
+
+    if (room.players.length >= room.maxPlayers) {
+      setMessage("Room full.");
       return;
     }
 
@@ -142,10 +258,176 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
 
     if (joinedRoom) {
       setActiveRoom(joinedRoom);
-      await loadOpenRooms();
+      await loadOpenRooms(false);
     }
 
-    setMessage(error || "");
+    setMessage(error || (joinedRoom ? "Joined room." : "Failed to join room."));
+  }
+
+  async function refreshActiveRoom() {
+    if (!activeRoom) {
+      return;
+    }
+
+    const { room, error } = await fetchArenaRoom(activeRoom.id);
+
+    if (room) {
+      setActiveRoom(room);
+    }
+
+    setMessage(error || "Room refreshed.");
+  }
+
+  async function handleReadyForDuel() {
+    if (!session?.user || !activeRoom) {
+      return;
+    }
+
+    setIsPreparingDuel(true);
+    setMessage("");
+
+    const readyResult = await markPlayerReady(activeRoom.id, session.user);
+
+    if (readyResult.error) {
+      setMessage(readyResult.error);
+      setIsPreparingDuel(false);
+      return;
+    }
+
+    const { room: freshRoom, error } = await fetchArenaRoom(activeRoom.id);
+
+    if (!freshRoom) {
+      setMessage(error || "Could not refresh room.");
+      setIsPreparingDuel(false);
+      return;
+    }
+
+    const allPlayersReady =
+      freshRoom.players.length >= 2 &&
+      freshRoom.players.every((player) => player.isReady);
+
+    if (allPlayersReady && freshRoom.quizQuestions.length === 0) {
+      try {
+        const tracks = await getSpotifyAlbumTracks(freshRoom.albumId);
+
+        if (tracks.length < MIN_QUESTIONS) {
+          setMessage("Not enough playable tracks for a Duel.");
+          setIsPreparingDuel(false);
+          return;
+        }
+
+        const questions = buildDuelQuestions(tracks);
+        const activatedRoom = await activateDuelRoom(freshRoom.id, questions);
+
+        setActiveRoom(activatedRoom.room || freshRoom);
+        setMessage(activatedRoom.error || "Both players ready. Duel started.");
+      } catch (loadError) {
+        console.error(loadError);
+        setMessage("Could not prepare Duel questions.");
+      } finally {
+        setIsPreparingDuel(false);
+      }
+      return;
+    }
+
+    setActiveRoom(freshRoom);
+    setMessage("Ready. Waiting for opponent.");
+    setIsPreparingDuel(false);
+  }
+
+  async function finishDuel({
+    finalScore,
+    correctAnswers,
+    answerTimes,
+  }: {
+    finalScore: number;
+    correctAnswers: number;
+    answerTimes: number[];
+  }) {
+    if (!activeRoom || !session?.user) {
+      return;
+    }
+
+    const averageAnswerTime =
+      answerTimes.length > 0
+        ? answerTimes.reduce((total, answerTime) => total + answerTime, 0) /
+          answerTimes.length
+        : 0;
+
+    const result = await saveDuelPlayerResult({
+      roomId: activeRoom.id,
+      user: session.user,
+      finalScore,
+      correctAnswers,
+      totalQuestions: activeRoom.quizQuestions.length,
+      averageAnswerTime,
+    });
+
+    const { room } = await fetchArenaRoom(activeRoom.id);
+
+    if (room) {
+      const hasEveryoneFinished =
+        room.players.length >= 2 &&
+        room.players.every((player) => player.finishedAt);
+
+      if (hasEveryoneFinished && room.status !== "finished") {
+        await finishDuelRoom(room.id);
+        const refreshedRoom = await fetchArenaRoom(room.id);
+        setActiveRoom(refreshedRoom.room || room);
+      } else {
+        setActiveRoom(room);
+      }
+    }
+
+    setMessage(result.error || "Duel complete. Waiting for opponent to finish.");
+    setIsDuelFinished(true);
+  }
+
+  function handleDuelAnswer(answer: string) {
+    if (!activeRoom || isDuelFinished || duelSelectedAnswer) {
+      return;
+    }
+
+    const question = activeRoom.quizQuestions[duelQuestionIndex];
+
+    if (!question) {
+      return;
+    }
+
+    const isCorrect = answer === question.correctTrack.name;
+    const points = getPointsForAnswer(isCorrect, duelTimeRemaining);
+    const answerTime = QUESTION_TIME_SECONDS - duelTimeRemaining;
+    const nextScore = duelScore + points;
+    const nextCorrectAnswers = duelCorrectAnswers + (isCorrect ? 1 : 0);
+    const nextAnswerTimes = [...duelAnswerTimes, answerTime];
+
+    setDuelSelectedAnswer(answer || "Timed out");
+    setDuelScore(nextScore);
+    setDuelCorrectAnswers(nextCorrectAnswers);
+    setDuelAnswerTimes(nextAnswerTimes);
+
+    window.setTimeout(() => {
+      if (duelQuestionIndex >= activeRoom.quizQuestions.length - 1) {
+        void finishDuel({
+          finalScore: nextScore,
+          correctAnswers: nextCorrectAnswers,
+          answerTimes: nextAnswerTimes,
+        });
+        return;
+      }
+
+      setDuelQuestionIndex((currentIndex) => currentIndex + 1);
+    }, 900);
+  }
+
+  function resetDuelLocalState() {
+    setDuelQuestionIndex(0);
+    setDuelScore(0);
+    setDuelCorrectAnswers(0);
+    setDuelAnswerTimes([]);
+    setDuelTimeRemaining(QUESTION_TIME_SECONDS);
+    setDuelSelectedAnswer("");
+    setIsDuelFinished(false);
   }
 
   function getHostName(room: ArenaRoom) {
@@ -158,13 +440,148 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
 
   function renderDuelLobby() {
     if (activeRoom) {
-      const isHost = activeRoom.hostUserId === session?.user.id;
       const hostPlayer = activeRoom.players.find(
         (player) => player.userId === activeRoom.hostUserId
       );
       const guestPlayer = activeRoom.players.find(
         (player) => player.userId !== activeRoom.hostUserId
       );
+      const currentPlayer = activeRoom.players.find(
+        (player) => player.userId === session?.user.id
+      );
+      const bothPlayersFinished =
+        activeRoom.players.length >= 2 &&
+        activeRoom.players.every((player) => player.finishedAt);
+      const question = activeRoom.quizQuestions[duelQuestionIndex];
+
+      if (bothPlayersFinished) {
+        const sortedPlayers = [...activeRoom.players].sort(
+          (a, b) => b.finalScore - a.finalScore
+        );
+        const isDraw =
+          sortedPlayers.length >= 2 &&
+          sortedPlayers[0].finalScore === sortedPlayers[1].finalScore;
+
+        return (
+          <section className="duel-room-screen">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setActiveRoom(null);
+                resetDuelLocalState();
+              }}
+            >
+              Back to Duel Lobby
+            </button>
+            <div className="duel-results-card">
+              <p className="eyebrow">Duel Results</p>
+              <h2>{isDraw ? "Draw" : `${sortedPlayers[0].displayName} wins`}</h2>
+              <div className="duel-player-grid">
+                {activeRoom.players.map((player) => {
+                  const accuracy =
+                    player.totalQuestions > 0
+                      ? Math.round(
+                          (player.correctAnswers / player.totalQuestions) * 100
+                        )
+                      : 0;
+
+                  return (
+                    <div className="duel-player-card" key={player.id}>
+                      <span>{player.userId === activeRoom.hostUserId ? "Host" : "Player"}</span>
+                      <strong>{player.displayName}</strong>
+                      <p>
+                        {player.finalScore.toLocaleString()} pts - {accuracy}%
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        );
+      }
+
+      if (activeRoom.status === "active" && question) {
+        if (currentPlayer?.finishedAt || isDuelFinished) {
+          return (
+            <section className="duel-room-screen">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void refreshActiveRoom()}
+              >
+                Refresh Results
+              </button>
+              <div className="duel-results-card">
+                <p className="eyebrow">Duel Submitted</p>
+                <h2>Waiting for opponent to finish.</h2>
+                <p className="arena-note">
+                  Your score: {duelScore.toLocaleString()} points.
+                </p>
+              </div>
+            </section>
+          );
+        }
+
+        return (
+          <section className="duel-room-screen duel-game-screen">
+            <div className="duel-room-hero">
+              {activeRoom.artworkUrl && (
+                <img src={activeRoom.artworkUrl} alt="" aria-hidden />
+              )}
+              <div>
+                <p className="eyebrow">Duel Active</p>
+                <h2>{activeRoom.albumName}</h2>
+                <p>
+                  Question {duelQuestionIndex + 1} of{" "}
+                  {activeRoom.quizQuestions.length}
+                </p>
+                <span>Time: {duelTimeRemaining}s</span>
+              </div>
+            </div>
+
+            {question.correctTrack.previewUrl ? (
+              <audio
+                controls
+                src={question.correctTrack.previewUrl}
+                className="audio-preview"
+              >
+                Your browser does not support the audio element.
+              </audio>
+            ) : (
+              <p className="preview-unavailable">
+                Audio preview unavailable. Answer from the options.
+              </p>
+            )}
+
+            <div className="song-options">
+              {question.options.map((option) => (
+                <button
+                  type="button"
+                  className={`song-button ${
+                    duelSelectedAnswer === option.name ? "selected-song" : ""
+                  } ${
+                    duelSelectedAnswer &&
+                    option.name === question.correctTrack.name
+                      ? "correct-song"
+                      : ""
+                  }`}
+                  key={option.id}
+                  disabled={Boolean(duelSelectedAnswer)}
+                  onClick={() => handleDuelAnswer(option.name)}
+                >
+                  {option.name}
+                </button>
+              ))}
+            </div>
+
+            <p className="score score-live">
+              Duel score: {duelScore.toLocaleString()}
+            </p>
+          </section>
+        );
+      }
 
       return (
         <section className="duel-room-screen">
@@ -175,6 +592,13 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
           >
             Back to Duel Lobby
           </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void refreshActiveRoom()}
+          >
+            Refresh Room
+          </button>
 
           <div className="duel-room-hero">
             {activeRoom.artworkUrl && (
@@ -184,7 +608,9 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
               <p className="eyebrow">Duel Room</p>
               <h2>{activeRoom.albumName}</h2>
               <p>{activeRoom.artistName}</p>
-              <span>Waiting to start</span>
+              <span>
+                {activeRoom.status === "active" ? "Active" : "Waiting to start"}
+              </span>
             </div>
           </div>
 
@@ -193,22 +619,30 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
               <span>Host</span>
               <strong>{hostPlayer?.displayName || "Arena host"}</strong>
               {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
+              {hostPlayer?.isReady && <small>Ready</small>}
             </div>
             <div className="duel-player-card">
               <span>Joined Player</span>
               <strong>{guestPlayer?.displayName || "Waiting for rival"}</strong>
               {guestPlayer?.username && <p>@{guestPlayer.username}</p>}
+              {guestPlayer?.isReady && <small>Ready</small>}
             </div>
           </div>
 
-          {isHost && (
-            <button type="button" className="duel-start-button" disabled>
-              Start Duel
+          {currentPlayer && !currentPlayer.isReady && (
+            <button
+              type="button"
+              className="duel-start-button"
+              disabled={activeRoom.players.length < 2 || isPreparingDuel}
+              onClick={() => void handleReadyForDuel()}
+            >
+              {isPreparingDuel ? "Preparing..." : "Ready"}
             </button>
           )}
+          {currentPlayer?.isReady && <p className="arena-note">You are ready.</p>}
           <p className="arena-note">
-            Gameplay start is coming next. This room confirms create and join
-            flow only.
+            Both players must press Ready. When both are ready, the same shared
+            question set starts for everyone.
           </p>
         </section>
       );
@@ -283,8 +717,12 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
               <p className="eyebrow">Open Duel Rooms</p>
               <h2>Waiting Rooms</h2>
             </div>
-            <button type="button" className="secondary-button" onClick={loadOpenRooms}>
-              Refresh
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void loadOpenRooms()}
+            >
+              Refresh Rooms
             </button>
           </div>
 
@@ -292,29 +730,44 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
             <p className="empty-stats">Loading open rooms...</p>
           ) : rooms.length > 0 ? (
             <div className="duel-room-list">
-              {rooms.map((room) => (
-                <article className="duel-room-card" key={room.id}>
-                  {room.artworkUrl && (
-                    <img src={room.artworkUrl} alt="" aria-hidden />
-                  )}
-                  <div>
-                    <strong>{room.albumName}</strong>
-                    <span>{room.artistName}</span>
-                    <small>Host: {getHostName(room)}</small>
-                  </div>
-                  <span className="duel-room-status">{room.status}</span>
-                  <span className="duel-room-count">
-                    {room.players.length}/{room.maxPlayers}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void handleJoinRoom(room)}
-                    disabled={!session || room.players.length >= room.maxPlayers}
-                  >
-                    Join Room
-                  </button>
-                </article>
-              ))}
+              {rooms.map((room) => {
+                const isAlreadyInRoom = Boolean(
+                  session?.user &&
+                    room.players.some((player) => player.userId === session.user.id)
+                );
+                const isFull = room.players.length >= room.maxPlayers;
+                const actionLabel = !session
+                  ? "Login to Join"
+                  : isAlreadyInRoom
+                    ? "Enter Room"
+                    : isFull
+                      ? "Room Full"
+                      : "Join Room";
+
+                return (
+                  <article className="duel-room-card" key={room.id}>
+                    {room.artworkUrl && (
+                      <img src={room.artworkUrl} alt="" aria-hidden />
+                    )}
+                    <div>
+                      <strong>{room.albumName}</strong>
+                      <span>{room.artistName}</span>
+                      <small>Host: {getHostName(room)}</small>
+                    </div>
+                    <span className="duel-room-status">{room.status}</span>
+                    <span className="duel-room-count">
+                      {room.players.length}/{room.maxPlayers}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleJoinRoom(room)}
+                      disabled={!session || (isFull && !isAlreadyInRoom)}
+                    >
+                      {actionLabel}
+                    </button>
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <p className="empty-stats">

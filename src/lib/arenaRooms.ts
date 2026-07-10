@@ -3,6 +3,17 @@ import { supabase } from "./supabaseClient";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
 
+export type DuelQuizTrack = {
+  id: string;
+  name: string;
+  previewUrl: string | null;
+};
+
+export type DuelQuizQuestion = {
+  correctTrack: DuelQuizTrack;
+  options: DuelQuizTrack[];
+};
+
 export type ArenaRoomPlayer = {
   id: string;
   roomId: string;
@@ -14,6 +25,8 @@ export type ArenaRoomPlayer = {
   correctAnswers: number;
   totalQuestions: number;
   averageAnswerTime: number;
+  isReady: boolean;
+  finishedAt: string | null;
 };
 
 export type ArenaRoom = {
@@ -29,6 +42,7 @@ export type ArenaRoom = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  quizQuestions: DuelQuizQuestion[];
   players: ArenaRoomPlayer[];
 };
 
@@ -45,6 +59,7 @@ type ArenaRoomRow = {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  quiz_questions?: unknown;
 };
 
 type ArenaRoomPlayerRow = {
@@ -58,6 +73,8 @@ type ArenaRoomPlayerRow = {
   correct_answers: number;
   total_questions: number;
   average_answer_time: number;
+  is_ready?: boolean;
+  finished_at?: string | null;
 };
 
 function getPlayerDisplay(profile: UserProfile | null, user: User) {
@@ -241,6 +258,94 @@ export async function fetchArenaRoom(roomId: string) {
   };
 }
 
+export async function markPlayerReady(roomId: string, user: User) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase
+    .from("arena_room_players")
+    .update({ is_ready: true })
+    .eq("room_id", roomId)
+    .eq("user_id", user.id);
+
+  return { error: error?.message || null };
+}
+
+export async function activateDuelRoom(
+  roomId: string,
+  questions: DuelQuizQuestion[]
+) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase
+    .from("arena_rooms")
+    .update({
+      status: "active",
+      started_at: new Date().toISOString(),
+      quiz_questions: questions,
+    })
+    .eq("id", roomId);
+
+  if (error) {
+    return { room: null, error: error.message };
+  }
+
+  return fetchArenaRoom(roomId);
+}
+
+export async function saveDuelPlayerResult({
+  roomId,
+  user,
+  finalScore,
+  correctAnswers,
+  totalQuestions,
+  averageAnswerTime,
+}: {
+  roomId: string;
+  user: User;
+  finalScore: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  averageAnswerTime: number;
+}) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase
+    .from("arena_room_players")
+    .update({
+      final_score: finalScore,
+      correct_answers: correctAnswers,
+      total_questions: totalQuestions,
+      average_answer_time: averageAnswerTime,
+      finished_at: new Date().toISOString(),
+    })
+    .eq("room_id", roomId)
+    .eq("user_id", user.id);
+
+  return { error: error?.message || null };
+}
+
+export async function finishDuelRoom(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase
+    .from("arena_rooms")
+    .update({
+      status: "finished",
+      finished_at: new Date().toISOString(),
+    })
+    .eq("id", roomId);
+
+  return { error: error?.message || null };
+}
+
 function attachPlayers(rooms: ArenaRoom[], players: ArenaRoomPlayerRow[]) {
   return rooms.map((room) => ({
     ...room,
@@ -264,6 +369,9 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    quizQuestions: Array.isArray(row.quiz_questions)
+      ? (row.quiz_questions as DuelQuizQuestion[])
+      : [],
     players: [],
   };
 }
@@ -280,5 +388,7 @@ function mapPlayerRow(row: ArenaRoomPlayerRow): ArenaRoomPlayer {
     correctAnswers: row.correct_answers,
     totalQuestions: row.total_questions,
     averageAnswerTime: row.average_answer_time,
+    isReady: Boolean(row.is_ready),
+    finishedAt: row.finished_at || null,
   };
 }
