@@ -139,6 +139,8 @@ function ProfilePage({
   const [isEditingFeaturedBadges, setIsEditingFeaturedBadges] = useState(false);
   const [featuredBadgeDraft, setFeaturedBadgeDraft] = useState<string[]>([]);
   const [featuredBadgeMessage, setFeaturedBadgeMessage] = useState("");
+  const [isBadgeCollectionVisible, setIsBadgeCollectionVisible] = useState(false);
+  const [selectedBadge, setSelectedBadge] = useState<ArenaBadge | null>(null);
   const isPublicProfile = Boolean(publicUsername);
 
   useEffect(() => {
@@ -307,6 +309,24 @@ function ProfilePage({
 
   function clearFeaturedBadges() {
     void saveFeaturedBadges([]);
+  }
+
+  function getBadgeProgressLabel(badge: ArenaBadge) {
+    if (!badge.target) {
+      return badge.unlocked ? "Unlocked" : "Locked";
+    }
+
+    return badge.unlocked
+      ? "Unlocked"
+      : `${badge.progress || 0} / ${badge.target}`;
+  }
+
+  function getBadgeProgressPercent(badge: ArenaBadge) {
+    if (!badge.target) {
+      return badge.unlocked ? 100 : 0;
+    }
+
+    return Math.min(100, Math.round(((badge.progress || 0) / badge.target) * 100));
   }
 
   if (!session && !isPublicProfile) {
@@ -532,7 +552,11 @@ function ProfilePage({
         {showcaseBadges.length > 0 ? (
           <div className="badge-grid profile-showcase-grid">
             {showcaseBadges.map((badge) => (
-              <BadgeCard badge={badge} key={badge.id} />
+              <BadgeCard
+                badge={badge}
+                key={badge.id}
+                onSelect={setSelectedBadge}
+              />
             ))}
           </div>
         ) : (
@@ -542,7 +566,41 @@ function ProfilePage({
               : "Finish quizzes to start filling your badge showcase."}
           </p>
         )}
+
+        <div className="profile-collection-toggle">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setIsBadgeCollectionVisible((isVisible) => !isVisible)}
+          >
+            {isBadgeCollectionVisible ? "Hide Badge Collection" : "View All Badges"}
+          </button>
+        </div>
       </section>
+
+      {isBadgeCollectionVisible && (
+        <section className="badge-section profile-badge-collection">
+          <div className="badge-section-header">
+            <div>
+              <p className="eyebrow">Badge Collection</p>
+              <h2>All Achievements</h2>
+            </div>
+            <span>
+              {unlockedBadgeCount} / {badges.length}
+            </span>
+          </div>
+
+          <div className="badge-grid profile-showcase-grid">
+            {badges.map((badge) => (
+              <BadgeCard
+                badge={badge}
+                key={badge.id}
+                onSelect={setSelectedBadge}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="leaderboard-sections profile-sections">
         <div className="leaderboard-panel">
@@ -646,6 +704,50 @@ function ProfilePage({
           </p>
         )}
       </div>
+
+      {selectedBadge && (
+        <div
+          className="badge-detail-overlay"
+          role="presentation"
+          onClick={() => setSelectedBadge(null)}
+        >
+          <section
+            className={`badge-detail-modal badge-${selectedBadge.accent}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="badge-detail-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="badge-detail-close"
+              onClick={() => setSelectedBadge(null)}
+              aria-label="Close badge details"
+            >
+              X
+            </button>
+            <p className="eyebrow">Badge Details</p>
+            <h2 id="badge-detail-title">{selectedBadge.title}</h2>
+            <div className="badge-detail-meta">
+              <span>{selectedBadge.tier}</span>
+              <span>{selectedBadge.category}</span>
+              <span>{selectedBadge.unlocked ? "Unlocked" : "Locked"}</span>
+            </div>
+            <p>{selectedBadge.description}</p>
+            <div
+              className="badge-progress badge-detail-progress"
+              aria-label={`${getBadgeProgressPercent(selectedBadge)}% complete`}
+            >
+              <div>
+                <span
+                  style={{ width: `${getBadgeProgressPercent(selectedBadge)}%` }}
+                />
+              </div>
+              <small>{getBadgeProgressLabel(selectedBadge)}</small>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }

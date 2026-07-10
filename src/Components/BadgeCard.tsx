@@ -2,6 +2,7 @@ import type { ArenaBadge } from "../lib/badges";
 
 type BadgeCardProps = {
   badge: ArenaBadge;
+  onSelect?: (badge: ArenaBadge) => void;
 };
 
 const iconSymbols: Record<ArenaBadge["icon"], string> = {
@@ -24,7 +25,7 @@ const iconSymbols: Record<ArenaBadge["icon"], string> = {
   target: "⊙",
 };
 
-function BadgeCard({ badge }: BadgeCardProps) {
+function BadgeCard({ badge, onSelect }: BadgeCardProps) {
   const progress =
     badge.progress !== undefined && badge.target
       ? Math.min(100, Math.round((badge.progress / badge.target) * 100))
@@ -36,7 +37,20 @@ function BadgeCard({ badge }: BadgeCardProps) {
     <article
       className={`badge-card badge-${badge.accent} badge-tier-${badge.tier.toLowerCase()} ${
         badge.unlocked ? "badge-unlocked" : "badge-locked"
-      }`}
+      } ${onSelect ? "badge-card-clickable" : ""}`}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={() => onSelect?.(badge)}
+      onKeyDown={(event) => {
+        if (!onSelect) {
+          return;
+        }
+
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(badge);
+        }
+      }}
     >
       <div className="badge-topline">
         <span>{badge.category}</span>

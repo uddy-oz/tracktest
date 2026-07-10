@@ -1587,6 +1587,23 @@ button:hover {
   gap: 24px;
   align-items: center;
   text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 86% 20%, rgba(255, 215, 106, 0.16), transparent 24%),
+    radial-gradient(circle at 18% 88%, rgba(167, 139, 250, 0.14), transparent 28%);
+}
+
+.profile-hero > * {
+  position: relative;
+  z-index: 1;
 }
 
 .profile-hero h1 {
@@ -1727,6 +1744,14 @@ button:hover {
 }
 
 .profile-showcase {
+  margin-bottom: 28px;
+}
+
+.profile-collection-toggle {
+  margin-top: 18px;
+}
+
+.profile-badge-collection {
   margin-bottom: 28px;
 }
 
@@ -1980,6 +2005,7 @@ button:hover {
   box-shadow:
     0 0 18px rgba(255, 79, 160, 0.22),
     inset 0 0 12px rgba(255, 184, 77, 0.08);
+  animation: identity-hot-pulse 1.6s ease-in-out infinite alternate;
 }
 
 .identity-dailyStreak,
@@ -2008,6 +2034,20 @@ button:hover {
   background:
     radial-gradient(circle, rgba(255, 207, 77, 0.44), rgba(255, 88, 84, 0.18));
   box-shadow: 0 0 12px rgba(255, 135, 64, 0.42);
+}
+
+@keyframes identity-hot-pulse {
+  from {
+    box-shadow:
+      0 0 18px rgba(255, 79, 160, 0.18),
+      inset 0 0 12px rgba(255, 184, 77, 0.08);
+  }
+
+  to {
+    box-shadow:
+      0 0 28px rgba(255, 135, 64, 0.34),
+      inset 0 0 16px rgba(255, 184, 77, 0.12);
+  }
 }
 
 .leaderboard-grid,
@@ -2222,6 +2262,15 @@ button:hover {
   box-shadow: 0 26px 70px var(--badge-accent-glow);
 }
 
+.badge-card-clickable {
+  cursor: pointer;
+}
+
+.badge-card-clickable:focus-visible {
+  outline: 2px solid var(--badge-accent);
+  outline-offset: 3px;
+}
+
 .badge-card > * {
   position: relative;
   z-index: 1;
@@ -2344,6 +2393,90 @@ button:hover {
 
 .badge-unlocked.badge-tier-legendary {
   animation: badge-legendary-breathe 1.8s ease-in-out infinite alternate;
+}
+
+.badge-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(5, 5, 10, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.badge-detail-modal {
+  --badge-accent: #7c5cff;
+  --badge-accent-soft: rgba(124, 92, 255, 0.18);
+  --badge-accent-glow: rgba(124, 92, 255, 0.26);
+  position: relative;
+  width: min(100%, 520px);
+  padding: 26px;
+  border: 1px solid color-mix(in srgb, var(--badge-accent), white 12%);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 20% 0%, var(--badge-accent-soft), transparent 38%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    #12121a;
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.52),
+    0 0 48px var(--badge-accent-glow);
+  text-align: left;
+  animation: arena-rise 220ms var(--arena-ease) both;
+}
+
+.badge-detail-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--arena-ink);
+  font-size: 13px;
+}
+
+.badge-detail-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.badge-detail-modal h2 {
+  margin: 0 0 14px;
+  color: white;
+  font-size: 34px;
+}
+
+.badge-detail-modal p:not(.eyebrow) {
+  margin: 0 0 20px;
+  color: #c9c5d8;
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.badge-detail-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.badge-detail-meta span {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--badge-accent), transparent 48%);
+  border-radius: 999px;
+  color: var(--badge-accent);
+  background: var(--badge-accent-soft);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.badge-detail-progress {
+  margin-top: 0;
 }
 
 .badge-earned-popup {
