@@ -134,7 +134,7 @@ function AuthPage({
                 name is ready for future leaderboards.
               </p>
               <button type="button" onClick={onPlay}>
-                Back to Play
+                Back Home
               </button>
             </>
           ) : (

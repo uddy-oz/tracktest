@@ -344,7 +344,7 @@ function ProfilePage({
               Login
             </button>
             <button type="button" className="secondary-button" onClick={onPlay}>
-              Back to Play
+              Back Home
             </button>
           </div>
         </div>

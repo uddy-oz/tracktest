@@ -315,6 +315,22 @@ button:hover {
   margin: 0;
 }
 
+.logo-button {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: white;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.logo-button:hover {
+  background: transparent;
+  color: var(--arena-accent-bright);
+}
+
 .nav-links {
   display: flex;
   align-items: center;
@@ -1468,6 +1484,291 @@ button:hover {
 }
 .clip-button {
   min-width: 220px;
+}
+
+.home-dashboard {
+  width: min(100%, 1240px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 120px 24px 64px;
+  display: block;
+  text-align: left;
+}
+
+.home-hero-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 22px;
+  align-items: stretch;
+  margin-bottom: 22px;
+}
+
+.home-hero-panel > div,
+.home-player-card,
+.home-mode-card,
+.home-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(124, 92, 255, 0.24);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.2), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.045), transparent 34%),
+    #15151f;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.home-hero-panel > div {
+  min-height: 430px;
+  padding: clamp(28px, 5vw, 56px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.home-hero-panel h1 {
+  max-width: 780px;
+  margin: 0 0 18px;
+  color: white;
+  font-size: clamp(52px, 7vw, 96px);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.home-hero-panel p:not(.eyebrow) {
+  max-width: 640px;
+  margin: 0 0 28px;
+  color: var(--arena-muted);
+  font-size: 19px;
+  line-height: 1.55;
+}
+
+.home-player-card {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-player-topline,
+.home-tier-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home-player-topline span,
+.home-player-topline strong {
+  color: var(--arena-muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-player-topline strong {
+  color: var(--arena-accent-bright);
+}
+
+.home-player-card h2 {
+  margin: 30px 0 6px;
+  color: white;
+  font-size: clamp(34px, 4vw, 54px);
+  overflow-wrap: anywhere;
+}
+
+.home-player-card p {
+  margin: 0 0 18px;
+  color: var(--arena-muted);
+  font-size: 17px;
+}
+
+.home-tier-row {
+  margin: 22px 0;
+}
+
+.home-tier-row > span {
+  display: inline-flex;
+  padding: 9px 14px;
+  border: 1px solid rgba(255, 215, 106, 0.5);
+  border-radius: 999px;
+  color: #fff1a8;
+  background: rgba(255, 215, 106, 0.1);
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.home-tier-row button {
+  padding: 9px 14px;
+  font-size: 13px;
+}
+
+.home-player-stats {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-player-stats span {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  color: var(--arena-muted);
+  background: rgba(16, 16, 24, 0.72);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.home-player-stats strong {
+  display: block;
+  margin-top: 6px;
+  color: white;
+  font-size: 20px;
+}
+
+.home-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin-bottom: 22px;
+}
+
+.home-mode-card {
+  min-height: 260px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.home-mode-card span {
+  margin-bottom: auto;
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: var(--arena-muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.home-mode-card h2 {
+  margin: 34px 0 10px;
+  color: white;
+  font-size: clamp(32px, 4vw, 54px);
+}
+
+.home-mode-card p {
+  max-width: 460px;
+  margin: 0 0 22px;
+  color: var(--arena-muted);
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.home-mode-solo {
+  background:
+    radial-gradient(circle at 18% 8%, rgba(97, 218, 251, 0.2), transparent 36%),
+    #15151f;
+}
+
+.home-mode-arena {
+  background:
+    radial-gradient(circle at 18% 8%, rgba(255, 79, 160, 0.2), transparent 36%),
+    #15151f;
+}
+
+.home-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.home-panel {
+  min-height: 260px;
+  padding: 24px;
+}
+
+.home-panel h2 {
+  margin: 0;
+  color: white;
+}
+
+.home-list {
+  display: grid;
+  gap: 12px;
+}
+
+.home-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: rgba(16, 16, 24, 0.72);
+}
+
+.home-list-row strong,
+.home-list-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.home-list-row strong {
+  color: white;
+}
+
+.home-list-row small {
+  margin-top: 4px;
+  color: var(--arena-muted);
+  font-size: 13px;
+}
+
+.home-list-row b {
+  color: var(--arena-accent-bright);
+  font-size: 18px;
+}
+
+.home-badge-strip {
+  display: grid;
+  gap: 12px;
+}
+
+.home-badge-pill {
+  min-height: 76px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.18), transparent 34%),
+    rgba(16, 16, 24, 0.82);
+}
+
+.home-badge-pill strong {
+  color: white;
+}
+
+.home-badge-pill small {
+  margin-top: 5px;
+  color: var(--arena-muted);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.home-global-preview p {
+  margin: 0 0 22px;
+  color: var(--arena-muted);
+  font-size: 17px;
+  line-height: 1.5;
 }
 
 .auth-page {
@@ -3268,6 +3569,36 @@ button:hover {
 }
 
 @media (max-width: 800px) {
+  .home-dashboard {
+    padding: 44px 20px 90px;
+  }
+
+  .home-hero-panel,
+  .home-mode-grid,
+  .home-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-hero-panel > div {
+    min-height: 420px;
+  }
+
+  .home-hero-panel h1 {
+    font-size: clamp(44px, 13vw, 64px);
+  }
+
+  .home-player-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .home-mode-card {
+    min-height: 240px;
+  }
+
+  .home-list-row {
+    grid-template-columns: 1fr;
+  }
+
   .profile-page {
     padding: 44px 20px 90px;
   }

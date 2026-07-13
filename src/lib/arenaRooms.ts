@@ -34,6 +34,8 @@ export type ArenaRoomPlayer = {
   isReady: boolean;
   finishedAt: string | null;
   leftAt: string | null;
+  forfeitedAt: string | null;
+  resultStatus: string;
 };
 
 export type ArenaRoom = {
@@ -89,6 +91,8 @@ type ArenaRoomPlayerRow = {
   is_ready?: boolean;
   finished_at?: string | null;
   left_at?: string | null;
+  forfeited_at?: string | null;
+  result_status?: string | null;
 };
 
 const ACTIVE_DUEL_STATUSES = ["waiting", "starting", "active"];
@@ -165,6 +169,7 @@ export async function fetchCurrentDuelRoom(user: User) {
     .select("room_id")
     .eq("user_id", user.id)
     .is("left_at", null)
+    .is("finished_at", null)
     .order("joined_at", { ascending: false });
 
   if (playerError) {
@@ -309,14 +314,16 @@ export async function joinDuelRoom({
   }
 
   const existingPlayer = targetRoom.players.find(
-    (player) => player.userId === user.id
+    (player) => player.userId === user.id && !player.leftAt
   );
 
   if (existingPlayer) {
     return { room: targetRoom, error: null };
   }
 
-  if (targetRoom.players.length >= targetRoom.maxPlayers) {
+  const presentPlayers = targetRoom.players.filter((player) => !player.leftAt);
+
+  if (presentPlayers.length >= targetRoom.maxPlayers) {
     return { room: targetRoom, error: "This Duel room is already full." };
   }
 
@@ -340,6 +347,8 @@ export async function fetchArenaRoom(roomId: string) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
+  await cancelStaleDuelRooms();
+
   const { data: roomData, error: roomError } = await supabase
     .from("arena_rooms")
     .select("*")
@@ -355,7 +364,6 @@ export async function fetchArenaRoom(roomId: string) {
     .from("arena_room_players")
     .select("*")
     .eq("room_id", room.id)
-    .is("left_at", null)
     .order("joined_at", { ascending: true });
 
   if (playersError) {
@@ -460,6 +468,7 @@ export async function saveDuelPlayerResult({
       current_question_index: totalQuestions,
       current_streak: 0,
       finished_at: new Date().toISOString(),
+      result_status: "completed",
     })
     .eq("room_id", roomId)
     .eq("user_id", user.id);
@@ -484,13 +493,33 @@ export async function cancelDuelRoom(roomId: string) {
     return { error: "Supabase is not configured yet." };
   }
 
-  const { error } = await supabase
-    .from("arena_rooms")
-    .update({
-      status: "cancelled",
-      finished_at: new Date().toISOString(),
-    })
-    .eq("id", roomId);
+  const { error } = await supabase.rpc("close_duel_room", {
+    target_room_id: roomId,
+  });
+
+  return { error: error?.message || null };
+}
+
+export async function leaveWaitingDuelRoom(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("leave_waiting_duel_room", {
+    target_room_id: roomId,
+  });
+
+  return { error: error?.message || null };
+}
+
+export async function forfeitDuelRoom(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("forfeit_duel_room", {
+    target_room_id: roomId,
+  });
 
   return { error: error?.message || null };
 }
@@ -571,5 +600,7 @@ function mapPlayerRow(row: ArenaRoomPlayerRow): ArenaRoomPlayer {
     isReady: Boolean(row.is_ready),
     finishedAt: row.finished_at || null,
     leftAt: row.left_at || null,
+    forfeitedAt: row.forfeited_at || null,
+    resultStatus: row.result_status || "active",
   };
 }

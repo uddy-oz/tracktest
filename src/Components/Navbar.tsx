@@ -5,23 +5,25 @@ import type { CompactPlayerBadge } from "../lib/playerIdentity";
 
 type NavbarProps = {
   onLogout: () => void;
+  onShowHome: () => void;
   onShowAuth: () => void;
   onShowPlay: () => void;
   onShowLeaderboard: () => void;
-  onShowArena: () => void;
+  onShowMultiplayer: () => void;
   onShowProfile: () => void;
   session: Session | null;
   profile: UserProfile | null;
   identityBadges: CompactPlayerBadge[] | null;
-  activeView: "play" | "leaderboard" | "arena" | "auth" | "profile";
+  activeView: "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
 };
 
 function Navbar({
   onLogout,
+  onShowHome,
   onShowAuth,
   onShowPlay,
   onShowLeaderboard,
-  onShowArena,
+  onShowMultiplayer,
   onShowProfile,
   session,
   profile,
@@ -37,15 +39,24 @@ function Navbar({
 
   return (
     <nav className="navbar">
-      <h2 className="logo">TrackTest Arena</h2>
+      <button type="button" className="logo logo-button" onClick={onShowHome}>
+        TrackTest Arena
+      </button>
 
       <div className="nav-links">
+        <button
+          type="button"
+          className={`nav-link-button ${activeView === "home" ? "active" : ""}`}
+          onClick={onShowHome}
+        >
+          Home
+        </button>
         <button
           type="button"
           className={`nav-link-button ${activeView === "play" ? "active" : ""}`}
           onClick={onShowPlay}
         >
-          Play
+          Single Player
         </button>
         <button
           type="button"
@@ -58,10 +69,12 @@ function Navbar({
         </button>
         <button
           type="button"
-          className={`nav-link-button ${activeView === "arena" ? "active" : ""}`}
-          onClick={onShowArena}
+          className={`nav-link-button ${
+            activeView === "multiplayer" ? "active" : ""
+          }`}
+          onClick={onShowMultiplayer}
         >
-          Arena
+          Multiplayer
         </button>
 
         {session ? (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
+import HomePage from "./Components/HomePage";
 import Hero from "./Components/Hero";
 import AlbumSearch from "./Components/AlbumSearch";
 import Quiz from "./Components/Quiz";
@@ -17,7 +18,7 @@ import { ensureUserProfile, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
-type AppView = "play" | "leaderboard" | "arena" | "auth" | "profile";
+type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
 
 function getProfileUsernameFromPath() {
   const match = window.location.pathname.match(/^\/profile\/([^/]+)\/?$/);
@@ -26,7 +27,26 @@ function getProfileUsernameFromPath() {
 }
 
 function getInitialView(): AppView {
-  return getProfileUsernameFromPath() ? "profile" : "play";
+  if (getProfileUsernameFromPath()) {
+    return "profile";
+  }
+
+  switch (window.location.pathname) {
+    case "/play":
+      return "play";
+    case "/leaderboard":
+      return "leaderboard";
+    case "/multiplayer":
+    case "/arena":
+      return "multiplayer";
+    case "/login":
+    case "/auth":
+      return "auth";
+    case "/profile":
+      return "profile";
+    default:
+      return "home";
+  }
 }
 
 function App() {
@@ -70,7 +90,7 @@ function App() {
       setSelectedAlbum(null);
       setIsQuizStarted(false);
       setPublicProfileUsername(username);
-      setActiveView(username ? "profile" : "play");
+      setActiveView(username ? "profile" : getInitialView());
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -164,7 +184,7 @@ function App() {
   }
 
   function startQuiz(album: SpotifyAlbum) {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
     setActiveView("play");
     setSelectedAlbum(album);
@@ -172,11 +192,19 @@ function App() {
   }
 
   function restartApp() {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
     setActiveView("play");
     setSelectedAlbum(null);
     setIsQuizStarted(false);
+  }
+
+  function showHome() {
+    window.history.pushState({}, "", "/");
+    setPublicProfileUsername(null);
+    setSelectedAlbum(null);
+    setIsQuizStarted(false);
+    setActiveView("home");
   }
 
   function showPlay() {
@@ -192,23 +220,23 @@ function App() {
   }
 
   function showLeaderboard() {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/leaderboard");
     setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("leaderboard");
   }
 
-  function showArena() {
-    window.history.pushState({}, "", "/");
+  function showMultiplayer() {
+    window.history.pushState({}, "", "/multiplayer");
     setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
-    setActiveView("arena");
+    setActiveView("multiplayer");
   }
 
   function showAuth() {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/login");
     setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
@@ -221,7 +249,7 @@ function App() {
       return;
     }
 
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/profile");
     setPublicProfileUsername(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
@@ -271,17 +299,30 @@ function App() {
   return (
     <>
       <Navbar
+        onShowHome={showHome}
         onShowAuth={showAuth}
         onLogout={logoutSupabase}
         onShowPlay={showPlay}
         onShowLeaderboard={showLeaderboard}
-        onShowArena={showArena}
+        onShowMultiplayer={showMultiplayer}
         onShowProfile={showProfile}
         session={session}
         profile={profile}
         identityBadges={identityBadges}
         activeView={activeView}
       />
+
+      {activeView === "home" && (
+        <HomePage
+          session={session}
+          profile={profile}
+          identityBadges={identityBadges}
+          onSinglePlayer={showPlay}
+          onMultiplayer={showMultiplayer}
+          onLeaderboard={showLeaderboard}
+          onProfile={showProfile}
+        />
+      )}
 
       {activeView === "play" && !isQuizStarted && (
         <>
@@ -304,17 +345,17 @@ function App() {
 
       {activeView === "leaderboard" && (
         <Leaderboard
-          onPlay={showPlay}
+          onPlay={showHome}
           session={session}
           onOpenProfile={showPublicProfile}
         />
       )}
 
-      {activeView === "arena" && (
+      {activeView === "multiplayer" && (
         <ArenaPage
           session={session}
           profile={profile}
-          onPlay={showPlay}
+          onHome={showHome}
           onLogin={showAuth}
         />
       )}
@@ -325,7 +366,7 @@ function App() {
           profile={profile}
           isProfileLoading={isProfileLoading}
           onProfileSaved={setProfile}
-          onPlay={showPlay}
+          onPlay={showHome}
         />
       )}
 
@@ -336,7 +377,7 @@ function App() {
           identityBadges={identityBadges}
           publicUsername={publicProfileUsername}
           onShowAuth={showAuth}
-          onPlay={showPlay}
+          onPlay={showHome}
           onBackToLeaderboard={showLeaderboard}
         />
       )}

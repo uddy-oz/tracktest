@@ -8,7 +8,9 @@ import {
   fetchCurrentDuelRoom,
   fetchOpenDuelRooms,
   finishDuelRoom,
+  forfeitDuelRoom,
   joinDuelRoom,
+  leaveWaitingDuelRoom,
   saveDuelPlayerResult,
   updateDuelPlayerProgress,
   type ArenaRoom,
@@ -90,11 +92,11 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 type ArenaPageProps = {
   session: Session | null;
   profile: UserProfile | null;
-  onPlay: () => void;
+  onHome: () => void;
   onLogin: () => void;
 };
 
-function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
+function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   const [isDuelOpen, setIsDuelOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
@@ -819,7 +821,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
       return;
     }
 
-    if (room.players.length >= room.maxPlayers) {
+    if (getPresentPlayers(room).length >= room.maxPlayers) {
       setMessage("Room full.");
       return;
     }
@@ -869,6 +871,46 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     await loadOpenRooms(false);
   }
 
+  async function handleLeaveDuelRoom() {
+    if (!activeRoom || !session?.user) {
+      return;
+    }
+
+    const isHost = activeRoom.hostUserId === session.user.id;
+
+    if (activeRoom.status === "waiting" || activeRoom.status === "starting") {
+      const result = isHost
+        ? await cancelDuelRoom(activeRoom.id)
+        : await leaveWaitingDuelRoom(activeRoom.id);
+
+      setMessage(
+        result.error ||
+          (isHost ? "Duel lobby closed." : "You left the Duel lobby.")
+      );
+      setActiveRoom(null);
+      resetDuelLocalState();
+      await loadOpenRooms(false);
+      return;
+    }
+
+    if (activeRoom.status === "active") {
+      const result = await forfeitDuelRoom(activeRoom.id);
+
+      setMessage(result.error || "You forfeited the Duel.");
+      setActiveRoom(null);
+      resetDuelLocalState();
+      await loadOpenRooms(false);
+      return;
+    }
+
+    setActiveRoom(null);
+    resetDuelLocalState();
+  }
+
+  function getPresentPlayers(room: ArenaRoom) {
+    return room.players.filter((player) => !player.leftAt);
+  }
+
   async function handleStartDuel() {
     if (!session?.user || !activeRoom) {
       return;
@@ -891,7 +933,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
       return;
     }
 
-    if (freshRoom.players.length < 2) {
+    if (getPresentPlayers(freshRoom).length < 2) {
       setMessage("Waiting for a second player.");
       setIsPreparingDuel(false);
       return;
@@ -968,9 +1010,10 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     const { room } = await fetchArenaRoom(activeRoom.id);
 
     if (room) {
+      const presentPlayers = getPresentPlayers(room);
       const hasEveryoneFinished =
-        room.players.length >= 2 &&
-        room.players.every((player) => player.finishedAt);
+        presentPlayers.length >= 2 &&
+        presentPlayers.every((player) => player.finishedAt);
 
       if (hasEveryoneFinished && room.status !== "finished") {
         await finishDuelRoom(room.id);
@@ -991,7 +1034,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
   }
 
   function getHostName(room: ArenaRoom) {
-    const hostPlayer = room.players.find(
+    const hostPlayer = getPresentPlayers(room).find(
       (player) => player.userId === room.hostUserId
     );
 
@@ -1012,6 +1055,11 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     }
 
     const [firstPlayer, secondPlayer] = players;
+
+    if (firstPlayer.resultStatus === "win_by_forfeit") {
+      return `${firstPlayer.displayName} wins by forfeit`;
+    }
+
     const firstAccuracy =
       firstPlayer.totalQuestions > 0
         ? firstPlayer.correctAnswers / firstPlayer.totalQuestions
@@ -1036,8 +1084,17 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
     return [...players].sort((a, b) => {
       const accuracyA = a.totalQuestions > 0 ? a.correctAnswers / a.totalQuestions : 0;
       const accuracyB = b.totalQuestions > 0 ? b.correctAnswers / b.totalQuestions : 0;
+      const resultRank: Record<string, number> = {
+        win_by_forfeit: 3,
+        completed: 2,
+        active: 1,
+        left: 0,
+        cancelled: 0,
+        forfeit: -1,
+      };
 
       return (
+        (resultRank[b.resultStatus] || 0) - (resultRank[a.resultStatus] || 0) ||
         b.finalScore - a.finalScore ||
         accuracyB - accuracyA ||
         a.averageAnswerTime - b.averageAnswerTime
@@ -1176,21 +1233,23 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
 
   function renderDuelLobby() {
     if (activeRoom) {
-      const hostPlayer = activeRoom.players.find(
+      const presentPlayers = getPresentPlayers(activeRoom);
+      const hostPlayer = presentPlayers.find(
         (player) => player.userId === activeRoom.hostUserId
       );
-      const guestPlayer = activeRoom.players.find(
+      const guestPlayer = presentPlayers.find(
         (player) => player.userId !== activeRoom.hostUserId
       );
       const currentPlayer = activeRoom.players.find(
         (player) => player.userId === session?.user.id
       );
-      const opponentPlayer = activeRoom.players.find(
+      const opponentPlayer = presentPlayers.find(
         (player) => player.userId !== session?.user.id
       );
       const bothPlayersFinished =
-        activeRoom.players.length >= 2 &&
-        activeRoom.players.every((player) => player.finishedAt);
+        activeRoom.status === "finished" ||
+        (activeRoom.players.length >= 2 &&
+          activeRoom.players.every((player) => player.finishedAt));
       const question = activeRoom.quizQuestions[duelQuestionIndex];
       const isHost = activeRoom.hostUserId === session?.user.id;
 
@@ -1244,6 +1303,8 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
                   >
                     <span>{player.userId === activeRoom.hostUserId ? "Host" : "Player"}</span>
                     <strong>{player.displayName}</strong>
+                    {player.resultStatus === "forfeit" && <p>Forfeited</p>}
+                    {player.resultStatus === "win_by_forfeit" && <p>Win by forfeit</p>}
                     <p>
                       {player.finalScore.toLocaleString()} pts -{" "}
                       {getPlayerAccuracy(player)}%
@@ -1304,6 +1365,16 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
                 </p>
                 <span>{duelPhase === "syncing" ? "Synced start" : "Live Duel"}</span>
               </div>
+            </div>
+
+            <div className="duel-room-actions">
+              <button
+                type="button"
+                className="secondary-button danger-button"
+                onClick={() => void handleLeaveDuelRoom()}
+              >
+                Forfeit Duel
+              </button>
             </div>
 
             <div className="duel-head-to-head">
@@ -1447,6 +1518,15 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
                 Close Lobby
               </button>
             )}
+            {!isHost && (
+              <button
+                type="button"
+                className="secondary-button danger-button"
+                onClick={() => void handleLeaveDuelRoom()}
+              >
+                Leave Lobby
+              </button>
+            )}
           </div>
 
           <div className="duel-room-hero">
@@ -1480,7 +1560,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
             <button
               type="button"
               className="duel-start-button"
-              disabled={activeRoom.players.length < 2 || isPreparingDuel}
+              disabled={presentPlayers.length < 2 || isPreparingDuel}
               onClick={() => void handleStartDuel()}
             >
               {isPreparingDuel ? "Preparing..." : "Start Synced Duel"}
@@ -1583,9 +1663,12 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
               {rooms.map((room) => {
                 const isAlreadyInRoom = Boolean(
                   session?.user &&
-                    room.players.some((player) => player.userId === session.user.id)
+                    room.players.some(
+                      (player) => player.userId === session.user.id && !player.leftAt
+                    )
                 );
-                const isFull = room.players.length >= room.maxPlayers;
+                const presentRoomPlayers = getPresentPlayers(room);
+                const isFull = presentRoomPlayers.length >= room.maxPlayers;
                 const actionLabel = !session
                   ? "Login to Join"
                   : isAlreadyInRoom
@@ -1606,7 +1689,7 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
                     </div>
                     <span className="duel-room-status">{room.status}</span>
                     <span className="duel-room-count">
-                      {room.players.length}/{room.maxPlayers}
+                      {presentRoomPlayers.length}/{room.maxPlayers}
                     </span>
                     <button
                       type="button"
@@ -1682,8 +1765,8 @@ function ArenaPage({ session, profile, onPlay, onLogin }: ArenaPageProps) {
       {message && <p className="arena-message">{message}</p>}
       {isDuelOpen && renderDuelLobby()}
 
-      <button type="button" onClick={onPlay}>
-        Back to Play
+      <button type="button" onClick={onHome}>
+        Back Home
       </button>
     </section>
   );

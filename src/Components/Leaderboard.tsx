@@ -197,7 +197,7 @@ function Leaderboard({ onPlay, session, onOpenProfile }: LeaderboardProps) {
         </div>
 
         <button type="button" onClick={onPlay}>
-          Back to Play
+          Back Home
         </button>
       </div>
 
