@@ -2537,6 +2537,11 @@ button:hover {
   gap: 14px;
 }
 
+.group-player-grid,
+.group-results-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
 .duel-player-card {
   min-height: 120px;
   padding: 18px;
@@ -2586,6 +2591,70 @@ button:hover {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 14px;
   align-items: stretch;
+}
+
+.group-live-board {
+  padding: 18px;
+  border: 1px solid rgba(124, 92, 255, 0.24);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.14), transparent 32%),
+    rgba(16, 16, 24, 0.86);
+  text-align: left;
+}
+
+.group-live-list {
+  display: grid;
+  gap: 10px;
+}
+
+.group-live-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1.2fr) minmax(86px, auto) repeat(3, minmax(82px, auto));
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(16, 16, 24, 0.82);
+}
+
+.group-live-row.current {
+  border-color: rgba(97, 218, 251, 0.42);
+  box-shadow: 0 0 24px rgba(97, 218, 251, 0.12);
+}
+
+.group-live-row .rank-number {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 215, 106, 0.42);
+  border-radius: 50%;
+  color: #fff1a8;
+  background: rgba(255, 215, 106, 0.1);
+  font-weight: 900;
+}
+
+.group-live-row strong,
+.group-live-row span,
+.group-live-row small {
+  overflow-wrap: anywhere;
+}
+
+.group-live-row strong {
+  color: white;
+}
+
+.group-live-row span:not(.rank-number) {
+  color: var(--arena-accent-bright);
+  font-weight: 900;
+}
+
+.group-live-row small {
+  color: var(--arena-muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .duel-h2h-card {
@@ -3637,6 +3706,16 @@ button:hover {
   .duel-player-grid,
   .duel-head-to-head {
     grid-template-columns: 1fr;
+  }
+
+  .group-live-row {
+    grid-template-columns: 34px 1fr;
+    align-items: start;
+  }
+
+  .group-live-row span:not(.rank-number),
+  .group-live-row small {
+    grid-column: 2;
   }
 
   .duel-h2h-vs {

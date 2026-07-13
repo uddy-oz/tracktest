@@ -14,6 +14,7 @@ import {
   saveDuelPlayerResult,
   updateDuelPlayerProgress,
   type ArenaRoom,
+  type ArenaRoomMode,
   type ArenaRoomPlayer,
   type DuelQuizQuestion,
 } from "../lib/arenaRooms";
@@ -39,7 +40,7 @@ const arenaModes = [
     label: "3-10",
     description: "3 to 10 players compete on one album.",
     accent: "group",
-    enabled: false,
+    enabled: true,
   },
   {
     title: "Party Mode",
@@ -85,6 +86,34 @@ const CLIP_LENGTH_SECONDS = 5;
 const DUEL_SYNC_START_DELAY_MS = 5000;
 const DUEL_ROOM_REFRESH_MS = 2500;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
+const ARENA_MODE_SETTINGS: Record<
+  ArenaRoomMode,
+  {
+    title: string;
+    roomTitle: string;
+    activeTitle: string;
+    resultsTitle: string;
+    maxPlayers: number;
+    minPlayersToStart: number;
+  }
+> = {
+  duel: {
+    title: "Duel",
+    roomTitle: "Duel Room",
+    activeTitle: "Duel Active",
+    resultsTitle: "Duel Results",
+    maxPlayers: 2,
+    minPlayersToStart: 2,
+  },
+  group_lobby: {
+    title: "Group Lobby",
+    roomTitle: "Group Lobby",
+    activeTitle: "Group Lobby Active",
+    resultsTitle: "Group Results",
+    maxPlayers: 10,
+    minPlayersToStart: 3,
+  },
+};
 const MIN_QUESTIONS = 5;
 const MAX_QUESTIONS = 12;
 const RING_RADIUS = 54;
@@ -98,7 +127,9 @@ type ArenaPageProps = {
 };
 
 function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
-  const [isDuelOpen, setIsDuelOpen] = useState(false);
+  const [activeArenaMode, setActiveArenaMode] = useState<ArenaRoomMode | null>(
+    null
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
@@ -141,6 +172,11 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   const hasSubmittedDuelResultRef = useRef(false);
 
   const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
+  const selectedMode = activeArenaMode || activeRoom?.mode || null;
+  const modeSettings =
+    selectedMode && selectedMode in ARENA_MODE_SETTINGS
+      ? ARENA_MODE_SETTINGS[selectedMode as ArenaRoomMode]
+      : ARENA_MODE_SETTINGS.duel;
   const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
   const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
   const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
@@ -160,7 +196,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   );
 
   useEffect(() => {
-    if (!isDuelOpen) {
+    if (!activeArenaMode) {
       return;
     }
 
@@ -169,10 +205,10 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     if (session?.user) {
       void reconnectCurrentDuelRoom();
     }
-  }, [isDuelOpen, session?.user?.id]);
+  }, [activeArenaMode, session?.user?.id]);
 
   useEffect(() => {
-    if (!isDuelOpen || activeRoom) {
+    if (!activeArenaMode || activeRoom) {
       return;
     }
 
@@ -181,7 +217,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     }, DUEL_OPEN_ROOM_REFRESH_MS);
 
     return () => window.clearInterval(refreshId);
-  }, [activeRoom, isDuelOpen]);
+  }, [activeRoom, activeArenaMode]);
 
   useEffect(() => {
     if (!activeRoom) {
@@ -742,13 +778,20 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
     if (room) {
       setActiveRoom(room);
-      setMessage(error || "Reconnected to your active Duel room.");
+      if (room.mode === "duel" || room.mode === "group_lobby") {
+        setActiveArenaMode(room.mode);
+      }
+      setMessage(error || "Reconnected to your active Arena room.");
     }
   }
 
   async function loadOpenRooms(showErrors = true) {
+    if (!activeArenaMode) {
+      return;
+    }
+
     setIsLoadingRooms(true);
-    const { rooms: nextRooms, error } = await fetchOpenDuelRooms();
+    const { rooms: nextRooms, error } = await fetchOpenDuelRooms(activeArenaMode);
 
     setRooms(nextRooms);
     if (showErrors) {
@@ -792,7 +835,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       return;
     }
 
-    if (!selectedAlbum || isCreatingRoom) {
+    if (!selectedAlbum || isCreatingRoom || !activeArenaMode) {
       return;
     }
 
@@ -803,15 +846,22 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       album: selectedAlbum,
       user: session.user,
       profile,
+      mode: activeArenaMode,
+      maxPlayers: modeSettings.maxPlayers,
     });
 
     if (room) {
       setActiveRoom(room);
+      if (room.mode === "duel" || room.mode === "group_lobby") {
+        setActiveArenaMode(room.mode);
+      }
       resetDuelLocalState();
       await loadOpenRooms(false);
     }
 
-    setMessage(error || (room ? "Duel room created." : "Failed to create room."));
+    setMessage(
+      error || (room ? `${modeSettings.title} room created.` : "Failed to create room.")
+    );
     setIsCreatingRoom(false);
   }
 
@@ -829,6 +879,10 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       const { room: freshRoom, error } = await fetchArenaRoom(room.id);
 
       setActiveRoom(freshRoom || room);
+      const nextRoom = freshRoom || room;
+      if (nextRoom.mode === "duel" || nextRoom.mode === "group_lobby") {
+        setActiveArenaMode(nextRoom.mode);
+      }
       setMessage(error || "Entered room.");
       return;
     }
@@ -847,6 +901,9 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
     if (joinedRoom) {
       setActiveRoom(joinedRoom);
+      if (joinedRoom.mode === "duel" || joinedRoom.mode === "group_lobby") {
+        setActiveArenaMode(joinedRoom.mode);
+      }
       resetDuelLocalState();
       await loadOpenRooms(false);
     }
@@ -945,8 +1002,15 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       return;
     }
 
-    if (getPresentPlayers(freshRoom).length < 2) {
-      setMessage("Waiting for a second player.");
+    const freshModeSettings =
+      freshRoom.mode === "group_lobby"
+        ? ARENA_MODE_SETTINGS.group_lobby
+        : ARENA_MODE_SETTINGS.duel;
+
+    if (getPresentPlayers(freshRoom).length < freshModeSettings.minPlayersToStart) {
+      setMessage(
+        `Waiting for ${freshModeSettings.minPlayersToStart} players to start.`
+      );
       setIsPreparingDuel(false);
       return;
     }
@@ -983,7 +1047,8 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     setActiveRoom(activatedRoom.room || { ...freshRoom, quizQuestions: questions });
     resetDuelLocalState("syncing");
     setMessage(
-      activatedRoom.error || "Duel starting. Both players get the same questions."
+      activatedRoom.error ||
+        `${freshModeSettings.title} starting. Everyone gets the same questions.`
     );
     setIsPreparingDuel(false);
   }
@@ -1023,8 +1088,12 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
     if (room) {
       const presentPlayers = getPresentPlayers(room);
+      const requiredPlayers =
+        room.mode === "group_lobby"
+          ? ARENA_MODE_SETTINGS.group_lobby.minPlayersToStart
+          : ARENA_MODE_SETTINGS.duel.minPlayersToStart;
       const hasEveryoneFinished =
-        presentPlayers.length >= 2 &&
+        presentPlayers.length >= requiredPlayers &&
         presentPlayers.every((player) => player.finishedAt);
 
       if (hasEveryoneFinished && room.status !== "finished") {
@@ -1036,7 +1105,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       }
     }
 
-    setMessage(result.error || "Duel complete. Waiting for opponent to finish.");
+    setMessage(result.error || "Game complete. Waiting for others to finish.");
     setIsDuelFinished(true);
     setDuelPhase("idle");
   }
@@ -1114,6 +1183,68 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     });
   }
 
+  function getLiveRankedPlayers(room: ArenaRoom, currentPlayerId?: string) {
+    return room.players
+      .filter((player) => player.resultStatus !== "cancelled" && player.resultStatus !== "left")
+      .map((player) =>
+        player.userId === currentPlayerId
+          ? {
+              ...player,
+              currentScore: duelScore,
+              currentCorrectAnswers: duelCorrectAnswers,
+              currentQuestionIndex: duelSelectedAnswer
+                ? duelQuestionIndex + 1
+                : duelQuestionIndex,
+              currentStreak: duelStreak,
+            }
+          : player
+      )
+      .sort(
+        (a, b) =>
+          b.currentScore - a.currentScore ||
+          b.currentCorrectAnswers - a.currentCorrectAnswers ||
+          b.currentQuestionIndex - a.currentQuestionIndex
+      );
+  }
+
+  function renderGroupLiveLeaderboard(room: ArenaRoom) {
+    const rankedPlayers = getLiveRankedPlayers(room, session?.user.id);
+
+    return (
+      <div className="group-live-board">
+        <div className="profile-panel-heading">
+          <div>
+            <p className="eyebrow">Live Group Leaderboard</p>
+            <h2>Current Standings</h2>
+          </div>
+          <span>{rankedPlayers.length}/{room.maxPlayers}</span>
+        </div>
+
+        <div className="group-live-list">
+          {rankedPlayers.map((player, index) => (
+            <div
+              className={`group-live-row ${
+                player.userId === session?.user.id ? "current" : ""
+              }`}
+              key={player.id}
+            >
+              <span className="rank-number">{index + 1}</span>
+              <strong>{player.displayName || player.username || "Arena Player"}</strong>
+              <span>{player.currentScore.toLocaleString()} pts</span>
+              <small>
+                {player.currentCorrectAnswers}/{room.quizQuestions.length} correct
+              </small>
+              <small>
+                Progress {player.currentQuestionIndex}/{room.quizQuestions.length}
+              </small>
+              <small>Streak {player.currentStreak}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderDuelGameState() {
     if (duelPhase === "syncing") {
       return (
@@ -1121,7 +1252,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
           <p className="game-state-label">Synced start</p>
           <p className="start-countdown">{duelSyncCountdown || "..."}</p>
           <p className="game-state-detail">
-            Both players start from the same room clock.
+            Players start from the same room clock.
           </p>
         </>
       );
@@ -1238,13 +1369,18 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     return (
       <>
         <p className="game-state-label">Preparing question</p>
-        <p className="game-state-detail">Waiting for the shared Duel clock...</p>
+        <p className="game-state-detail">Waiting for the shared room clock...</p>
       </>
     );
   }
 
   function renderDuelLobby() {
     if (activeRoom) {
+      const activeModeSettings =
+        activeRoom.mode === "group_lobby"
+          ? ARENA_MODE_SETTINGS.group_lobby
+          : ARENA_MODE_SETTINGS.duel;
+      const isActiveGroupLobby = activeRoom.mode === "group_lobby";
       const presentPlayers = getPresentPlayers(activeRoom);
       const hostPlayer = presentPlayers.find(
         (player) => player.userId === activeRoom.hostUserId
@@ -1258,10 +1394,14 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       const opponentPlayer = presentPlayers.find(
         (player) => player.userId !== session?.user.id
       );
+      const resultPlayers = activeRoom.players.filter(
+        (player) =>
+          player.resultStatus !== "cancelled" && player.resultStatus !== "left"
+      );
       const bothPlayersFinished =
         activeRoom.status === "finished" ||
-        (activeRoom.players.length >= 2 &&
-          activeRoom.players.every((player) => player.finishedAt));
+        (resultPlayers.length >= activeModeSettings.minPlayersToStart &&
+          resultPlayers.every((player) => player.finishedAt));
       const question = activeRoom.quizQuestions[duelQuestionIndex];
       const isHost = activeRoom.hostUserId === session?.user.id;
 
@@ -1269,7 +1409,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
         return (
           <section className="duel-room-screen">
             <div className="duel-results-card">
-              <p className="eyebrow">Duel Closed</p>
+              <p className="eyebrow">{activeModeSettings.title} Closed</p>
               <h2>This room was cancelled.</h2>
               <p className="arena-note">Create or join another waiting room.</p>
             </div>
@@ -1281,14 +1421,14 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                 resetDuelLocalState();
               }}
             >
-              Back to Duel Lobby
+              Back to Lobby
             </button>
           </section>
         );
       }
 
       if (bothPlayersFinished) {
-        const sortedPlayers = sortDuelResults(activeRoom.players);
+        const sortedPlayers = sortDuelResults(resultPlayers);
 
         return (
           <section className="duel-room-screen">
@@ -1303,9 +1443,13 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
               Back to Duel Lobby
             </button>
             <div className="duel-results-card">
-              <p className="eyebrow">Duel Results</p>
+              <p className="eyebrow">{activeModeSettings.resultsTitle}</p>
               <h2>{getWinnerLabel(sortedPlayers)}</h2>
-              <div className="duel-player-grid">
+              <div
+                className={`duel-player-grid ${
+                  isActiveGroupLobby ? "group-results-grid" : ""
+                }`}
+              >
                 {sortedPlayers.map((player, index) => (
                   <div
                     className={`duel-player-card ${
@@ -1347,8 +1491,12 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                 Refresh Results
               </button>
               <div className="duel-results-card">
-                <p className="eyebrow">Duel Submitted</p>
-                <h2>Waiting for opponent to finish.</h2>
+                <p className="eyebrow">{activeModeSettings.title} Submitted</p>
+                <h2>
+                  {isActiveGroupLobby
+                    ? "Waiting for other players to finish."
+                    : "Waiting for opponent to finish."}
+                </h2>
                 <p className="arena-note">
                   Your score: {duelScore.toLocaleString()} points.
                 </p>
@@ -1369,13 +1517,17 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                 <img src={activeRoom.artworkUrl} alt="" aria-hidden />
               )}
               <div>
-                <p className="eyebrow">Duel Active</p>
+                <p className="eyebrow">{activeModeSettings.activeTitle}</p>
                 <h2>{activeRoom.albumName}</h2>
                 <p>
                   Question {duelQuestionIndex + 1} of{" "}
                   {activeRoom.quizQuestions.length}
                 </p>
-                <span>{duelPhase === "syncing" ? "Synced start" : "Live Duel"}</span>
+                <span>
+                  {duelPhase === "syncing"
+                    ? "Synced start"
+                    : `Live ${activeModeSettings.title}`}
+                </span>
               </div>
             </div>
 
@@ -1385,35 +1537,39 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                 className="secondary-button danger-button"
                 onClick={() => void handleLeaveDuelRoom()}
               >
-                Forfeit Duel
+                Forfeit Game
               </button>
             </div>
 
-            <div className="duel-head-to-head">
-              <div className="duel-h2h-card current">
-                <span>You</span>
-                <strong>{currentPlayer?.displayName || "Arena Player"}</strong>
-                <p>{duelScore.toLocaleString()} pts</p>
-                <small>
-                  {duelCorrectAnswers}/{activeRoom.quizQuestions.length} correct
-                </small>
-                <small>Streak {duelStreak}</small>
+            {isActiveGroupLobby ? (
+              renderGroupLiveLeaderboard(activeRoom)
+            ) : (
+              <div className="duel-head-to-head">
+                <div className="duel-h2h-card current">
+                  <span>You</span>
+                  <strong>{currentPlayer?.displayName || "Arena Player"}</strong>
+                  <p>{duelScore.toLocaleString()} pts</p>
+                  <small>
+                    {duelCorrectAnswers}/{activeRoom.quizQuestions.length} correct
+                  </small>
+                  <small>Streak {duelStreak}</small>
+                </div>
+                <div className="duel-h2h-vs">VS</div>
+                <div className="duel-h2h-card">
+                  <span>Opponent</span>
+                  <strong>{opponentPlayer?.displayName || "Waiting"}</strong>
+                  <p>{(opponentPlayer?.currentScore || 0).toLocaleString()} pts</p>
+                  <small>
+                    {opponentPlayer?.currentCorrectAnswers || 0}/
+                    {activeRoom.quizQuestions.length} correct
+                  </small>
+                  <small>
+                    Progress {opponentPlayer?.currentQuestionIndex || 0}/
+                    {activeRoom.quizQuestions.length}
+                  </small>
+                </div>
               </div>
-              <div className="duel-h2h-vs">VS</div>
-              <div className="duel-h2h-card">
-                <span>Opponent</span>
-                <strong>{opponentPlayer?.displayName || "Waiting"}</strong>
-                <p>{(opponentPlayer?.currentScore || 0).toLocaleString()} pts</p>
-                <small>
-                  {opponentPlayer?.currentCorrectAnswers || 0}/
-                  {activeRoom.quizQuestions.length} correct
-                </small>
-                <small>
-                  Progress {opponentPlayer?.currentQuestionIndex || 0}/
-                  {activeRoom.quizQuestions.length}
-                </small>
-              </div>
-            </div>
+            )}
 
             <div className="quiz-status duel-game-status">
               <span>Score: {duelScore.toLocaleString()}</span>
@@ -1495,7 +1651,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             </div>
 
             <p className="score score-live">
-              Duel score: {duelScore.toLocaleString()}
+              Score: {duelScore.toLocaleString()}
             </p>
           </section>
         );
@@ -1512,7 +1668,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                 resetDuelLocalState();
               }}
             >
-              Back to Duel Lobby
+              Back to Lobby
             </button>
             <button
               type="button"
@@ -1546,7 +1702,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
               <img src={activeRoom.artworkUrl} alt="" aria-hidden />
             )}
             <div>
-              <p className="eyebrow">Duel Room</p>
+              <p className="eyebrow">{activeModeSettings.roomTitle}</p>
               <h2>{activeRoom.albumName}</h2>
               <p>{activeRoom.artistName}</p>
               <span>
@@ -1555,36 +1711,61 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             </div>
           </div>
 
-          <div className="duel-player-grid">
-            <div className="duel-player-card">
-              <span>Host</span>
-              <strong>{hostPlayer?.displayName || "Arena host"}</strong>
-              {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
+          {isActiveGroupLobby ? (
+            <div className="duel-player-grid group-player-grid">
+              {presentPlayers.map((player) => (
+                <div className="duel-player-card" key={player.id}>
+                  <span>{player.userId === activeRoom.hostUserId ? "Host" : "Player"}</span>
+                  <strong>{player.displayName || "Arena Player"}</strong>
+                  {player.username && <p>@{player.username}</p>}
+                </div>
+              ))}
+              {presentPlayers.length < activeRoom.maxPlayers && (
+                <div className="duel-player-card">
+                  <span>Open Spot</span>
+                  <strong>Waiting for players</strong>
+                  <p>{presentPlayers.length}/{activeRoom.maxPlayers}</p>
+                </div>
+              )}
             </div>
-            <div className="duel-player-card">
-              <span>Joined Player</span>
-              <strong>{guestPlayer?.displayName || "Waiting for rival"}</strong>
-              {guestPlayer?.username && <p>@{guestPlayer.username}</p>}
+          ) : (
+            <div className="duel-player-grid">
+              <div className="duel-player-card">
+                <span>Host</span>
+                <strong>{hostPlayer?.displayName || "Arena host"}</strong>
+                {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
+              </div>
+              <div className="duel-player-card">
+                <span>Joined Player</span>
+                <strong>{guestPlayer?.displayName || "Waiting for rival"}</strong>
+                {guestPlayer?.username && <p>@{guestPlayer.username}</p>}
+              </div>
             </div>
-          </div>
+          )}
 
           {isHost ? (
             <button
               type="button"
               className="duel-start-button"
-              disabled={presentPlayers.length < 2 || isPreparingDuel}
+              disabled={
+                presentPlayers.length < activeModeSettings.minPlayersToStart ||
+                isPreparingDuel
+              }
               onClick={() => void handleStartDuel()}
             >
-              {isPreparingDuel ? "Preparing..." : "Start Synced Duel"}
+              {isPreparingDuel
+                ? "Preparing..."
+                : `Start Synced ${activeModeSettings.title}`}
             </button>
           ) : (
             <p className="arena-note">
-              Waiting for the host to start the Duel.
+              Waiting for the host to start.
             </p>
           )}
           <p className="arena-note">
-            The host starts once both players are in. A shared question set and
-            future start clock keep both devices aligned.
+            The host starts once {activeModeSettings.minPlayersToStart} or more
+            players are in. A shared question set and future start clock keep
+            every device aligned.
           </p>
         </section>
       );
@@ -1595,15 +1776,17 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
         <div className="duel-builder">
           <div className="profile-panel-heading">
             <div>
-              <p className="eyebrow">Create Duel</p>
+              <p className="eyebrow">Create {modeSettings.title}</p>
               <h2>Pick an album</h2>
             </div>
-            <span>1v1 lobby</span>
+            <span>
+              {modeSettings.minPlayersToStart}-{modeSettings.maxPlayers} players
+            </span>
           </div>
 
           {!session && (
             <p className="arena-note">
-              Log in to create or join Duel rooms.
+              Log in to create or join Arena rooms.
             </p>
           )}
 
@@ -1612,7 +1795,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
               type="search"
               placeholder="Album or artist..."
               value={searchTerm}
-              aria-label="Search for a Duel album"
+              aria-label={`Search for a ${modeSettings.title} album`}
               onChange={(event) => setSearchTerm(event.target.value)}
             />
             <button type="submit" disabled={isSearching}>
@@ -1665,14 +1848,14 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             disabled={!selectedAlbum || isCreatingRoom || !session}
             onClick={handleCreateRoom}
           >
-            {isCreatingRoom ? "Creating..." : "Create Duel Room"}
+            {isCreatingRoom ? "Creating..." : `Create ${modeSettings.title} Room`}
           </button>
         </div>
 
         <div className="duel-open-rooms">
           <div className="profile-panel-heading">
             <div>
-              <p className="eyebrow">Open Duel Rooms</p>
+              <p className="eyebrow">Open {modeSettings.title} Rooms</p>
               <h2>Waiting Rooms</h2>
             </div>
             <button
@@ -1732,7 +1915,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             </div>
           ) : (
             <p className="empty-stats">
-              No open Duel rooms yet. Create the first one.
+              No open {modeSettings.title} rooms yet. Create the first one.
             </p>
           )}
         </div>
@@ -1752,12 +1935,16 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       </div>
 
       <div className="arena-status">
-        <span>{isDuelOpen ? "Duel MVP" : "Coming Soon"}</span>
+        <span>{activeArenaMode ? `${modeSettings.title} MVP` : "Coming Soon"}</span>
         <div>
-          <h2>{isDuelOpen ? "Duel rooms are playable" : "Arena is coming soon"}</h2>
+          <h2>
+            {activeArenaMode
+              ? `${modeSettings.title} rooms are playable`
+              : "Arena is coming soon"}
+          </h2>
           <p>
-            {isDuelOpen
-              ? "Create or join a waiting Duel room, start together, and play the same synced album quiz."
+            {activeArenaMode
+              ? "Create or join a waiting room, start together, and play the same synced album quiz."
               : "Solo stats, badges, profiles, and leaderboards are laying the foundation before live rooms open."}
           </p>
         </div>
@@ -1766,17 +1953,39 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       <div className="arena-mode-grid">
         {arenaModes.map((mode) => {
           const isDuel = mode.title === "Duel";
+          const isGroup = mode.title === "Group Lobby";
+          const roomMode: ArenaRoomMode | null = isDuel
+            ? "duel"
+            : isGroup
+              ? "group_lobby"
+              : null;
 
           return (
             <button
               type="button"
               className={`arena-mode-card arena-mode-${mode.accent} ${
-                isDuelOpen && isDuel ? "active" : ""
+                activeArenaMode === roomMode ? "active" : ""
               }`}
               key={mode.title}
               onClick={() => {
-                if (isDuel) {
-                  setIsDuelOpen(true);
+                if (roomMode) {
+                  if (
+                    activeRoom &&
+                    activeRoom.status !== "finished" &&
+                    activeRoom.status !== "cancelled"
+                  ) {
+                    setMessage(
+                      "Leave, close, or finish your current Arena room before switching modes."
+                    );
+                    return;
+                  }
+
+                  setActiveArenaMode(roomMode);
+                  setActiveRoom(null);
+                  resetDuelLocalState();
+                  setSelectedAlbum(null);
+                  setAlbums([]);
+                  setMessage("");
                 }
               }}
               disabled={!mode.enabled}
@@ -1791,7 +2000,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       </div>
 
       {message && <p className="arena-message">{message}</p>}
-      {isDuelOpen && renderDuelLobby()}
+      {activeArenaMode && renderDuelLobby()}
 
       <button type="button" onClick={onHome}>
         Back Home
