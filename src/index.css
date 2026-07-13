@@ -2381,6 +2381,15 @@ button:hover {
   margin-bottom: 18px;
 }
 
+.duel-result-count {
+  margin: 0 0 12px;
+}
+
+.duel-view-more-albums {
+  width: 100%;
+  margin: 0 0 18px;
+}
+
 .duel-album-card {
   min-height: 92px;
   padding: 10px;

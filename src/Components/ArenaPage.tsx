@@ -75,6 +75,7 @@ type DuelResult = {
 };
 
 const ALBUMS_PER_PAGE = 8;
+const MAX_VISIBLE_ALBUMS = 48;
 const QUESTION_TIME_SECONDS = 10;
 const START_COUNTDOWN_SECONDS = 3;
 const REVEAL_NEXT_QUESTION_DELAY_MS = 800;
@@ -101,6 +102,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
+  const [visibleAlbumCount, setVisibleAlbumCount] = useState(ALBUMS_PER_PAGE);
   const [rooms, setRooms] = useState<ArenaRoom[]>([]);
   const [activeRoom, setActiveRoom] = useState<ArenaRoom | null>(null);
   const [message, setMessage] = useState("");
@@ -139,6 +141,9 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   const hasSubmittedDuelResultRef = useRef(false);
 
   const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
+  const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
+  const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
+  const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
   const duelTimerProgress = Math.max(0, duelTimeRemaining / QUESTION_TIME_SECONDS);
   const duelRingOffset = RING_CIRCUMFERENCE * (1 - duelTimerProgress);
   const shouldShowDuelDanger =
@@ -762,16 +767,23 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     setIsSearching(true);
     setMessage("");
     setSelectedAlbum(null);
+    setVisibleAlbumCount(ALBUMS_PER_PAGE);
 
     try {
       const results = await searchSpotifyAlbums(searchTerm);
-      setAlbums(results.slice(0, ALBUMS_PER_PAGE));
+      setAlbums(results);
     } catch (error) {
       console.error(error);
       setMessage("Could not search albums. Try another album or artist.");
     } finally {
       setIsSearching(false);
     }
+  }
+
+  function handleViewMoreAlbums() {
+    setVisibleAlbumCount((currentCount) =>
+      Math.min(currentCount + ALBUMS_PER_PAGE, MAX_VISIBLE_ALBUMS, albums.length)
+    );
   }
 
   async function handleCreateRoom() {
@@ -1609,26 +1621,42 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
           </form>
 
           {albums.length > 0 && (
-            <div className="duel-album-grid">
-              {albums.map((album) => (
+            <>
+              <p className="album-result-count duel-result-count">
+                Showing {visibleAlbums.length} of {cappedAlbums.length} results
+              </p>
+
+              <div className="duel-album-grid">
+                {visibleAlbums.map((album) => (
+                  <button
+                    type="button"
+                    className={`duel-album-card ${
+                      selectedAlbum?.id === album.id ? "selected" : ""
+                    }`}
+                    onClick={() => setSelectedAlbum(album)}
+                    key={album.id}
+                  >
+                    {album.imageUrl && (
+                      <img src={album.imageUrl} alt={`${album.title} cover`} />
+                    )}
+                    <span>
+                      <strong>{album.title}</strong>
+                      <small>{album.artist}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {hasMoreAlbums && (
                 <button
                   type="button"
-                  className={`duel-album-card ${
-                    selectedAlbum?.id === album.id ? "selected" : ""
-                  }`}
-                  onClick={() => setSelectedAlbum(album)}
-                  key={album.id}
+                  className="view-more-albums duel-view-more-albums"
+                  onClick={handleViewMoreAlbums}
                 >
-                  {album.imageUrl && (
-                    <img src={album.imageUrl} alt={`${album.title} cover`} />
-                  )}
-                  <span>
-                    <strong>{album.title}</strong>
-                    <small>{album.artist}</small>
-                  </span>
+                  View more albums
                 </button>
-              ))}
-            </div>
+              )}
+            </>
           )}
 
           <button
