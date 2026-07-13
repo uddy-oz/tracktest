@@ -43,19 +43,42 @@ export type ArenaRoomPlayer = {
 export type ArenaRoom = {
   id: string;
   hostUserId: string;
-  mode: string;
+  mode: ArenaRoomMode;
   status: string;
   albumId: string;
   albumName: string;
   artistName: string;
   artworkUrl: string;
   maxPlayers: number;
+  isPrivate: boolean;
+  inviteCode: string | null;
+  roundNumber: number;
+  rematchRequestedBy: string | null;
+  rematchRequestedAt: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
   expiresAt: string | null;
   quizQuestions: DuelQuizQuestion[];
   players: ArenaRoomPlayer[];
+};
+
+export type ArenaInvite = {
+  roomId: string;
+  mode: ArenaRoomMode;
+  status: string;
+  albumId: string;
+  albumName: string;
+  artistName: string;
+  artworkUrl: string;
+  maxPlayers: number;
+  isPrivate: boolean;
+  inviteCode: string;
+  hostUserId: string;
+  hostDisplayName: string;
+  hostUsername: string | null;
+  playerCount: number;
+  expiresAt: string | null;
 };
 
 type ArenaRoomRow = {
@@ -68,6 +91,11 @@ type ArenaRoomRow = {
   artist_name: string | null;
   artwork_url: string | null;
   max_players: number;
+  is_private?: boolean | null;
+  invite_code?: string | null;
+  round_number?: number | null;
+  rematch_requested_by?: string | null;
+  rematch_requested_at?: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -100,6 +128,14 @@ type ArenaRoomPlayerRow = {
 const ACTIVE_ARENA_STATUSES = ["waiting", "starting", "active"];
 const ARENA_ROOM_MODES: ArenaRoomMode[] = ["duel", "group_lobby"];
 
+function isArenaRoomMode(value: string | null | undefined): value is ArenaRoomMode {
+  return value === "duel" || value === "group_lobby";
+}
+
+function generateInviteCode() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
 function getPlayerDisplay(profile: UserProfile | null, user: User) {
   return {
     displayName:
@@ -130,6 +166,7 @@ export async function fetchOpenDuelRooms(mode: ArenaRoomMode = "duel") {
     .select("*")
     .eq("mode", mode)
     .eq("status", "waiting")
+    .eq("is_private", false)
     .order("created_at", { ascending: false });
 
   if (roomsError) {
@@ -215,12 +252,14 @@ export async function createDuelRoom({
   profile,
   mode = "duel",
   maxPlayers = 2,
+  isPrivate = false,
 }: {
   album: SpotifyAlbum;
   user: User;
   profile: UserProfile | null;
   mode?: ArenaRoomMode;
   maxPlayers?: number;
+  isPrivate?: boolean;
 }) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
@@ -246,6 +285,8 @@ export async function createDuelRoom({
       artist_name: album.artist,
       artwork_url: album.imageUrl,
       max_players: maxPlayers,
+      is_private: isPrivate,
+      invite_code: isPrivate ? generateInviteCode() : null,
     })
     .select("*")
     .single();
@@ -347,6 +388,111 @@ export async function joinDuelRoom({
   }
 
   return fetchArenaRoom(targetRoom.id);
+}
+
+export async function fetchArenaInvite(inviteCode: string) {
+  if (!supabase) {
+    return { invite: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc("get_arena_invite", {
+    target_invite_code: inviteCode.trim(),
+  });
+
+  if (error) {
+    return { invite: null, error: error.message };
+  }
+
+  const row = (Array.isArray(data) ? data[0] : null) as
+    | {
+        room_id: string;
+        mode: string;
+        status: string;
+        album_id: string | null;
+        album_name: string | null;
+        artist_name: string | null;
+        artwork_url: string | null;
+        max_players: number;
+        is_private: boolean;
+        invite_code: string | null;
+        host_user_id: string;
+        host_display_name: string | null;
+        host_username: string | null;
+        player_count: number;
+        expires_at: string | null;
+      }
+    | null;
+
+  if (!row || !isArenaRoomMode(row.mode)) {
+    return { invite: null, error: "Invite not found." };
+  }
+
+  return {
+    invite: {
+      roomId: row.room_id,
+      mode: row.mode,
+      status: row.status,
+      albumId: row.album_id || "",
+      albumName: row.album_name || "Unknown album",
+      artistName: row.artist_name || "Unknown artist",
+      artworkUrl: row.artwork_url || "",
+      maxPlayers: row.max_players,
+      isPrivate: Boolean(row.is_private),
+      inviteCode: row.invite_code || inviteCode,
+      hostUserId: row.host_user_id,
+      hostDisplayName:
+        row.host_display_name || row.host_username || "Arena Host",
+      hostUsername: row.host_username,
+      playerCount: row.player_count || 0,
+      expiresAt: row.expires_at || null,
+    },
+    error: null,
+  };
+}
+
+export async function joinArenaRoomByInvite({
+  inviteCode,
+  user,
+  profile,
+}: {
+  inviteCode: string;
+  user: User;
+  profile: UserProfile | null;
+}) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const currentRoom = await fetchCurrentDuelRoom(user);
+
+  if (currentRoom.room) {
+    if (
+      currentRoom.room.inviteCode?.toLowerCase() === inviteCode.trim().toLowerCase()
+    ) {
+      return { room: currentRoom.room, error: null };
+    }
+
+    return {
+      room: currentRoom.room,
+      error: "You are already in another active Arena room.",
+    };
+  }
+
+  const { displayName, username } = getPlayerDisplay(profile, user);
+  const { data, error } = await supabase.rpc("join_arena_room_by_invite", {
+    target_invite_code: inviteCode.trim(),
+    player_display_name: displayName,
+    player_username: username,
+  });
+
+  if (error || !data) {
+    return {
+      room: null,
+      error: error?.message || "Could not join this Arena invite.",
+    };
+  }
+
+  return fetchArenaRoom(String(data));
 }
 
 export async function fetchArenaRoom(roomId: string) {
@@ -531,6 +677,56 @@ export async function forfeitDuelRoom(roomId: string) {
   return { error: error?.message || null };
 }
 
+export async function requestArenaRematch(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("request_arena_rematch", {
+    target_room_id: roomId,
+  });
+
+  return { error: error?.message || null };
+}
+
+export async function resetArenaRoomForRematch({
+  roomId,
+  album,
+}: {
+  roomId: string;
+  album?: SpotifyAlbum | null;
+}) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("reset_arena_room_for_rematch", {
+    target_room_id: roomId,
+    new_album_id: album?.id || null,
+    new_album_name: album?.title || null,
+    new_artist_name: album?.artist || null,
+    new_artwork_url: album?.imageUrl || null,
+  });
+
+  if (error) {
+    return { room: null, error: error.message };
+  }
+
+  return fetchArenaRoom(roomId);
+}
+
+export async function endArenaRoom(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("end_arena_room", {
+    target_room_id: roomId,
+  });
+
+  return { error: error?.message || null };
+}
+
 function attachPlayers(rooms: ArenaRoom[], players: ArenaRoomPlayerRow[]) {
   return rooms.map((room) => ({
     ...room,
@@ -544,13 +740,18 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
   return {
     id: row.id,
     hostUserId: row.host_user_id,
-    mode: row.mode,
+    mode: isArenaRoomMode(row.mode) ? row.mode : "duel",
     status: row.status,
     albumId: row.album_id || "",
     albumName: row.album_name || "Unknown album",
     artistName: row.artist_name || "Unknown artist",
     artworkUrl: row.artwork_url || "",
     maxPlayers: row.max_players,
+    isPrivate: Boolean(row.is_private),
+    inviteCode: row.invite_code || null,
+    roundNumber: row.round_number || 1,
+    rematchRequestedBy: row.rematch_requested_by || null,
+    rematchRequestedAt: row.rematch_requested_at || null,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,

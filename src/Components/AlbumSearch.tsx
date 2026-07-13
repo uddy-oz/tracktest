@@ -5,12 +5,13 @@ import { searchSpotifyAlbums } from "../lib/spotifyApi";
 
 type AlbumSearchProps = {
   onStartQuiz: (album: SpotifyAlbum) => void;
+  compact?: boolean;
 };
 
 const ALBUMS_PER_PAGE = 12;
 const MAX_VISIBLE_ALBUMS = 48;
 
-function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
+function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
@@ -58,7 +59,10 @@ function AlbumSearch({ onStartQuiz }: AlbumSearchProps) {
   }
 
   return (
-    <section className="album-search" id="album-search">
+    <section
+      className={`album-search ${compact ? "album-search-compact" : ""}`}
+      id="album-search"
+    >
       <p className="eyebrow">Step one</p>
       <h2>Pick your battlefield</h2>
 

@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
 import HomePage from "./Components/HomePage";
-import Hero from "./Components/Hero";
-import AlbumSearch from "./Components/AlbumSearch";
+import SinglePlayerPage from "./Components/SinglePlayerPage";
 import Quiz from "./Components/Quiz";
 import SpotifyCallback from "./Components/SpotifyCallback";
 import Leaderboard from "./Components/Leaderboard";
@@ -26,6 +25,12 @@ function getProfileUsernameFromPath() {
   return match ? decodeURIComponent(match[1]).toLowerCase() : null;
 }
 
+function getArenaInviteCodeFromPath() {
+  const match = window.location.pathname.match(/^\/multiplayer\/invite\/([^/]+)\/?$/);
+
+  return match ? decodeURIComponent(match[1]).toUpperCase() : null;
+}
+
 function getInitialView(): AppView {
   if (getProfileUsernameFromPath()) {
     return "profile";
@@ -45,6 +50,10 @@ function getInitialView(): AppView {
     case "/profile":
       return "profile";
     default:
+      if (getArenaInviteCodeFromPath()) {
+        return "multiplayer";
+      }
+
       return "home";
   }
 }
@@ -54,6 +63,9 @@ function App() {
   const [publicProfileUsername, setPublicProfileUsername] = useState<
     string | null
   >(getProfileUsernameFromPath);
+  const [arenaInviteCode, setArenaInviteCode] = useState<string | null>(
+    getArenaInviteCodeFromPath
+  );
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [isQuizStarted, setIsQuizStarted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -86,11 +98,13 @@ function App() {
   useEffect(() => {
     function handlePopState() {
       const username = getProfileUsernameFromPath();
+      const inviteCode = getArenaInviteCodeFromPath();
 
       setSelectedAlbum(null);
       setIsQuizStarted(false);
       setPublicProfileUsername(username);
-      setActiveView(username ? "profile" : getInitialView());
+      setArenaInviteCode(inviteCode);
+      setActiveView(username ? "profile" : inviteCode ? "multiplayer" : getInitialView());
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -186,6 +200,7 @@ function App() {
   function startQuiz(album: SpotifyAlbum) {
     window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setActiveView("play");
     setSelectedAlbum(album);
     setIsQuizStarted(true);
@@ -194,6 +209,7 @@ function App() {
   function restartApp() {
     window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setActiveView("play");
     setSelectedAlbum(null);
     setIsQuizStarted(false);
@@ -202,6 +218,7 @@ function App() {
   function showHome() {
     window.history.pushState({}, "", "/");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("home");
@@ -211,17 +228,10 @@ function App() {
     restartApp();
   }
 
-  function scrollToAlbumSearch() {
-    const searchSection = document.getElementById("album-search");
-    const searchInput = searchSection?.querySelector("input");
-
-    searchSection?.scrollIntoView({ behavior: "smooth" });
-    searchInput?.focus({ preventScroll: true });
-  }
-
   function showLeaderboard() {
     window.history.pushState({}, "", "/leaderboard");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("leaderboard");
@@ -230,6 +240,7 @@ function App() {
   function showMultiplayer() {
     window.history.pushState({}, "", "/multiplayer");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("multiplayer");
@@ -238,6 +249,7 @@ function App() {
   function showAuth() {
     window.history.pushState({}, "", "/login");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("auth");
@@ -251,6 +263,7 @@ function App() {
 
     window.history.pushState({}, "", "/profile");
     setPublicProfileUsername(null);
+    setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView(session ? "profile" : "auth");
@@ -265,6 +278,7 @@ function App() {
       `/profile/${encodeURIComponent(normalizedUsername)}`
     );
     setPublicProfileUsername(normalizedUsername);
+    setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("profile");
@@ -325,13 +339,12 @@ function App() {
       )}
 
       {activeView === "play" && !isQuizStarted && (
-        <>
-          <Hero
-            onStartPlaying={scrollToAlbumSearch}
-            onViewLeaderboard={showLeaderboard}
-          />
-          <AlbumSearch onStartQuiz={startQuiz} />
-        </>
+        <SinglePlayerPage
+          session={session}
+          profile={profile}
+          identityBadges={identityBadges}
+          onStartQuiz={startQuiz}
+        />
       )}
 
       {activeView === "play" && isQuizStarted && selectedAlbum && (
@@ -357,6 +370,11 @@ function App() {
           profile={profile}
           onHome={showHome}
           onLogin={showAuth}
+          inviteCode={arenaInviteCode}
+          onInviteHandled={() => {
+            window.history.pushState({}, "", "/multiplayer");
+            setArenaInviteCode(null);
+          }}
         />
       )}
 

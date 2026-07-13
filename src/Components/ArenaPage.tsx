@@ -4,13 +4,19 @@ import {
   activateDuelRoom,
   cancelDuelRoom,
   createDuelRoom,
+  endArenaRoom,
   fetchArenaRoom,
+  fetchArenaInvite,
   fetchCurrentDuelRoom,
   fetchOpenDuelRooms,
   finishDuelRoom,
   forfeitDuelRoom,
+  joinArenaRoomByInvite,
   joinDuelRoom,
   leaveWaitingDuelRoom,
+  requestArenaRematch,
+  resetArenaRoomForRematch,
+  type ArenaInvite,
   saveDuelPlayerResult,
   updateDuelPlayerProgress,
   type ArenaRoom,
@@ -124,9 +130,18 @@ type ArenaPageProps = {
   profile: UserProfile | null;
   onHome: () => void;
   onLogin: () => void;
+  inviteCode?: string | null;
+  onInviteHandled?: () => void;
 };
 
-function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
+function ArenaPage({
+  session,
+  profile,
+  onHome,
+  onLogin,
+  inviteCode,
+  onInviteHandled,
+}: ArenaPageProps) {
   const [activeArenaMode, setActiveArenaMode] = useState<ArenaRoomMode | null>(
     null
   );
@@ -137,6 +152,15 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   const [rooms, setRooms] = useState<ArenaRoom[]>([]);
   const [activeRoom, setActiveRoom] = useState<ArenaRoom | null>(null);
   const [message, setMessage] = useState("");
+  const [isPrivateRoom, setIsPrivateRoom] = useState(false);
+  const [pendingPublicRoom, setPendingPublicRoom] = useState<ArenaRoom | null>(
+    null
+  );
+  const [pendingInvite, setPendingInvite] = useState<ArenaInvite | null>(null);
+  const [isInviteLoading, setIsInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [isJoiningInvite, setIsJoiningInvite] = useState(false);
+  const [isChoosingRematchAlbum, setIsChoosingRematchAlbum] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
@@ -172,7 +196,8 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   const hasSubmittedDuelResultRef = useRef(false);
 
   const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
-  const selectedMode = activeArenaMode || activeRoom?.mode || null;
+  const selectedMode =
+    activeArenaMode || activeRoom?.mode || pendingInvite?.mode || pendingPublicRoom?.mode || null;
   const modeSettings =
     selectedMode && selectedMode in ARENA_MODE_SETTINGS
       ? ARENA_MODE_SETTINGS[selectedMode as ArenaRoomMode]
@@ -202,10 +227,50 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
     void loadOpenRooms(false);
 
-    if (session?.user) {
+    if (session?.user && !inviteCode) {
       void reconnectCurrentDuelRoom();
     }
-  }, [activeArenaMode, session?.user?.id]);
+  }, [activeArenaMode, session?.user?.id, inviteCode]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadInvite() {
+      if (!inviteCode) {
+        setPendingInvite(null);
+        setInviteError("");
+        return;
+      }
+
+      setIsInviteLoading(true);
+      setInviteError("");
+      setPendingPublicRoom(null);
+      setActiveRoom(null);
+
+      const { invite, error } = await fetchArenaInvite(inviteCode);
+
+      if (!isActive) {
+        return;
+      }
+
+      if (invite) {
+        setPendingInvite(invite);
+        setActiveArenaMode(invite.mode);
+      } else {
+        setPendingInvite(null);
+        setInviteError(error || "Invite not found.");
+        setActiveArenaMode("duel");
+      }
+
+      setIsInviteLoading(false);
+    }
+
+    void loadInvite();
+
+    return () => {
+      isActive = false;
+    };
+  }, [inviteCode]);
 
   useEffect(() => {
     if (!activeArenaMode || activeRoom) {
@@ -848,6 +913,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       profile,
       mode: activeArenaMode,
       maxPlayers: modeSettings.maxPlayers,
+      isPrivate: isPrivateRoom,
     });
 
     if (room) {
@@ -856,13 +922,37 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
         setActiveArenaMode(room.mode);
       }
       resetDuelLocalState();
+      setSelectedAlbum(null);
       await loadOpenRooms(false);
     }
 
     setMessage(
-      error || (room ? `${modeSettings.title} room created.` : "Failed to create room.")
+      error ||
+        (room
+          ? `${isPrivateRoom ? "Private" : "Public"} ${modeSettings.title} room created.`
+          : "Failed to create room.")
     );
     setIsCreatingRoom(false);
+  }
+
+  function handleOpenRoomRequest(room: ArenaRoom) {
+    if (!session?.user) {
+      onLogin();
+      return;
+    }
+
+    const isAlreadyInRoom = room.players.some(
+      (player) => player.userId === session.user.id && !player.leftAt
+    );
+
+    if (isAlreadyInRoom) {
+      void handleJoinRoom(room);
+      return;
+    }
+
+    setPendingPublicRoom(room);
+    setPendingInvite(null);
+    setMessage("");
   }
 
   async function handleJoinRoom(room: ArenaRoom) {
@@ -904,11 +994,77 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
       if (joinedRoom.mode === "duel" || joinedRoom.mode === "group_lobby") {
         setActiveArenaMode(joinedRoom.mode);
       }
+      setPendingPublicRoom(null);
       resetDuelLocalState();
       await loadOpenRooms(false);
     }
 
     setMessage(error || (joinedRoom ? "Joined room." : "Failed to join room."));
+  }
+
+  async function handleAcceptInvite() {
+    if (!pendingInvite) {
+      return;
+    }
+
+    if (!session?.user) {
+      onLogin();
+      return;
+    }
+
+    if (pendingInvite.status !== "waiting") {
+      setInviteError("This Arena room is no longer waiting.");
+      return;
+    }
+
+    if (pendingInvite.playerCount >= pendingInvite.maxPlayers) {
+      setInviteError("This Arena room is full.");
+      return;
+    }
+
+    setIsJoiningInvite(true);
+    setInviteError("");
+
+    const { room, error } = await joinArenaRoomByInvite({
+      inviteCode: pendingInvite.inviteCode,
+      user: session.user,
+      profile,
+    });
+
+    if (room) {
+      setActiveRoom(room);
+      setActiveArenaMode(room.mode);
+      setPendingInvite(null);
+      resetDuelLocalState();
+      onInviteHandled?.();
+      await loadOpenRooms(false);
+    }
+
+    setMessage(error || (room ? "Joined private room." : "Could not join invite."));
+    setIsJoiningInvite(false);
+  }
+
+  async function handleCopyInvite(room: ArenaRoom) {
+    if (!room.inviteCode) {
+      return;
+    }
+
+    const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
+    const hostHandle = profile?.username
+      ? `@${profile.username}`
+      : getHostName(room);
+    const inviteText =
+      room.mode === "group_lobby"
+        ? `Join ${hostHandle}'s Group Lobby on ${room.albumName}: ${inviteUrl}`
+        : `Duel ${hostHandle} on ${room.albumName}: ${inviteUrl}`;
+
+    try {
+      await navigator.clipboard.writeText(inviteText);
+      setMessage("Invite link copied.");
+    } catch (error) {
+      console.error(error);
+      setMessage(inviteUrl);
+    }
   }
 
   async function refreshActiveRoom(showMessage = true) {
@@ -980,15 +1136,15 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     return room.players.filter((player) => !player.leftAt);
   }
 
-  async function handleStartDuel() {
-    if (!session?.user || !activeRoom) {
+  async function startArenaRoom(roomToStart: ArenaRoom) {
+    if (!session?.user) {
       return;
     }
 
     setIsPreparingDuel(true);
     setMessage("");
 
-    const { room: freshRoom, error } = await fetchArenaRoom(activeRoom.id);
+    const { room: freshRoom, error } = await fetchArenaRoom(roomToStart.id);
 
     if (!freshRoom) {
       setMessage(error || "Could not refresh room.");
@@ -997,7 +1153,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     }
 
     if (freshRoom.hostUserId !== session.user.id) {
-      setMessage("Only the host can start the Duel.");
+      setMessage("Only the host can start this Arena room.");
       setIsPreparingDuel(false);
       return;
     }
@@ -1053,6 +1209,62 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     setIsPreparingDuel(false);
   }
 
+  async function handleStartDuel() {
+    if (!activeRoom) {
+      return;
+    }
+
+    await startArenaRoom(activeRoom);
+  }
+
+  async function handleHostRematch(album?: SpotifyAlbum | null) {
+    if (!activeRoom || activeRoom.hostUserId !== session?.user.id) {
+      return;
+    }
+
+    setIsPreparingDuel(true);
+    setMessage(album ? "Preparing new album rematch..." : "Preparing rematch...");
+
+    const { room, error } = await resetArenaRoomForRematch({
+      roomId: activeRoom.id,
+      album,
+    });
+
+    if (!room) {
+      setMessage(error || "Could not prepare rematch.");
+      setIsPreparingDuel(false);
+      return;
+    }
+
+    setActiveRoom(room);
+    setSelectedAlbum(null);
+    setIsChoosingRematchAlbum(false);
+    resetDuelLocalState();
+    await startArenaRoom(room);
+  }
+
+  async function handleRequestRematch() {
+    if (!activeRoom) {
+      return;
+    }
+
+    const { error } = await requestArenaRematch(activeRoom.id);
+    setMessage(error || "Rematch requested. Host controls the next start.");
+    await refreshActiveRoom(false);
+  }
+
+  async function handleEndArenaRoom() {
+    if (!activeRoom) {
+      return;
+    }
+
+    const { error } = await endArenaRoom(activeRoom.id);
+    setMessage(error || "Arena room ended.");
+    setActiveRoom(null);
+    resetDuelLocalState();
+    await loadOpenRooms(false);
+  }
+
   async function finishDuel({
     finalScore,
     correctAnswers,
@@ -1088,12 +1300,8 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
     if (room) {
       const presentPlayers = getPresentPlayers(room);
-      const requiredPlayers =
-        room.mode === "group_lobby"
-          ? ARENA_MODE_SETTINGS.group_lobby.minPlayersToStart
-          : ARENA_MODE_SETTINGS.duel.minPlayersToStart;
       const hasEveryoneFinished =
-        presentPlayers.length >= requiredPlayers &&
+        presentPlayers.length > 0 &&
         presentPlayers.every((player) => player.finishedAt);
 
       if (hasEveryoneFinished && room.status !== "finished") {
@@ -1245,6 +1453,266 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
     );
   }
 
+  function renderArenaAcceptScreen() {
+    const inviteMode = pendingInvite?.mode || pendingPublicRoom?.mode || "duel";
+    const acceptModeSettings = ARENA_MODE_SETTINGS[inviteMode];
+    const isGroupInvite = inviteMode === "group_lobby";
+    const status = pendingInvite?.status || pendingPublicRoom?.status || "waiting";
+    const albumName =
+      pendingInvite?.albumName || pendingPublicRoom?.albumName || "Arena album";
+    const artistName =
+      pendingInvite?.artistName || pendingPublicRoom?.artistName || "Unknown artist";
+    const artworkUrl = pendingInvite?.artworkUrl || pendingPublicRoom?.artworkUrl;
+    const playerCount =
+      pendingInvite?.playerCount ||
+      (pendingPublicRoom ? getPresentPlayers(pendingPublicRoom).length : 0);
+    const maxPlayers =
+      pendingInvite?.maxPlayers || pendingPublicRoom?.maxPlayers || acceptModeSettings.maxPlayers;
+    const hostName = pendingInvite
+      ? pendingInvite.hostUsername
+        ? `@${pendingInvite.hostUsername}`
+        : pendingInvite.hostDisplayName
+      : pendingPublicRoom
+        ? getHostName(pendingPublicRoom)
+        : "Arena host";
+    const isFull = playerCount >= maxPlayers;
+    const isUnavailable = status !== "waiting" || isFull || Boolean(inviteError);
+
+    return (
+      <section className="arena-accept-screen">
+        <div className="duel-results-card arena-accept-card">
+          <p className="eyebrow">
+            {isGroupInvite ? "Group Lobby Invite" : "Duel Request"}
+          </p>
+          <h2>
+            {isGroupInvite
+              ? `${hostName} invited you to join ${albumName}`
+              : `${hostName} wants to Duel on ${albumName}`}
+          </h2>
+          {artworkUrl && <img src={artworkUrl} alt="" aria-hidden />}
+          <p>{artistName}</p>
+          <span className="duel-room-count">
+            {playerCount}/{maxPlayers} players
+          </span>
+
+          {isInviteLoading && <p className="arena-note">Loading invite...</p>}
+          {(inviteError || isUnavailable) && (
+            <p className="arena-note">
+              {inviteError ||
+                (isFull
+                  ? "This room is full."
+                  : "This Arena room is no longer available.")}
+            </p>
+          )}
+
+          <div className="duel-room-actions arena-accept-actions">
+            <button
+              type="button"
+              disabled={isUnavailable || isInviteLoading || isJoiningInvite}
+              onClick={() => {
+                if (!session) {
+                  onLogin();
+                  return;
+                }
+
+                if (pendingInvite) {
+                  void handleAcceptInvite();
+                  return;
+                }
+
+                if (pendingPublicRoom) {
+                  void handleJoinRoom(pendingPublicRoom);
+                }
+              }}
+            >
+              {!session
+                ? "Login to Accept"
+                : isJoiningInvite
+                  ? "Joining..."
+                  : isGroupInvite
+                    ? "Join Lobby"
+                    : "Accept Duel"}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setPendingInvite(null);
+                setPendingPublicRoom(null);
+                setInviteError("");
+                onInviteHandled?.();
+              }}
+            >
+              Decline
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderPrivateInvitePanel(room: ArenaRoom) {
+    if (!room.isPrivate || !room.inviteCode || room.status !== "waiting") {
+      return null;
+    }
+
+    const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
+
+    return (
+      <div className="arena-invite-panel">
+        <div>
+          <p className="eyebrow">Private Invite</p>
+          <h3>{room.inviteCode}</h3>
+          <p>{inviteUrl}</p>
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => void handleCopyInvite(room)}
+        >
+          Copy Invite
+        </button>
+      </div>
+    );
+  }
+
+  function renderSelectedAlbumStartBar() {
+    if (!selectedAlbum || activeRoom) {
+      return null;
+    }
+
+    return (
+      <div className="start-bar arena-start-bar">
+        {selectedAlbum.imageUrl && (
+          <img src={selectedAlbum.imageUrl} alt="" aria-hidden />
+        )}
+
+        <div className="start-bar-info">
+          <strong>{selectedAlbum.title}</strong>
+          <span>{selectedAlbum.artist}</span>
+        </div>
+
+        <div className="arena-privacy-toggle" role="group" aria-label="Room privacy">
+          <button
+            type="button"
+            className={!isPrivateRoom ? "active" : ""}
+            onClick={() => setIsPrivateRoom(false)}
+          >
+            Public
+          </button>
+          <button
+            type="button"
+            className={isPrivateRoom ? "active" : ""}
+            onClick={() => setIsPrivateRoom(true)}
+          >
+            Private
+          </button>
+        </div>
+
+        <button
+          type="button"
+          disabled={isCreatingRoom || !session}
+          onClick={handleCreateRoom}
+        >
+          {isCreatingRoom
+            ? "Creating..."
+            : selectedMode === "group_lobby"
+              ? "Create Group Lobby"
+              : "Create Duel Room"}
+        </button>
+      </div>
+    );
+  }
+
+  function renderRematchAlbumPicker() {
+    if (!isChoosingRematchAlbum) {
+      return null;
+    }
+
+    return (
+      <div className="rematch-album-picker">
+        <div className="profile-panel-heading">
+          <div>
+            <p className="eyebrow">Choose Another Album</p>
+            <h2>Keep the room, change the battlefield</h2>
+          </div>
+        </div>
+
+        <form className="search-box" onSubmit={handleSearch}>
+          <input
+            type="search"
+            placeholder="Album or artist..."
+            value={searchTerm}
+            aria-label="Search for a rematch album"
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
+          <button type="submit" disabled={isSearching}>
+            {isSearching ? "Searching..." : "Search"}
+          </button>
+        </form>
+
+        {albums.length > 0 && (
+          <>
+            <p className="album-result-count duel-result-count">
+              Showing {visibleAlbums.length} of {cappedAlbums.length} results
+            </p>
+
+            <div className="duel-album-grid">
+              {visibleAlbums.map((album) => (
+                <button
+                  type="button"
+                  className={`duel-album-card ${
+                    selectedAlbum?.id === album.id ? "selected" : ""
+                  }`}
+                  onClick={() => setSelectedAlbum(album)}
+                  key={album.id}
+                >
+                  {album.imageUrl && (
+                    <img src={album.imageUrl} alt={`${album.title} cover`} />
+                  )}
+                  <span>
+                    <strong>{album.title}</strong>
+                    <small>{album.artist}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {hasMoreAlbums && (
+              <button
+                type="button"
+                className="view-more-albums duel-view-more-albums"
+                onClick={handleViewMoreAlbums}
+              >
+                View more albums
+              </button>
+            )}
+          </>
+        )}
+
+        <div className="duel-room-actions">
+          <button
+            type="button"
+            disabled={!selectedAlbum || isPreparingDuel}
+            onClick={() => void handleHostRematch(selectedAlbum)}
+          >
+            {isPreparingDuel ? "Preparing..." : "Start Rematch on Album"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setIsChoosingRematchAlbum(false);
+              setSelectedAlbum(null);
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function renderDuelGameState() {
     if (duelPhase === "syncing") {
       return (
@@ -1375,6 +1843,13 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
   }
 
   function renderDuelLobby() {
+    if (
+      !activeRoom &&
+      (isInviteLoading || pendingInvite || pendingPublicRoom || inviteError)
+    ) {
+      return renderArenaAcceptScreen();
+    }
+
     if (activeRoom) {
       const activeModeSettings =
         activeRoom.mode === "group_lobby"
@@ -1432,16 +1907,16 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
         return (
           <section className="duel-room-screen">
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => {
-                setActiveRoom(null);
-                resetDuelLocalState();
-              }}
-            >
-              Back to Duel Lobby
-            </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setActiveRoom(null);
+                  resetDuelLocalState();
+                }}
+              >
+              Back to Lobby
+              </button>
             <div className="duel-results-card">
               <p className="eyebrow">{activeModeSettings.resultsTitle}</p>
               <h2>{getWinnerLabel(sortedPlayers)}</h2>
@@ -1474,7 +1949,64 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                   </div>
                 ))}
               </div>
+              {activeRoom.rematchRequestedBy && (
+                <p className="arena-note">
+                  A player requested a rematch. Host controls the next start.
+                </p>
+              )}
+              <div className="duel-room-actions rematch-actions">
+                {isHost ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isPreparingDuel}
+                      onClick={() => void handleHostRematch()}
+                    >
+                      {isPreparingDuel ? "Preparing..." : "Rematch"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => {
+                        setSelectedAlbum(null);
+                        setAlbums([]);
+                        setVisibleAlbumCount(ALBUMS_PER_PAGE);
+                        setIsChoosingRematchAlbum(true);
+                      }}
+                    >
+                      Choose Another Album
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button danger-button"
+                      onClick={() => void handleEndArenaRoom()}
+                    >
+                      {isActiveGroupLobby ? "End Lobby" : "End Duel"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleRequestRematch()}
+                    >
+                      Request Rematch
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button danger-button"
+                      onClick={() => {
+                        setActiveRoom(null);
+                        resetDuelLocalState();
+                      }}
+                    >
+                      Leave Lobby
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+            {isHost && renderRematchAlbumPicker()}
           </section>
         );
       }
@@ -1711,6 +2243,8 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             </div>
           </div>
 
+          {renderPrivateInvitePanel(activeRoom)}
+
           {isActiveGroupLobby ? (
             <div className="duel-player-grid group-player-grid">
               {presentPlayers.map((player) => (
@@ -1842,14 +2376,6 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             </>
           )}
 
-          <button
-            type="button"
-            className="duel-create-button"
-            disabled={!selectedAlbum || isCreatingRoom || !session}
-            onClick={handleCreateRoom}
-          >
-            {isCreatingRoom ? "Creating..." : `Create ${modeSettings.title} Room`}
-          </button>
         </div>
 
         <div className="duel-open-rooms">
@@ -1904,7 +2430,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => void handleJoinRoom(room)}
+                      onClick={() => handleOpenRoomRequest(room)}
                       disabled={!session || (isFull && !isAlreadyInRoom)}
                     >
                       {actionLabel}
@@ -1919,6 +2445,7 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
             </p>
           )}
         </div>
+        {renderSelectedAlbumStartBar()}
       </section>
     );
   }
@@ -1982,6 +2509,8 @@ function ArenaPage({ session, profile, onHome, onLogin }: ArenaPageProps) {
 
                   setActiveArenaMode(roomMode);
                   setActiveRoom(null);
+                  setPendingInvite(null);
+                  setPendingPublicRoom(null);
                   resetDuelLocalState();
                   setSelectedAlbum(null);
                   setAlbums([]);
