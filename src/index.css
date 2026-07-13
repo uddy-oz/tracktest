@@ -2175,6 +2175,22 @@ button:hover {
   gap: 18px;
 }
 
+.duel-room-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.danger-button {
+  border-color: rgba(255, 77, 77, 0.42);
+  color: #ffb4b4;
+}
+
+.danger-button:hover {
+  border-color: rgba(255, 77, 77, 0.72);
+  background: rgba(255, 77, 77, 0.12);
+}
+
 .duel-room-hero {
   display: grid;
   grid-template-columns: 130px 1fr;
@@ -2239,6 +2255,92 @@ button:hover {
   margin: 6px 0 0;
   color: var(--arena-accent-bright);
   font-size: 16px;
+}
+
+.duel-player-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--arena-muted);
+}
+
+.duel-winner-card {
+  border-color: rgba(255, 215, 106, 0.7);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 215, 106, 0.18), transparent 34%),
+    rgba(16, 16, 24, 0.92);
+  box-shadow: 0 0 34px rgba(255, 215, 106, 0.16);
+}
+
+.duel-head-to-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.duel-h2h-card {
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.14), transparent 32%),
+    rgba(16, 16, 24, 0.86);
+  min-width: 0;
+}
+
+.duel-h2h-card.current {
+  border-color: rgba(97, 218, 251, 0.42);
+  box-shadow: 0 0 28px rgba(97, 218, 251, 0.12);
+}
+
+.duel-h2h-card span,
+.duel-h2h-card small {
+  display: block;
+  color: var(--arena-muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.duel-h2h-card strong {
+  display: block;
+  margin-top: 8px;
+  color: white;
+  font-size: clamp(18px, 2.5vw, 26px);
+  overflow-wrap: anywhere;
+}
+
+.duel-h2h-card p {
+  margin: 8px 0;
+  color: var(--arena-accent-bright);
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.duel-h2h-vs {
+  align-self: center;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 215, 106, 0.45);
+  border-radius: 50%;
+  color: #fff1a8;
+  background: rgba(255, 215, 106, 0.1);
+  font-weight: 900;
+  box-shadow: 0 0 24px rgba(255, 215, 106, 0.14);
+}
+
+.duel-game-screen {
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+}
+
+.duel-game-screen .duel-room-hero,
+.duel-game-screen .duel-head-to-head {
+  text-align: left;
 }
 
 .duel-start-button:disabled {
@@ -3192,8 +3294,13 @@ button:hover {
   }
 
   .duel-lobby,
-  .duel-player-grid {
+  .duel-player-grid,
+  .duel-head-to-head {
     grid-template-columns: 1fr;
+  }
+
+  .duel-h2h-vs {
+    justify-self: center;
   }
 
   .duel-album-grid {
