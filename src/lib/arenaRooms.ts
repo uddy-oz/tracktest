@@ -125,11 +125,76 @@ type ArenaRoomPlayerRow = {
   result_status?: string | null;
 };
 
-const ACTIVE_ARENA_STATUSES = ["waiting", "starting", "active"];
+const ACTIVE_ARENA_STATUSES = [
+  "waiting",
+  "countdown",
+  "starting",
+  "active",
+  "submitted",
+];
 const ARENA_ROOM_MODES: ArenaRoomMode[] = ["duel", "group_lobby"];
 
 function isArenaRoomMode(value: string | null | undefined): value is ArenaRoomMode {
   return value === "duel" || value === "group_lobby";
+}
+
+export function normalizeArenaInviteCode(value: string) {
+  return value.trim().toUpperCase();
+}
+
+export function getFriendlyArenaError(error: string | null | undefined) {
+  if (!error) {
+    return "";
+  }
+
+  const normalizedError = error.toLowerCase();
+
+  if (normalizedError.includes("invite not found")) {
+    return "Invalid private room code.";
+  }
+
+  if (
+    normalizedError.includes("expired") ||
+    normalizedError.includes("invite has expired")
+  ) {
+    return "This invite has expired.";
+  }
+
+  if (
+    normalizedError.includes("no longer waiting") ||
+    normalizedError.includes("not waiting")
+  ) {
+    return "This room is no longer accepting players.";
+  }
+
+  if (normalizedError.includes("already full")) {
+    return "This private room is full.";
+  }
+
+  if (
+    normalizedError.includes("already in another active") ||
+    normalizedError.includes("already has an active")
+  ) {
+    return "Resume your active room before creating another.";
+  }
+
+  if (normalizedError.includes("closed") || normalizedError.includes("cancelled")) {
+    return "This room was closed by the host.";
+  }
+
+  if (normalizedError.includes("finished")) {
+    return "The game has already finished.";
+  }
+
+  if (normalizedError.includes("own room")) {
+    return "You cannot join your own room as a second player.";
+  }
+
+  if (normalizedError.includes("duplicate key")) {
+    return "You are already in this room. Reconnecting...";
+  }
+
+  return error;
 }
 
 function generateInviteCode() {
@@ -209,7 +274,6 @@ export async function fetchCurrentDuelRoom(user: User) {
     .select("room_id")
     .eq("user_id", user.id)
     .is("left_at", null)
-    .is("finished_at", null)
     .order("joined_at", { ascending: false });
 
   if (playerError) {
@@ -229,15 +293,17 @@ export async function fetchCurrentDuelRoom(user: User) {
     .select("*")
     .in("id", roomIds)
     .in("mode", ARENA_ROOM_MODES)
-    .in("status", ACTIVE_ARENA_STATUSES)
+    .in("status", [...ACTIVE_ARENA_STATUSES, "finished"])
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(5);
 
   if (roomsError) {
     return { room: null, error: roomsError.message };
   }
 
-  const roomRow = ((roomsData || []) as ArenaRoomRow[])[0];
+  const roomRow = ((roomsData || []) as ArenaRoomRow[]).find(
+    (row) => row.status !== "finished" || Boolean(row.rematch_requested_by)
+  );
 
   if (!roomRow) {
     return { room: null, error: null };
@@ -292,7 +358,19 @@ export async function createDuelRoom({
     .single();
 
   if (roomError || !roomData) {
-    return { room: null, error: roomError?.message || "Could not create room." };
+    const activeRoom = await fetchCurrentDuelRoom(user);
+
+    if (activeRoom.room) {
+      return {
+        room: activeRoom.room,
+        error: "You already have an active Arena room.",
+      };
+    }
+
+    return {
+      room: null,
+      error: getFriendlyArenaError(roomError?.message) || "Could not create room.",
+    };
   }
 
   const room = mapRoomRow(roomData as ArenaRoomRow);
@@ -311,7 +389,9 @@ export async function createDuelRoom({
   if (playerError || !playerData) {
     return {
       room,
-      error: playerError?.message || "Room created, but host could not join.",
+      error:
+        getFriendlyArenaError(playerError?.message) ||
+        "Room created, but host could not join.",
     };
   }
 
@@ -376,6 +456,27 @@ export async function joinDuelRoom({
   }
 
   const { displayName, username } = getPlayerDisplay(profile, user);
+  const { data: rejoinedPlayers, error: rejoinError } = await supabase
+    .from("arena_room_players")
+    .update({
+      display_name: displayName,
+      username,
+      left_at: null,
+      forfeited_at: null,
+      result_status: "active",
+    })
+    .eq("room_id", targetRoom.id)
+    .eq("user_id", user.id)
+    .select("id");
+
+  if (rejoinError) {
+    return { room: null, error: getFriendlyArenaError(rejoinError.message) };
+  }
+
+  if (rejoinedPlayers && rejoinedPlayers.length > 0) {
+    return fetchArenaRoom(targetRoom.id);
+  }
+
   const { error } = await supabase.from("arena_room_players").insert({
     room_id: targetRoom.id,
     user_id: user.id,
@@ -384,7 +485,11 @@ export async function joinDuelRoom({
   });
 
   if (error) {
-    return { room: null, error: error.message };
+    if (error.message.toLowerCase().includes("duplicate")) {
+      return fetchArenaRoom(targetRoom.id);
+    }
+
+    return { room: null, error: getFriendlyArenaError(error.message) };
   }
 
   return fetchArenaRoom(targetRoom.id);
@@ -396,11 +501,11 @@ export async function fetchArenaInvite(inviteCode: string) {
   }
 
   const { data, error } = await supabase.rpc("get_arena_invite", {
-    target_invite_code: inviteCode.trim(),
+    target_invite_code: normalizeArenaInviteCode(inviteCode),
   });
 
   if (error) {
-    return { invite: null, error: error.message };
+    return { invite: null, error: getFriendlyArenaError(error.message) };
   }
 
   const row = (Array.isArray(data) ? data[0] : null) as
@@ -424,7 +529,7 @@ export async function fetchArenaInvite(inviteCode: string) {
     | null;
 
   if (!row || !isArenaRoomMode(row.mode)) {
-    return { invite: null, error: "Invite not found." };
+    return { invite: null, error: "Invalid private room code." };
   }
 
   return {
@@ -438,7 +543,7 @@ export async function fetchArenaInvite(inviteCode: string) {
       artworkUrl: row.artwork_url || "",
       maxPlayers: row.max_players,
       isPrivate: Boolean(row.is_private),
-      inviteCode: row.invite_code || inviteCode,
+      inviteCode: row.invite_code || normalizeArenaInviteCode(inviteCode),
       hostUserId: row.host_user_id,
       hostDisplayName:
         row.host_display_name || row.host_username || "Arena Host",
@@ -467,7 +572,8 @@ export async function joinArenaRoomByInvite({
 
   if (currentRoom.room) {
     if (
-      currentRoom.room.inviteCode?.toLowerCase() === inviteCode.trim().toLowerCase()
+      currentRoom.room.inviteCode?.toLowerCase() ===
+        normalizeArenaInviteCode(inviteCode).toLowerCase()
     ) {
       return { room: currentRoom.room, error: null };
     }
@@ -480,7 +586,7 @@ export async function joinArenaRoomByInvite({
 
   const { displayName, username } = getPlayerDisplay(profile, user);
   const { data, error } = await supabase.rpc("join_arena_room_by_invite", {
-    target_invite_code: inviteCode.trim(),
+    target_invite_code: normalizeArenaInviteCode(inviteCode),
     player_display_name: displayName,
     player_username: username,
   });
@@ -488,7 +594,9 @@ export async function joinArenaRoomByInvite({
   if (error || !data) {
     return {
       room: null,
-      error: error?.message || "Could not join this Arena invite.",
+      error:
+        getFriendlyArenaError(error?.message) ||
+        "Could not join this Arena invite.",
     };
   }
 
@@ -526,7 +634,9 @@ export async function fetchArenaRoom(roomId: string) {
   return {
     room: {
       ...room,
-      players: ((playersData || []) as ArenaRoomPlayerRow[]).map(mapPlayerRow),
+      players: dedupeActivePlayers(
+        ((playersData || []) as ArenaRoomPlayerRow[]).map(mapPlayerRow)
+      ),
     },
     error: null,
   };
@@ -551,7 +661,7 @@ export async function activateDuelRoom(
     .eq("id", roomId);
 
   if (error) {
-    return { room: null, error: error.message };
+    return { room: null, error: getFriendlyArenaError(error.message) };
   }
 
   return fetchArenaRoom(roomId);
@@ -587,7 +697,7 @@ export async function updateDuelPlayerProgress({
     .eq("room_id", roomId)
     .eq("user_id", user.id);
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function saveDuelPlayerResult({
@@ -626,7 +736,7 @@ export async function saveDuelPlayerResult({
     .eq("room_id", roomId)
     .eq("user_id", user.id);
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function finishDuelRoom(roomId: string) {
@@ -638,7 +748,7 @@ export async function finishDuelRoom(roomId: string) {
     target_room_id: roomId,
   });
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function cancelDuelRoom(roomId: string) {
@@ -650,7 +760,7 @@ export async function cancelDuelRoom(roomId: string) {
     target_room_id: roomId,
   });
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function leaveWaitingDuelRoom(roomId: string) {
@@ -662,7 +772,7 @@ export async function leaveWaitingDuelRoom(roomId: string) {
     target_room_id: roomId,
   });
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function forfeitDuelRoom(roomId: string) {
@@ -674,7 +784,7 @@ export async function forfeitDuelRoom(roomId: string) {
     target_room_id: roomId,
   });
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function requestArenaRematch(roomId: string) {
@@ -709,7 +819,7 @@ export async function resetArenaRoomForRematch({
   });
 
   if (error) {
-    return { room: null, error: error.message };
+    return { room: null, error: getFriendlyArenaError(error.message) };
   }
 
   return fetchArenaRoom(roomId);
@@ -724,16 +834,35 @@ export async function endArenaRoom(roomId: string) {
     target_room_id: roomId,
   });
 
-  return { error: error?.message || null };
+  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 function attachPlayers(rooms: ArenaRoom[], players: ArenaRoomPlayerRow[]) {
   return rooms.map((room) => ({
     ...room,
-    players: players
-      .filter((player) => player.room_id === room.id)
-      .map(mapPlayerRow),
+    players: dedupeActivePlayers(
+      players
+        .filter((player) => player.room_id === room.id)
+        .map(mapPlayerRow)
+    ),
   }));
+}
+
+function dedupeActivePlayers(players: ArenaRoomPlayer[]) {
+  const seenPresentUsers = new Set<string>();
+
+  return players.filter((player) => {
+    if (player.leftAt) {
+      return true;
+    }
+
+    if (seenPresentUsers.has(player.userId)) {
+      return false;
+    }
+
+    seenPresentUsers.add(player.userId);
+    return true;
+  });
 }
 
 function mapRoomRow(row: ArenaRoomRow): ArenaRoom {

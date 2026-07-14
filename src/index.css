@@ -1771,6 +1771,10 @@ button:hover {
   line-height: 1.5;
 }
 
+.home-active-room {
+  margin: 0 0 22px;
+}
+
 .single-player-page {
   width: min(100%, 1240px);
   min-height: 100vh;
@@ -2262,10 +2266,31 @@ button:hover {
 }
 
 .arena-page {
+  --arena-mode-accent: #ff4fa0;
+  --arena-mode-accent-soft: rgba(255, 79, 160, 0.15);
+  --arena-mode-accent-glow: rgba(255, 79, 160, 0.24);
   width: 100%;
   min-height: 70vh;
   padding: 104px 24px 64px;
   text-align: center;
+}
+
+.arena-theme-group_lobby {
+  --arena-mode-accent: #61dafb;
+  --arena-mode-accent-soft: rgba(97, 218, 251, 0.14);
+  --arena-mode-accent-glow: rgba(97, 218, 251, 0.22);
+}
+
+.arena-theme-party {
+  --arena-mode-accent: #a78bfa;
+  --arena-mode-accent-soft: rgba(167, 139, 250, 0.16);
+  --arena-mode-accent-glow: rgba(167, 139, 250, 0.26);
+}
+
+.arena-theme-championship {
+  --arena-mode-accent: #ffd76a;
+  --arena-mode-accent-soft: rgba(255, 215, 106, 0.15);
+  --arena-mode-accent-glow: rgba(255, 215, 106, 0.24);
 }
 
 .arena-hero {
@@ -2294,25 +2319,140 @@ button:hover {
   grid-template-columns: auto 1fr;
   gap: 18px;
   align-items: center;
-  border: 1px solid rgba(124, 92, 255, 0.28);
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 62%);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 12% 0%, var(--arena-mode-accent-soft), transparent 34%),
     #15151f;
   text-align: left;
 }
 
 .arena-status > span {
   padding: 9px 12px;
-  border: 1px solid rgba(255, 215, 106, 0.38);
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), white 16%);
   border-radius: 999px;
-  color: #fff1a8;
-  background: rgba(255, 215, 106, 0.12);
+  color: var(--arena-mode-accent);
+  background: var(--arena-mode-accent-soft);
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 1px;
   white-space: nowrap;
+}
+
+.arena-code-entry,
+.arena-recovery-strip {
+  width: min(100%, 940px);
+  margin: 0 auto 24px;
+}
+
+.arena-code-entry {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 62%);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, var(--arena-mode-accent-soft), transparent 34%),
+    #15151f;
+  text-align: left;
+}
+
+.arena-code-entry h2 {
+  margin: 0;
+  color: white;
+  font-size: 22px;
+}
+
+.arena-code-entry input {
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(16, 16, 24, 0.9);
+  color: white;
+  font: inherit;
+  text-transform: uppercase;
+}
+
+.arena-code-entry input:focus,
+.arena-page .search-box input:focus {
+  border-color: var(--arena-mode-accent);
+  box-shadow: 0 0 0 4px var(--arena-mode-accent-soft);
+}
+
+.arena-code-entry button,
+.arena-page .start-bar > button,
+.arena-page .duel-start-button {
+  background: var(--arena-mode-accent);
+  box-shadow: 0 0 28px var(--arena-mode-accent-glow);
+}
+
+.arena-active-room-card {
+  width: min(100%, 1100px);
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent, #7c5cff), transparent 56%);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 10% 0%, var(--arena-mode-accent-soft, rgba(124, 92, 255, 0.16)), transparent 34%),
+    rgba(18, 18, 28, 0.94);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  text-align: left;
+}
+
+.arena-active-room-card.compact {
+  width: 100%;
+}
+
+.arena-active-room-card > img {
+  width: 92px;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 16px;
+}
+
+.arena-active-room-main h2 {
+  margin: 0 0 5px;
+  color: white;
+  font-size: clamp(24px, 3vw, 36px);
+  overflow-wrap: anywhere;
+}
+
+.arena-active-room-main p:not(.eyebrow) {
+  margin: 0 0 10px;
+  color: var(--arena-muted);
+}
+
+.arena-active-room-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.arena-active-room-meta span,
+.arena-accept-meta span {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent, #7c5cff), transparent 62%);
+  border-radius: 999px;
+  color: var(--arena-ink);
+  background: var(--arena-mode-accent-soft, rgba(124, 92, 255, 0.12));
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.arena-active-room-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .arena-status h2 {
@@ -2474,10 +2614,10 @@ button:hover {
 .duel-open-rooms,
 .duel-room-screen {
   padding: 22px;
-  border: 1px solid rgba(124, 92, 255, 0.24);
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 66%);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 14% 0%, rgba(124, 92, 255, 0.16), transparent 30%),
+    radial-gradient(circle at 14% 0%, var(--arena-mode-accent-soft), transparent 30%),
     #15151f;
   text-align: left;
 }
@@ -2519,8 +2659,8 @@ button:hover {
 
 .duel-album-card:hover,
 .duel-album-card.selected {
-  border-color: var(--arena-accent-bright);
-  background: var(--arena-accent-soft);
+  border-color: var(--arena-mode-accent);
+  background: var(--arena-mode-accent-soft);
 }
 
 .duel-album-card img,
@@ -2549,13 +2689,15 @@ button:hover {
 
 .arena-start-bar {
   width: min(94vw, 820px);
+  border-color: color-mix(in srgb, var(--arena-mode-accent), transparent 58%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 42px var(--arena-mode-accent-glow);
 }
 
 .arena-privacy-toggle {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
-  border: 1px solid rgba(124, 92, 255, 0.28);
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 66%);
   border-radius: 999px;
   background: rgba(16, 16, 24, 0.82);
 }
@@ -2572,8 +2714,8 @@ button:hover {
 
 .start-bar .arena-privacy-toggle button:hover,
 .start-bar .arena-privacy-toggle button.active {
-  border-color: rgba(124, 92, 255, 0.45);
-  background: var(--arena-accent-soft);
+  border-color: color-mix(in srgb, var(--arena-mode-accent), transparent 42%);
+  background: var(--arena-mode-accent-soft);
   color: white;
 }
 
@@ -2601,6 +2743,12 @@ button:hover {
   margin: 0;
 }
 
+.arena-accept-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .arena-accept-card .arena-note {
   width: 100%;
   margin: 0;
@@ -2613,10 +2761,10 @@ button:hover {
 .arena-invite-panel,
 .rematch-album-picker {
   padding: 18px;
-  border: 1px solid rgba(124, 92, 255, 0.26);
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 64%);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 10% 0%, rgba(124, 92, 255, 0.16), transparent 30%),
+    radial-gradient(circle at 10% 0%, var(--arena-mode-accent-soft), transparent 30%),
     rgba(16, 16, 24, 0.84);
 }
 
@@ -2638,6 +2786,13 @@ button:hover {
   margin: 0;
   color: var(--arena-muted);
   overflow-wrap: anywhere;
+}
+
+.arena-invite-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .rematch-actions {
@@ -2684,9 +2839,9 @@ button:hover {
 .duel-room-status,
 .duel-room-count {
   padding: 7px 10px;
-  border: 1px solid rgba(124, 92, 255, 0.28);
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 62%);
   border-radius: 999px;
-  background: rgba(124, 92, 255, 0.08);
+  background: var(--arena-mode-accent-soft);
   color: var(--arena-ink) !important;
   font-size: 13px;
   font-weight: 900;
@@ -3919,6 +4074,23 @@ button:hover {
 
   .arena-mode-card {
     min-height: 220px;
+  }
+
+  .arena-code-entry,
+  .arena-active-room-card {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .arena-active-room-card > img {
+    margin: 0 auto;
+  }
+
+  .arena-active-room-meta,
+  .arena-active-room-actions,
+  .arena-accept-meta,
+  .arena-invite-actions {
+    justify-content: center;
   }
 
   .duel-lobby,

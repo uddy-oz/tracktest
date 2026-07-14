@@ -10,17 +10,22 @@ import {
   type CompactPlayerBadge,
 } from "../lib/playerIdentity";
 import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
+import type { ArenaRoom } from "../lib/arenaRooms";
 import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
+import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 
 type HomePageProps = {
   session: Session | null;
   profile: UserProfile | null;
   identityBadges: CompactPlayerBadge[] | null;
+  activeArenaRoom: ArenaRoom | null;
   onSinglePlayer: () => void;
   onMultiplayer: () => void;
   onLeaderboard: () => void;
   onProfile: () => void;
+  onResumeArenaRoom: () => void;
+  onCloseArenaRoom: (roomId: string) => Promise<string>;
 };
 
 function formatNumber(value: number) {
@@ -42,14 +47,19 @@ function HomePage({
   session,
   profile,
   identityBadges,
+  activeArenaRoom,
   onSinglePlayer,
   onMultiplayer,
   onLeaderboard,
   onProfile,
+  onResumeArenaRoom,
+  onCloseArenaRoom,
 }: HomePageProps) {
   const [stats, setStats] = useState<TrackTestStats>(() => getTrackTestStats());
   const [statsSource, setStatsSource] = useState<"cloud" | "local">("local");
   const [globalRank, setGlobalRank] = useState<number | null>(null);
+  const [arenaMessage, setArenaMessage] = useState("");
+  const [isClosingArenaRoom, setIsClosingArenaRoom] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -108,6 +118,17 @@ function HomePage({
     : "Guest Player";
   const username = profile?.username ? `@${profile.username}` : "Local profile";
 
+  async function handleCloseArenaRoom() {
+    if (!activeArenaRoom) {
+      return;
+    }
+
+    setIsClosingArenaRoom(true);
+    const error = await onCloseArenaRoom(activeArenaRoom.id);
+    setArenaMessage(error || "Arena room closed.");
+    setIsClosingArenaRoom(false);
+  }
+
   return (
     <main className="home-dashboard">
       <section className="home-hero-panel">
@@ -162,6 +183,20 @@ function HomePage({
           </div>
         </aside>
       </section>
+
+      {activeArenaRoom && (
+        <section className="home-active-room">
+          <ArenaActiveRoomCard
+            room={activeArenaRoom}
+            currentUserId={session?.user.id}
+            onResume={onResumeArenaRoom}
+            onClose={() => void handleCloseArenaRoom()}
+            isClosing={isClosingArenaRoom}
+            compact
+          />
+          {arenaMessage && <p className="arena-message">{arenaMessage}</p>}
+        </section>
+      )}
 
       <section className="home-mode-grid">
         <article className="home-mode-card home-mode-solo">

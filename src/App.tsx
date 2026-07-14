@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
 import HomePage from "./Components/HomePage";
@@ -9,6 +9,11 @@ import Leaderboard from "./Components/Leaderboard";
 import AuthPage from "./Components/AuthPage";
 import ProfilePage from "./Components/ProfilePage";
 import ArenaPage from "./Components/ArenaPage";
+import {
+  cancelDuelRoom,
+  fetchCurrentDuelRoom,
+  type ArenaRoom,
+} from "./lib/arenaRooms";
 import { supabase } from "./lib/supabaseClient";
 import { getArenaBadges } from "./lib/badges";
 import { fetchCloudBadgeStats } from "./lib/cloudBadgeStats";
@@ -74,6 +79,23 @@ function App() {
   const [identityBadges, setIdentityBadges] = useState<
     CompactPlayerBadge[] | null
   >(null);
+  const [activeArenaRoom, setActiveArenaRoom] = useState<ArenaRoom | null>(null);
+
+  const refreshActiveArenaRoom = useCallback(async () => {
+    if (!session?.user) {
+      setActiveArenaRoom(null);
+      return null;
+    }
+
+    const { room, error } = await fetchCurrentDuelRoom(session.user);
+
+    if (error) {
+      console.error("Could not load active Arena room:", error);
+    }
+
+    setActiveArenaRoom(room);
+    return room;
+  }, [session?.user]);
 
   useEffect(() => {
     if (!supabase) {
@@ -174,6 +196,10 @@ function App() {
     };
   }, [session]);
 
+  useEffect(() => {
+    void refreshActiveArenaRoom();
+  }, [activeView, refreshActiveArenaRoom]);
+
   async function refreshIdentityBadges() {
     if (!session?.user) {
       const localStats = getTrackTestStats();
@@ -244,6 +270,19 @@ function App() {
     setSelectedAlbum(null);
     setIsQuizStarted(false);
     setActiveView("multiplayer");
+  }
+
+  async function closeActiveArenaRoom(roomId?: string) {
+    const targetRoomId = roomId || activeArenaRoom?.id;
+
+    if (!targetRoomId) {
+      return "";
+    }
+
+    const { error } = await cancelDuelRoom(targetRoomId);
+    await refreshActiveArenaRoom();
+
+    return error || "";
   }
 
   function showAuth() {
@@ -331,10 +370,13 @@ function App() {
           session={session}
           profile={profile}
           identityBadges={identityBadges}
+          activeArenaRoom={activeArenaRoom}
           onSinglePlayer={showPlay}
           onMultiplayer={showMultiplayer}
           onLeaderboard={showLeaderboard}
           onProfile={showProfile}
+          onResumeArenaRoom={showMultiplayer}
+          onCloseArenaRoom={closeActiveArenaRoom}
         />
       )}
 
@@ -371,6 +413,8 @@ function App() {
           onHome={showHome}
           onLogin={showAuth}
           inviteCode={arenaInviteCode}
+          recoveredRoom={activeArenaRoom}
+          onArenaRoomChange={setActiveArenaRoom}
           onInviteHandled={() => {
             window.history.pushState({}, "", "/multiplayer");
             setArenaInviteCode(null);
