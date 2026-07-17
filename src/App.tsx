@@ -24,6 +24,10 @@ import type { SpotifyAlbum } from "./lib/spotifyApi";
 
 type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
 
+function isRecoverableArenaRoom(room: ArenaRoom | null) {
+  return Boolean(room && ["waiting", "starting", "active"].includes(room.status));
+}
+
 function getProfileUsernameFromPath() {
   const match = window.location.pathname.match(/^\/profile\/([^/]+)\/?$/);
 
@@ -93,7 +97,7 @@ function App() {
       console.error("Could not load active Arena room:", error);
     }
 
-    setActiveArenaRoom(room);
+    setActiveArenaRoom(isRecoverableArenaRoom(room) ? room : null);
     return room;
   }, [session?.user]);
 
@@ -414,7 +418,9 @@ function App() {
           onLogin={showAuth}
           inviteCode={arenaInviteCode}
           recoveredRoom={activeArenaRoom}
-          onArenaRoomChange={setActiveArenaRoom}
+          onArenaRoomChange={(room) =>
+            setActiveArenaRoom(isRecoverableArenaRoom(room) ? room : null)
+          }
           onInviteHandled={() => {
             window.history.pushState({}, "", "/multiplayer");
             setArenaInviteCode(null);

@@ -113,18 +113,23 @@ function HomePage({
     .slice(0, 3);
   const dailyGoals = getDailyGoalFoundation(stats).slice(0, 3);
   const recentResults = stats.quizResults.slice(0, 3);
+  const recoverableArenaRoom =
+    activeArenaRoom &&
+    ["waiting", "starting", "active"].includes(activeArenaRoom.status)
+      ? activeArenaRoom
+      : null;
   const displayName = session
     ? getProfileDisplayLabel(profile, session.user.email)
     : "Guest Player";
   const username = profile?.username ? `@${profile.username}` : "Local profile";
 
   async function handleCloseArenaRoom() {
-    if (!activeArenaRoom) {
+    if (!recoverableArenaRoom) {
       return;
     }
 
     setIsClosingArenaRoom(true);
-    const error = await onCloseArenaRoom(activeArenaRoom.id);
+    const error = await onCloseArenaRoom(recoverableArenaRoom.id);
     setArenaMessage(error || "Arena room closed.");
     setIsClosingArenaRoom(false);
   }
@@ -184,10 +189,10 @@ function HomePage({
         </aside>
       </section>
 
-      {activeArenaRoom && (
+      {recoverableArenaRoom && (
         <section className="home-active-room">
           <ArenaActiveRoomCard
-            room={activeArenaRoom}
+            room={recoverableArenaRoom}
             currentUserId={session?.user.id}
             onResume={onResumeArenaRoom}
             onClose={() => void handleCloseArenaRoom()}

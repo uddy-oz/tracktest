@@ -95,6 +95,7 @@ const CLIP_LENGTH_SECONDS = 5;
 const DUEL_SYNC_START_DELAY_MS = 5000;
 const DUEL_ROOM_REFRESH_MS = 2500;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
+const RECOVERABLE_ARENA_ROOM_STATUSES = new Set(["waiting", "starting", "active"]);
 const ARENA_MODE_SETTINGS: Record<
   ArenaRoomMode,
   {
@@ -222,7 +223,10 @@ function ArenaPage({
   const duelRingOffset = RING_CIRCUMFERENCE * (1 - duelTimerProgress);
   const shouldShowDuelDanger =
     duelPhase === "answering" && duelTimeRemaining <= 3 && !duelSelectedAnswer;
-  const visibleRecoveryRoom = activeRoom || recoveredRoom || null;
+  const visibleRecoveryRoom = [activeRoom, recoveredRoom].find(
+    (room): room is ArenaRoom =>
+      Boolean(room && RECOVERABLE_ARENA_ROOM_STATUSES.has(room.status))
+  ) || null;
 
   const burstPieces = useMemo(
     () =>
@@ -926,14 +930,6 @@ function ArenaPage({
     }
   }
 
-  function getPresentPlayerCount(room: ArenaRoom | ArenaInvite) {
-    if ("players" in room) {
-      return getPresentPlayers(room).length;
-    }
-
-    return room.playerCount;
-  }
-
   function getInviteUnavailableMessage(invite: ArenaInvite | null) {
     if (!invite) {
       return inviteError || "";
@@ -961,10 +957,6 @@ function ArenaPage({
 
     if (invite.status !== "waiting") {
       return "This room is no longer accepting players.";
-    }
-
-    if (invite.playerCount >= invite.maxPlayers) {
-      return "This private room is full.";
     }
 
     return "";
@@ -1269,7 +1261,11 @@ function ArenaPage({
   }
 
   function getPresentPlayers(room: ArenaRoom) {
-    return room.players.filter((player) => !player.leftAt);
+    return room.players.filter(
+      (player) =>
+        !player.leftAt &&
+        !["cancelled", "left", "forfeit"].includes(player.resultStatus)
+    );
   }
 
   async function startArenaRoom(roomToStart: ArenaRoom) {
@@ -1642,6 +1638,7 @@ function ArenaPage({
       : pendingPublicRoom
         ? getHostName(pendingPublicRoom)
         : "Arena host";
+    const isRecoverableInviteStatus = RECOVERABLE_ARENA_ROOM_STATUSES.has(status);
     const isAlreadyInside =
       Boolean(targetRoomId) &&
       (activeRoom?.id === targetRoomId || recoveredRoom?.id === targetRoomId);
@@ -1649,7 +1646,9 @@ function ArenaPage({
       Boolean(session?.user.id) &&
       (pendingInvite?.hostUserId === session?.user.id ||
         pendingPublicRoom?.hostUserId === session?.user.id);
-    const unavailableMessage = pendingInvite
+    const canResumeRoom =
+      isRecoverableInviteStatus && (isAlreadyInside || isHostInvite);
+    const roomUnavailableMessage = pendingInvite
       ? getInviteUnavailableMessage(pendingInvite)
       : status === "cancelled"
         ? "This room was closed by the host."
@@ -1657,10 +1656,16 @@ function ArenaPage({
           ? "The game has already finished."
           : status !== "waiting"
             ? "This room is no longer accepting players."
-            : pendingPublicRoom && getPresentPlayerCount(pendingPublicRoom) >= maxPlayers
-              ? "This room is full."
-              : "";
-    const isUnavailable = Boolean(unavailableMessage) && !isAlreadyInside && !isHostInvite;
+            : "";
+    const isFullForNewUser = playerCount >= maxPlayers && !canResumeRoom;
+    const unavailableMessage =
+      roomUnavailableMessage ||
+      (isFullForNewUser
+        ? isPrivate
+          ? "This private room is full."
+          : "This room is full."
+        : "");
+    const isUnavailable = Boolean(unavailableMessage) && !canResumeRoom;
 
     return (
       <section className="arena-accept-screen">
@@ -1683,7 +1688,7 @@ function ArenaPage({
 
           {isInviteLoading && <p className="arena-note">Loading invite...</p>}
           {unavailableMessage && <p className="arena-note">{unavailableMessage}</p>}
-          {isAlreadyInside && (
+          {canResumeRoom && (
             <p className="arena-note">
               You are already in this room. Reconnecting...
             </p>
@@ -1699,7 +1704,7 @@ function ArenaPage({
                   return;
                 }
 
-                if (isAlreadyInside || isHostInvite) {
+                if (canResumeRoom) {
                   const roomId = targetRoomId;
 
                   if (roomId) {
@@ -1727,7 +1732,7 @@ function ArenaPage({
             >
               {!session
                 ? "Login to Accept"
-                : isAlreadyInside || isHostInvite
+                : canResumeRoom
                   ? "Resume Room"
                   : isJoiningInvite
                   ? "Joining..."

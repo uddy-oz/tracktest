@@ -127,10 +127,8 @@ type ArenaRoomPlayerRow = {
 
 const ACTIVE_ARENA_STATUSES = [
   "waiting",
-  "countdown",
   "starting",
   "active",
-  "submitted",
 ];
 const ARENA_ROOM_MODES: ArenaRoomMode[] = ["duel", "group_lobby"];
 
@@ -293,17 +291,15 @@ export async function fetchCurrentDuelRoom(user: User) {
     .select("*")
     .in("id", roomIds)
     .in("mode", ARENA_ROOM_MODES)
-    .in("status", [...ACTIVE_ARENA_STATUSES, "finished"])
+    .in("status", ACTIVE_ARENA_STATUSES)
     .order("created_at", { ascending: false })
-    .limit(5);
+    .limit(1);
 
   if (roomsError) {
     return { room: null, error: roomsError.message };
   }
 
-  const roomRow = ((roomsData || []) as ArenaRoomRow[]).find(
-    (row) => row.status !== "finished" || Boolean(row.rematch_requested_by)
-  );
+  const roomRow = ((roomsData || []) as ArenaRoomRow[])[0];
 
   if (!roomRow) {
     return { room: null, error: null };

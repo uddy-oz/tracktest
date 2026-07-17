@@ -37,7 +37,11 @@ function ArenaActiveRoomCard({
   isClosing = false,
   compact = false,
 }: ArenaActiveRoomCardProps) {
-  const presentPlayers = room.players.filter((player) => !player.leftAt);
+  const presentPlayers = room.players.filter(
+    (player) =>
+      !player.leftAt &&
+      !["cancelled", "left", "forfeit"].includes(player.resultStatus)
+  );
   const isHost = room.hostUserId === currentUserId;
   const canClose = isHost && ["waiting", "starting"].includes(room.status);
 
