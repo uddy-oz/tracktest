@@ -7,14 +7,14 @@ import {
   endArenaRoom,
   fetchArenaRoom,
   fetchArenaInvite,
-  fetchCurrentDuelRoom,
   fetchOpenDuelRooms,
   finishDuelRoom,
   forfeitDuelRoom,
   getFriendlyArenaError,
+  isArenaRoomRecoverableForUser,
   joinArenaRoomByInvite,
   joinDuelRoom,
-  leaveWaitingDuelRoom,
+  leaveArenaRoom,
   normalizeArenaInviteCode,
   requestArenaRematch,
   resetArenaRoomForRematch,
@@ -95,7 +95,11 @@ const CLIP_LENGTH_SECONDS = 5;
 const DUEL_SYNC_START_DELAY_MS = 5000;
 const DUEL_ROOM_REFRESH_MS = 2500;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
-const RECOVERABLE_ARENA_ROOM_STATUSES = new Set(["waiting", "starting", "active", "finished"]);
+const LEGACY_ARENA_ROOM_STORAGE_KEYS = [
+  "tracktest.activeArenaRoomId",
+  "tracktestArenaRoomId",
+  "tracktest_arena_room_id",
+];
 const ARENA_MODE_SETTINGS: Record<
   ArenaRoomMode,
   {
@@ -137,6 +141,22 @@ const MAX_QUESTIONS = 12;
 const RING_RADIUS = 54;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
+function clearStoredArenaRoomReferences() {
+  for (const key of LEGACY_ARENA_ROOM_STORAGE_KEYS) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {
+      // The database membership remains the source of truth.
+    }
+  }
+}
+
 type ArenaPageProps = {
   session: Session | null;
   profile: UserProfile | null;
@@ -161,7 +181,7 @@ function ArenaPage({
   onInviteHandled,
 }: ArenaPageProps) {
   const [selectedArenaTheme, setSelectedArenaTheme] =
-    useState<ArenaTheme>("duel");
+    useState<ArenaTheme | null>(null);
   const [activeArenaMode, setActiveArenaMode] = useState<ArenaRoomMode | null>(
     null
   );
@@ -183,6 +203,7 @@ function ArenaPage({
   const [isJoiningInvite, setIsJoiningInvite] = useState(false);
   const [isChoosingRematchAlbum, setIsChoosingRematchAlbum] = useState(false);
   const [isClosingActiveRoom, setIsClosingActiveRoom] = useState(false);
+  const [isLeavingRoom, setIsLeavingRoom] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
@@ -217,6 +238,8 @@ function ArenaPage({
   const isDuelCorrectHoldRef = useRef(false);
   const hasSubmittedDuelResultRef = useRef(false);
   const activeRoundKeyRef = useRef<string>("");
+  const leavingRoomIdRef = useRef<string | null>(null);
+  const ignoredRoomIdsRef = useRef(new Set<string>());
 
   const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
   const selectedMode =
@@ -232,14 +255,15 @@ function ArenaPage({
   const duelRingOffset = RING_CIRCUMFERENCE * (1 - duelTimerProgress);
   const shouldShowDuelDanger =
     duelPhase === "answering" && duelTimeRemaining <= 3 && !duelSelectedAnswer;
-  const visibleRecoveryRoom = [activeRoom, recoveredRoom].find(
-    (room): room is ArenaRoom =>
-      Boolean(
-        room &&
-          RECOVERABLE_ARENA_ROOM_STATUSES.has(room.status) &&
-          (room.status !== "finished" || room.rematchRequestedBy)
-      )
-  ) || null;
+  const visibleRecoveryRoom =
+    [activeRoom, recoveredRoom].find(
+      (room): room is ArenaRoom =>
+        Boolean(
+          room &&
+            !ignoredRoomIdsRef.current.has(room.id) &&
+            isArenaRoomRecoverableForUser(room, session?.user.id)
+        )
+    ) || null;
 
   const burstPieces = useMemo(
     () =>
@@ -257,10 +281,6 @@ function ArenaPage({
     }
 
     void loadOpenRooms(false);
-
-    if (session?.user && !inviteCode) {
-      void reconnectCurrentDuelRoom();
-    }
   }, [activeArenaMode, session?.user?.id, inviteCode]);
 
   useEffect(() => {
@@ -270,6 +290,7 @@ function ArenaPage({
       }
 
       setActiveArenaMode(null);
+      setSelectedArenaTheme(null);
       setPendingPublicRoom(null);
       setSelectedAlbum(null);
       setAlbums([]);
@@ -324,13 +345,21 @@ function ArenaPage({
   }, [inviteCode]);
 
   useEffect(() => {
-    if (!recoveredRoom || activeRoom || pendingInvite || inviteCode) {
+    if (
+      !recoveredRoom ||
+      activeRoom ||
+      activeArenaMode ||
+      pendingInvite ||
+      inviteCode ||
+      ignoredRoomIdsRef.current.has(recoveredRoom.id) ||
+      !isArenaRoomRecoverableForUser(recoveredRoom, session?.user.id)
+    ) {
       return;
     }
 
     updateActiveRoom(recoveredRoom);
     resetDuelLocalState();
-  }, [activeRoom, inviteCode, pendingInvite, recoveredRoom]);
+  }, [activeArenaMode, activeRoom, inviteCode, pendingInvite, recoveredRoom, session?.user.id]);
 
   useEffect(() => {
     if (!activeArenaMode || activeRoom) {
@@ -937,19 +966,6 @@ function ArenaPage({
     startDuelRevealCountdown();
   }
 
-  async function reconnectCurrentDuelRoom() {
-    if (!session?.user) {
-      return;
-    }
-
-    const { room, error } = await fetchCurrentDuelRoom(session.user);
-
-    if (room) {
-      updateActiveRoom(room);
-      setMessage(error || "Reconnected to your active Arena room.");
-    }
-  }
-
   async function loadOpenRooms(showErrors = true) {
     if (!activeArenaMode) {
       return;
@@ -995,6 +1011,10 @@ function ArenaPage({
   }
 
   function updateActiveRoom(room: ArenaRoom | null) {
+    if (room && ignoredRoomIdsRef.current.has(room.id)) {
+      return;
+    }
+
     setActiveRoom(room);
     onArenaRoomChange?.(room);
 
@@ -1002,6 +1022,32 @@ function ArenaPage({
       setActiveArenaMode(room.mode);
       setSelectedArenaTheme(room.mode);
     }
+  }
+
+  function allowRoomActivation(room: ArenaRoom) {
+    ignoredRoomIdsRef.current.delete(room.id);
+    updateActiveRoom(room);
+  }
+
+  function clearActiveRoomClientState(roomId: string, nextMessage: string) {
+    ignoredRoomIdsRef.current.add(roomId);
+    clearStoredArenaRoomReferences();
+    updateActiveRoom(null);
+    setActiveArenaMode(null);
+    setSelectedArenaTheme(null);
+    setPendingInvite(null);
+    setPendingPublicRoom(null);
+    setInviteError("");
+    setRoomCodeInput("");
+    setSelectedAlbum(null);
+    setAlbums([]);
+    setVisibleAlbumCount(ALBUMS_PER_PAGE);
+    setSearchTerm("");
+    setIsChoosingRematchAlbum(false);
+    setIsPrivateRoom(false);
+    resetDuelLocalState();
+    setMessage(nextMessage);
+    onInviteHandled?.();
   }
 
   function getInviteUnavailableMessage(invite: ArenaInvite | null) {
@@ -1099,7 +1145,7 @@ function ArenaPage({
     });
 
     if (room) {
-      updateActiveRoom(room);
+      allowRoomActivation(room);
       resetDuelLocalState();
       setSelectedAlbum(null);
       await loadOpenRooms(false);
@@ -1139,7 +1185,7 @@ function ArenaPage({
       const { room: freshRoom, error } = await fetchArenaRoom(room.id);
 
       const nextRoom = freshRoom || room;
-      updateActiveRoom(nextRoom);
+      allowRoomActivation(nextRoom);
       setMessage(error || "Entered room.");
       return;
     }
@@ -1157,7 +1203,7 @@ function ArenaPage({
     });
 
     if (joinedRoom) {
-      updateActiveRoom(joinedRoom);
+      allowRoomActivation(joinedRoom);
       setPendingPublicRoom(null);
       resetDuelLocalState();
       await loadOpenRooms(false);
@@ -1193,7 +1239,7 @@ function ArenaPage({
     });
 
     if (room) {
-      updateActiveRoom(room);
+      allowRoomActivation(room);
       setPendingInvite(null);
       resetDuelLocalState();
       onInviteHandled?.();
@@ -1253,9 +1299,15 @@ function ArenaPage({
       return;
     }
 
-    const { room, error } = await fetchArenaRoom(activeRoom.id);
+    const roomId = activeRoom.id;
 
-    if (room) {
+    if (ignoredRoomIdsRef.current.has(roomId)) {
+      return;
+    }
+
+    const { room, error } = await fetchArenaRoom(roomId);
+
+    if (room && !ignoredRoomIdsRef.current.has(roomId)) {
       updateActiveRoom(room);
     }
 
@@ -1273,57 +1325,81 @@ function ArenaPage({
   }
 
   async function handleCloseArenaRoom(room: ArenaRoom) {
-    if (room.hostUserId !== session?.user.id) {
+    if (
+      room.hostUserId !== session?.user.id ||
+      isClosingActiveRoom ||
+      leavingRoomIdRef.current === room.id
+    ) {
       return;
     }
 
+    leavingRoomIdRef.current = room.id;
+    ignoredRoomIdsRef.current.add(room.id);
     setIsClosingActiveRoom(true);
     const { error } = await cancelDuelRoom(room.id);
 
-    setMessage(error || "Arena room closed.");
-    if (!error) {
-      updateActiveRoom(null);
-      resetDuelLocalState();
+    if (error) {
+      ignoredRoomIdsRef.current.delete(room.id);
+      setMessage(error);
+    } else {
+      clearActiveRoomClientState(room.id, "Arena room closed.");
     }
+    leavingRoomIdRef.current = null;
     setIsClosingActiveRoom(false);
     await loadOpenRooms(false);
   }
 
   async function handleLeaveDuelRoom() {
-    if (!activeRoom || !session?.user) {
+    if (
+      !activeRoom ||
+      !session?.user ||
+      leavingRoomIdRef.current === activeRoom.id
+    ) {
       return;
     }
 
-    const isHost = activeRoom.hostUserId === session.user.id;
+    const roomId = activeRoom.id;
+    leavingRoomIdRef.current = roomId;
+    ignoredRoomIdsRef.current.add(roomId);
+    setIsLeavingRoom(true);
 
-    if (activeRoom.status === "waiting" || activeRoom.status === "starting") {
-      const result = isHost
-        ? await cancelDuelRoom(activeRoom.id)
-        : await leaveWaitingDuelRoom(activeRoom.id);
+    const { error } = await leaveArenaRoom(roomId);
 
-      setMessage(
-        result.error ||
-          (isHost ? "Duel lobby closed." : "You left the Duel lobby.")
-      );
-      updateActiveRoom(null);
-      resetDuelLocalState();
-      await loadOpenRooms(false);
+    if (error) {
+      ignoredRoomIdsRef.current.delete(roomId);
+      setMessage(error);
+    } else {
+      clearActiveRoomClientState(roomId, "You left the Arena room.");
+    }
+
+    leavingRoomIdRef.current = null;
+    setIsLeavingRoom(false);
+    await loadOpenRooms(false);
+  }
+
+  async function handleForfeitDuelRoom() {
+    if (
+      !activeRoom ||
+      !session?.user ||
+      leavingRoomIdRef.current === activeRoom.id
+    ) {
       return;
     }
 
-    if (activeRoom.status === "active") {
-      const result = await forfeitDuelRoom(activeRoom.id);
+    leavingRoomIdRef.current = activeRoom.id;
+    setIsLeavingRoom(true);
+    const result = await forfeitDuelRoom(activeRoom.id);
 
-      setMessage(result.error || "You forfeited the Duel.");
+    setMessage(result.error || "You forfeited the game.");
+    if (!result.error) {
       setIsDuelFinished(true);
       setDuelPhase("idle");
       await refreshActiveRoom(false);
       await loadOpenRooms(false);
-      return;
     }
 
-    updateActiveRoom(null);
-    resetDuelLocalState();
+    leavingRoomIdRef.current = null;
+    setIsLeavingRoom(false);
   }
 
   function getPresentPlayers(room: ArenaRoom) {
@@ -1450,14 +1526,25 @@ function ArenaPage({
   }
 
   async function handleEndArenaRoom() {
-    if (!activeRoom) {
+    if (!activeRoom || leavingRoomIdRef.current === activeRoom.id) {
       return;
     }
 
-    const { error } = await endArenaRoom(activeRoom.id);
-    setMessage(error || "Arena room ended.");
-    updateActiveRoom(null);
-    resetDuelLocalState();
+    const roomId = activeRoom.id;
+    leavingRoomIdRef.current = roomId;
+    ignoredRoomIdsRef.current.add(roomId);
+    setIsLeavingRoom(true);
+    const { error } = await endArenaRoom(roomId);
+
+    if (error) {
+      ignoredRoomIdsRef.current.delete(roomId);
+      setMessage(error);
+    } else {
+      clearActiveRoomClientState(roomId, "Arena room ended.");
+    }
+
+    leavingRoomIdRef.current = null;
+    setIsLeavingRoom(false);
     await loadOpenRooms(false);
   }
 
@@ -1702,10 +1789,14 @@ function ArenaPage({
       : pendingPublicRoom
         ? getHostName(pendingPublicRoom)
         : "Arena host";
-    const isRecoverableInviteStatus = RECOVERABLE_ARENA_ROOM_STATUSES.has(status);
+    const isRecoverableInviteStatus = ["waiting", "starting", "active"].includes(
+      status
+    );
     const isAlreadyInside =
       Boolean(targetRoomId) &&
-      (activeRoom?.id === targetRoomId || recoveredRoom?.id === targetRoomId);
+      (activeRoom?.id === targetRoomId ||
+        (recoveredRoom?.id === targetRoomId &&
+          isArenaRoomRecoverableForUser(recoveredRoom, session?.user.id)));
     const isHostInvite =
       Boolean(session?.user.id) &&
       (pendingInvite?.hostUserId === session?.user.id ||
@@ -1780,7 +1871,7 @@ function ArenaPage({
                   if (roomId) {
                     fetchArenaRoom(roomId).then(({ room }) => {
                       if (room) {
-                        updateActiveRoom(room);
+                        allowRoomActivation(room);
                         setPendingInvite(null);
                         setPendingPublicRoom(null);
                         onInviteHandled?.();
@@ -2182,7 +2273,9 @@ function ArenaPage({
       );
       const resultPlayers = activeRoom.players.filter(
         (player) =>
-          player.resultStatus !== "cancelled" && player.resultStatus !== "left"
+          !player.leftAt &&
+          player.resultStatus !== "cancelled" &&
+          player.resultStatus !== "left"
       );
       const bothPlayersFinished =
         activeRoom.status === "finished" ||
@@ -2201,13 +2294,11 @@ function ArenaPage({
             </div>
             <button
               type="button"
-              className="secondary-button"
-              onClick={() => {
-                updateActiveRoom(null);
-                resetDuelLocalState();
-              }}
+              className="secondary-button danger-button"
+              disabled={isLeavingRoom}
+              onClick={() => void handleLeaveDuelRoom()}
             >
-              Back to Lobby
+              {isLeavingRoom ? "Leaving..." : "Leave Lobby"}
             </button>
           </section>
         );
@@ -2310,12 +2401,10 @@ function ArenaPage({
                     <button
                       type="button"
                       className="secondary-button danger-button"
-                      onClick={() => {
-                        updateActiveRoom(null);
-                        resetDuelLocalState();
-                      }}
+                      disabled={isLeavingRoom}
+                      onClick={() => void handleLeaveDuelRoom()}
                     >
-                      Leave Lobby
+                      {isLeavingRoom ? "Leaving..." : "Leave Lobby"}
                     </button>
                   </>
                 )}
@@ -2331,13 +2420,23 @@ function ArenaPage({
         if (currentPlayer?.finishedAt || isDuelFinished) {
           return (
             <section className="duel-room-screen">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void refreshActiveRoom()}
-              >
-                Refresh Results
-              </button>
+              <div className="duel-room-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void refreshActiveRoom()}
+                >
+                  Refresh Results
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button danger-button"
+                  disabled={isLeavingRoom}
+                  onClick={() => void handleLeaveDuelRoom()}
+                >
+                  {isLeavingRoom ? "Leaving..." : "Leave Lobby"}
+                </button>
+              </div>
               <div className="duel-results-card">
                 <p className="eyebrow">{activeModeSettings.title} Submitted</p>
                 <h2>
@@ -2383,9 +2482,10 @@ function ArenaPage({
               <button
                 type="button"
                 className="secondary-button danger-button"
-                onClick={() => void handleLeaveDuelRoom()}
+                disabled={isLeavingRoom}
+                onClick={() => void handleForfeitDuelRoom()}
               >
-                Forfeit Game
+                {isLeavingRoom ? "Forfeiting..." : "Forfeit Game"}
               </button>
             </div>
 
@@ -2525,7 +2625,7 @@ function ArenaPage({
             >
               Refresh Room
             </button>
-            {isHost && (
+            {isHost && activeRoom.mode === "duel" && (
               <button
                 type="button"
                 className="secondary-button danger-button"
@@ -2534,13 +2634,14 @@ function ArenaPage({
                 Close Lobby
               </button>
             )}
-            {!isHost && (
+            {(!isHost || activeRoom.mode !== "duel") && (
               <button
                 type="button"
                 className="secondary-button danger-button"
+                disabled={isLeavingRoom}
                 onClick={() => void handleLeaveDuelRoom()}
               >
-                Leave Lobby
+                {isLeavingRoom ? "Leaving..." : "Leave Lobby"}
               </button>
             )}
           </div>
@@ -2767,7 +2868,11 @@ function ArenaPage({
   }
 
   return (
-    <section className={`arena-page arena-theme-${selectedArenaTheme}`}>
+    <section
+      className={`arena-page ${
+        selectedArenaTheme ? `arena-theme-${selectedArenaTheme}` : ""
+      }`}
+    >
       <div className="arena-hero">
         <p className="eyebrow">TrackTest Arena</p>
         <h1>Arena Modes</h1>
@@ -2799,7 +2904,7 @@ function ArenaPage({
             room={visibleRecoveryRoom}
             currentUserId={session?.user.id}
             onResume={() => {
-              updateActiveRoom(visibleRecoveryRoom);
+              allowRoomActivation(visibleRecoveryRoom);
               setActiveArenaMode(visibleRecoveryRoom.mode);
               setSelectedArenaTheme(visibleRecoveryRoom.mode);
               setMessage("Resumed active Arena room.");
@@ -2809,25 +2914,6 @@ function ArenaPage({
           />
         </section>
       )}
-
-      <form className="arena-code-entry" onSubmit={handleJoinWithCode}>
-        <div>
-          <p className="eyebrow">Private Room</p>
-          <h2>Join with Code</h2>
-        </div>
-        <input
-          type="text"
-          placeholder="Enter private room code"
-          value={roomCodeInput}
-          aria-label="Enter private room code"
-          onChange={(event) =>
-            setRoomCodeInput(normalizeArenaInviteCode(event.target.value))
-          }
-        />
-        <button type="submit" disabled={isInviteLoading}>
-          {isInviteLoading ? "Checking..." : "Join with Code"}
-        </button>
-      </form>
 
       <div className="arena-mode-grid">
         {arenaModes.map((mode) => {
@@ -2884,6 +2970,25 @@ function ArenaPage({
         })}
       </div>
 
+      <form className="arena-code-entry" onSubmit={handleJoinWithCode}>
+        <div>
+          <p className="eyebrow">Private Room</p>
+          <h2>Join with Code</h2>
+        </div>
+        <input
+          type="text"
+          placeholder="Enter private room code"
+          value={roomCodeInput}
+          aria-label="Enter private room code"
+          onChange={(event) =>
+            setRoomCodeInput(normalizeArenaInviteCode(event.target.value))
+          }
+        />
+        <button type="submit" disabled={isInviteLoading}>
+          {isInviteLoading ? "Checking..." : "Join with Code"}
+        </button>
+      </form>
+
       {message && <p className="arena-message">{message}</p>}
       {(activeRoom ||
         activeArenaMode ||
@@ -2903,6 +3008,7 @@ function ArenaPage({
               !inviteError
             ) {
               setActiveArenaMode(null);
+              setSelectedArenaTheme(null);
               setPendingPublicRoom(null);
               setSelectedAlbum(null);
               setAlbums([]);
@@ -2917,6 +3023,7 @@ function ArenaPage({
                 className="arena-modal-close"
                 onClick={() => {
                   setActiveArenaMode(null);
+                  setSelectedArenaTheme(null);
                   setPendingPublicRoom(null);
                   setSelectedAlbum(null);
                   setAlbums([]);

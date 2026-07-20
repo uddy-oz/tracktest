@@ -10,7 +10,10 @@ import {
   type CompactPlayerBadge,
 } from "../lib/playerIdentity";
 import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
-import type { ArenaRoom } from "../lib/arenaRooms";
+import {
+  isArenaRoomRecoverableForUser,
+  type ArenaRoom,
+} from "../lib/arenaRooms";
 import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
@@ -113,12 +116,12 @@ function HomePage({
     .slice(0, 3);
   const dailyGoals = getDailyGoalFoundation(stats).slice(0, 3);
   const recentResults = stats.quizResults.slice(0, 3);
-  const recoverableArenaRoom =
-    activeArenaRoom &&
-    (["waiting", "starting", "active"].includes(activeArenaRoom.status) ||
-      (activeArenaRoom.status === "finished" && activeArenaRoom.rematchRequestedBy))
-      ? activeArenaRoom
-      : null;
+  const recoverableArenaRoom = isArenaRoomRecoverableForUser(
+    activeArenaRoom,
+    session?.user.id
+  )
+    ? activeArenaRoom
+    : null;
   const displayName = session
     ? getProfileDisplayLabel(profile, session.user.email)
     : "Guest Player";

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
 import HomePage from "./Components/HomePage";
@@ -12,6 +12,7 @@ import ArenaPage from "./Components/ArenaPage";
 import {
   cancelDuelRoom,
   fetchCurrentDuelRoom,
+  isArenaRoomRecoverableForUser,
   type ArenaRoom,
 } from "./lib/arenaRooms";
 import { supabase } from "./lib/supabaseClient";
@@ -23,14 +24,6 @@ import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
 type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
-
-function isRecoverableArenaRoom(room: ArenaRoom | null) {
-  return Boolean(
-    room &&
-      (["waiting", "starting", "active"].includes(room.status) ||
-        (room.status === "finished" && room.rematchRequestedBy))
-  );
-}
 
 function hasCompleteUsername(profile: UserProfile | null) {
   return Boolean(profile?.username && validateUsername(profile.username).ok);
@@ -92,8 +85,11 @@ function App() {
     CompactPlayerBadge[] | null
   >(null);
   const [activeArenaRoom, setActiveArenaRoom] = useState<ArenaRoom | null>(null);
+  const arenaRecoveryGenerationRef = useRef(0);
 
   const refreshActiveArenaRoom = useCallback(async () => {
+    const recoveryGeneration = ++arenaRecoveryGenerationRef.current;
+
     if (!session?.user) {
       setActiveArenaRoom(null);
       return null;
@@ -105,9 +101,25 @@ function App() {
       console.error("Could not load active Arena room:", error);
     }
 
-    setActiveArenaRoom(isRecoverableArenaRoom(room) ? room : null);
+    if (recoveryGeneration !== arenaRecoveryGenerationRef.current) {
+      return room;
+    }
+
+    setActiveArenaRoom(
+      isArenaRoomRecoverableForUser(room, session.user.id) ? room : null
+    );
     return room;
   }, [session?.user]);
+
+  const handleArenaRoomChange = useCallback(
+    (room: ArenaRoom | null) => {
+      arenaRecoveryGenerationRef.current += 1;
+      setActiveArenaRoom(
+        isArenaRoomRecoverableForUser(room, session?.user.id) ? room : null
+      );
+    },
+    [session?.user.id]
+  );
 
   useEffect(() => {
     if (!supabase) {
@@ -439,9 +451,7 @@ function App() {
           onLogin={showAuth}
           inviteCode={arenaInviteCode}
           recoveredRoom={activeArenaRoom}
-          onArenaRoomChange={(room) =>
-            setActiveArenaRoom(isRecoverableArenaRoom(room) ? room : null)
-          }
+          onArenaRoomChange={handleArenaRoomChange}
           onInviteHandled={() => {
             window.history.pushState({}, "", "/multiplayer");
             setArenaInviteCode(null);

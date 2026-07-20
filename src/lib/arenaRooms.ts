@@ -132,6 +132,35 @@ const ACTIVE_ARENA_STATUSES = [
   "finished",
 ];
 const ARENA_ROOM_MODES: ArenaRoomMode[] = ["duel", "group_lobby", "party_mode"];
+const INACTIVE_MEMBERSHIP_STATUSES = new Set(["cancelled", "left"]);
+
+export function isArenaRoomRecoverableForUser(
+  room: ArenaRoom | null,
+  userId: string | null | undefined
+) {
+  if (!room || !userId) {
+    return false;
+  }
+
+  const currentPlayer = room.players.find(
+    (player) => player.userId === userId
+  );
+  const hasCurrentMembership = Boolean(
+    currentPlayer &&
+      !currentPlayer.leftAt &&
+      !INACTIVE_MEMBERSHIP_STATUSES.has(currentPlayer.resultStatus)
+  );
+
+  if (!hasCurrentMembership) {
+    return false;
+  }
+
+  if (["waiting", "starting", "active"].includes(room.status)) {
+    return true;
+  }
+
+  return room.status === "finished" && Boolean(room.rematchRequestedBy);
+}
 
 function isArenaRoomMode(value: string | null | undefined): value is ArenaRoomMode {
   return value === "duel" || value === "group_lobby" || value === "party_mode";
@@ -200,7 +229,7 @@ function generateInviteCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-function getPlayerDisplay(profile: UserProfile | null, _user: User) {
+function getPlayerDisplay(profile: UserProfile | null) {
   return {
     displayName:
       profile?.displayName || profile?.username || "Arena Player",
@@ -270,7 +299,7 @@ export async function fetchCurrentDuelRoom(user: User) {
 
   const { data: playerRows, error: playerError } = await supabase
     .from("arena_room_players")
-    .select("room_id")
+    .select("room_id, result_status")
     .eq("user_id", user.id)
     .is("left_at", null)
     .order("joined_at", { ascending: false });
@@ -280,7 +309,14 @@ export async function fetchCurrentDuelRoom(user: User) {
   }
 
   const roomIds = Array.from(
-    new Set(((playerRows || []) as Array<{ room_id: string }>).map((row) => row.room_id))
+    new Set(
+      ((playerRows || []) as Array<{ room_id: string; result_status: string | null }>)
+        .filter(
+          (row) =>
+            !INACTIVE_MEMBERSHIP_STATUSES.has(row.result_status || "active")
+        )
+        .map((row) => row.room_id)
+    )
   );
 
   if (roomIds.length === 0) {
@@ -300,15 +336,19 @@ export async function fetchCurrentDuelRoom(user: User) {
     return { room: null, error: roomsError.message };
   }
 
-  const roomRow = ((roomsData || []) as ArenaRoomRow[]).find(
-    (row) => row.status !== "finished" || Boolean(row.rematch_requested_by)
-  );
+  for (const roomRow of (roomsData || []) as ArenaRoomRow[]) {
+    if (roomRow.status === "finished" && !roomRow.rematch_requested_by) {
+      continue;
+    }
 
-  if (!roomRow) {
-    return { room: null, error: null };
+    const result = await fetchArenaRoom(roomRow.id);
+
+    if (isArenaRoomRecoverableForUser(result.room, user.id)) {
+      return result;
+    }
   }
 
-  return fetchArenaRoom(roomRow.id);
+  return { room: null, error: null };
 }
 
 export async function createDuelRoom({
@@ -373,7 +413,7 @@ export async function createDuelRoom({
   }
 
   const room = mapRoomRow(roomData as ArenaRoomRow);
-  const { displayName, username } = getPlayerDisplay(profile, user);
+  const { displayName, username } = getPlayerDisplay(profile);
   const { data: playerData, error: playerError } = await supabase
     .from("arena_room_players")
     .insert({
@@ -454,7 +494,7 @@ export async function joinDuelRoom({
     return { room: targetRoom, error: "This Arena room is already full." };
   }
 
-  const { displayName, username } = getPlayerDisplay(profile, user);
+  const { displayName, username } = getPlayerDisplay(profile);
   const { data: rejoinedPlayers, error: rejoinError } = await supabase
     .from("arena_room_players")
     .update({
@@ -583,7 +623,7 @@ export async function joinArenaRoomByInvite({
     };
   }
 
-  const { displayName, username } = getPlayerDisplay(profile, user);
+  const { displayName, username } = getPlayerDisplay(profile);
   const { data, error } = await supabase.rpc("join_arena_room_by_invite", {
     target_invite_code: normalizeArenaInviteCode(inviteCode),
     player_display_name: displayName,
@@ -768,6 +808,18 @@ export async function leaveWaitingDuelRoom(roomId: string) {
   }
 
   const { error } = await supabase.rpc("leave_waiting_arena_room", {
+    target_room_id: roomId,
+  });
+
+  return { error: getFriendlyArenaError(error?.message) || null };
+}
+
+export async function leaveArenaRoom(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("leave_arena_room", {
     target_room_id: roomId,
   });
 
