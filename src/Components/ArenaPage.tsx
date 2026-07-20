@@ -57,7 +57,7 @@ const arenaModes = [
     description:
       "In person game where one host plays music and everyone answers on their phones.",
     accent: "party",
-    enabled: false,
+    enabled: true,
   },
   {
     title: "Championship",
@@ -95,7 +95,7 @@ const CLIP_LENGTH_SECONDS = 5;
 const DUEL_SYNC_START_DELAY_MS = 5000;
 const DUEL_ROOM_REFRESH_MS = 2500;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
-const RECOVERABLE_ARENA_ROOM_STATUSES = new Set(["waiting", "starting", "active"]);
+const RECOVERABLE_ARENA_ROOM_STATUSES = new Set(["waiting", "starting", "active", "finished"]);
 const ARENA_MODE_SETTINGS: Record<
   ArenaRoomMode,
   {
@@ -123,6 +123,14 @@ const ARENA_MODE_SETTINGS: Record<
     maxPlayers: 10,
     minPlayersToStart: 3,
   },
+  party_mode: {
+    title: "Party Mode",
+    roomTitle: "Party Room",
+    activeTitle: "Party Mode Live",
+    resultsTitle: "Party Results",
+    maxPlayers: 30,
+    minPlayersToStart: 2,
+  },
 };
 const MIN_QUESTIONS = 5;
 const MAX_QUESTIONS = 12;
@@ -140,7 +148,7 @@ type ArenaPageProps = {
   onInviteHandled?: () => void;
 };
 
-type ArenaTheme = ArenaRoomMode | "party" | "championship";
+type ArenaTheme = ArenaRoomMode | "championship";
 
 function ArenaPage({
   session,
@@ -208,6 +216,7 @@ function ArenaPage({
   const duelCorrectAnswerHoldTimerRef = useRef<number | null>(null);
   const isDuelCorrectHoldRef = useRef(false);
   const hasSubmittedDuelResultRef = useRef(false);
+  const activeRoundKeyRef = useRef<string>("");
 
   const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
   const selectedMode =
@@ -225,7 +234,11 @@ function ArenaPage({
     duelPhase === "answering" && duelTimeRemaining <= 3 && !duelSelectedAnswer;
   const visibleRecoveryRoom = [activeRoom, recoveredRoom].find(
     (room): room is ArenaRoom =>
-      Boolean(room && RECOVERABLE_ARENA_ROOM_STATUSES.has(room.status))
+      Boolean(
+        room &&
+          RECOVERABLE_ARENA_ROOM_STATUSES.has(room.status) &&
+          (room.status !== "finished" || room.rematchRequestedBy)
+      )
   ) || null;
 
   const burstPieces = useMemo(
@@ -249,6 +262,24 @@ function ArenaPage({
       void reconnectCurrentDuelRoom();
     }
   }, [activeArenaMode, session?.user?.id, inviteCode]);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || activeRoom || pendingInvite || inviteError) {
+        return;
+      }
+
+      setActiveArenaMode(null);
+      setPendingPublicRoom(null);
+      setSelectedAlbum(null);
+      setAlbums([]);
+      setMessage("");
+    }
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [activeRoom, inviteError, pendingInvite]);
 
   useEffect(() => {
     let isActive = true;
@@ -315,6 +346,7 @@ function ArenaPage({
 
   useEffect(() => {
     if (!activeRoom) {
+      activeRoundKeyRef.current = "";
       return;
     }
 
@@ -324,6 +356,48 @@ function ArenaPage({
 
     return () => window.clearInterval(refreshId);
   }, [activeRoom?.id]);
+
+  useEffect(() => {
+    if (!activeRoom) {
+      activeRoundKeyRef.current = "";
+      return;
+    }
+
+    const roundKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.status}:${activeRoom.startedAt || ""}`;
+
+    if (!activeRoundKeyRef.current) {
+      activeRoundKeyRef.current = roundKey;
+      return;
+    }
+
+    if (activeRoundKeyRef.current === roundKey) {
+      return;
+    }
+
+    const previousRoomId = activeRoundKeyRef.current.split(":")[0];
+    activeRoundKeyRef.current = roundKey;
+
+    if (previousRoomId !== activeRoom.id) {
+      resetDuelLocalState();
+      return;
+    }
+
+    if (activeRoom.status === "waiting") {
+      resetDuelLocalState();
+      return;
+    }
+
+    if (activeRoom.status === "active" && activeRoom.quizQuestions.length > 0) {
+      const startsAtMs = activeRoom.startedAt ? Date.parse(activeRoom.startedAt) : 0;
+      resetDuelLocalState(startsAtMs && Date.now() < startsAtMs ? "syncing" : "idle");
+    }
+  }, [
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.status,
+    activeRoom?.startedAt,
+    activeRoom?.quizQuestions.length,
+  ]);
 
   useEffect(() => {
     if (
@@ -1046,16 +1120,7 @@ function ArenaPage({
       return;
     }
 
-    const isAlreadyInRoom = room.players.some(
-      (player) => player.userId === session.user.id && !player.leftAt
-    );
-
-    if (isAlreadyInRoom) {
-      void handleJoinRoom(room);
-      return;
-    }
-
-    setPendingPublicRoom(room);
+    void handleJoinRoom(room);
     setPendingInvite(null);
     setMessage("");
   }
@@ -1250,8 +1315,9 @@ function ArenaPage({
       const result = await forfeitDuelRoom(activeRoom.id);
 
       setMessage(result.error || "You forfeited the Duel.");
-      updateActiveRoom(null);
-      resetDuelLocalState();
+      setIsDuelFinished(true);
+      setDuelPhase("idle");
+      await refreshActiveRoom(false);
       await loadOpenRooms(false);
       return;
     }
@@ -1264,7 +1330,7 @@ function ArenaPage({
     return room.players.filter(
       (player) =>
         !player.leftAt &&
-        !["cancelled", "left", "forfeit"].includes(player.resultStatus)
+        !["cancelled", "left"].includes(player.resultStatus)
     );
   }
 
@@ -1291,9 +1357,7 @@ function ArenaPage({
     }
 
     const freshModeSettings =
-      freshRoom.mode === "group_lobby"
-        ? ARENA_MODE_SETTINGS.group_lobby
-        : ARENA_MODE_SETTINGS.duel;
+      ARENA_MODE_SETTINGS[freshRoom.mode] || ARENA_MODE_SETTINGS.duel;
 
     if (getPresentPlayers(freshRoom).length < freshModeSettings.minPlayersToStart) {
       setMessage(
@@ -1671,12 +1735,18 @@ function ArenaPage({
       <section className="arena-accept-screen">
         <div className="duel-results-card arena-accept-card">
           <p className="eyebrow">
-            {isGroupInvite ? "Group Lobby Invite" : "Duel Request"}
+            {inviteMode === "party_mode"
+              ? "Party Mode Invite"
+              : isGroupInvite
+                ? "Group Lobby Invite"
+                : "Duel Request"}
           </p>
           <h2>
-            {isGroupInvite
+            {inviteMode === "party_mode"
+              ? `${hostName} invited you to a Party Mode room on ${albumName}`
+              : isGroupInvite
               ? `${hostName} invited you to join ${albumName}`
-              : `${hostName} wants to Duel on ${albumName}`}
+                : `${hostName} wants to Duel on ${albumName}`}
           </h2>
           {artworkUrl && <img src={artworkUrl} alt="" aria-hidden />}
           <p>{artistName}</p>
@@ -1738,7 +1808,9 @@ function ArenaPage({
                   ? "Joining..."
                   : isGroupInvite
                     ? "Accept Group Lobby"
-                    : "Accept Duel"}
+                    : inviteMode === "party_mode"
+                      ? "Accept Party Mode"
+                      : "Accept Duel"}
             </button>
             <button
               type="button"
@@ -1863,6 +1935,8 @@ function ArenaPage({
             ? "Creating..."
             : selectedMode === "group_lobby"
               ? "Create Group Lobby"
+              : selectedMode === "party_mode"
+                ? "Create Party Room"
               : "Create Duel Room"}
         </button>
       </div>
@@ -2089,11 +2163,10 @@ function ArenaPage({
     }
 
     if (activeRoom) {
-      const activeModeSettings =
-        activeRoom.mode === "group_lobby"
-          ? ARENA_MODE_SETTINGS.group_lobby
-          : ARENA_MODE_SETTINGS.duel;
+      const activeModeSettings = ARENA_MODE_SETTINGS[activeRoom.mode];
       const isActiveGroupLobby = activeRoom.mode === "group_lobby";
+      const isActivePartyMode = activeRoom.mode === "party_mode";
+      const usesLiveLeaderboard = activeRoom.mode !== "duel";
       const presentPlayers = getPresentPlayers(activeRoom);
       const hostPlayer = presentPlayers.find(
         (player) => player.userId === activeRoom.hostUserId
@@ -2160,7 +2233,7 @@ function ArenaPage({
               <h2>{getWinnerLabel(sortedPlayers)}</h2>
               <div
                 className={`duel-player-grid ${
-                  isActiveGroupLobby ? "group-results-grid" : ""
+                  usesLiveLeaderboard ? "group-results-grid" : ""
                 }`}
               >
                 {sortedPlayers.map((player, index) => (
@@ -2219,7 +2292,11 @@ function ArenaPage({
                       className="secondary-button danger-button"
                       onClick={() => void handleEndArenaRoom()}
                     >
-                      {isActiveGroupLobby ? "End Lobby" : "End Duel"}
+                      {isActivePartyMode
+                        ? "End Party"
+                        : isActiveGroupLobby
+                          ? "End Lobby"
+                          : "End Duel"}
                     </button>
                   </>
                 ) : (
@@ -2264,7 +2341,7 @@ function ArenaPage({
               <div className="duel-results-card">
                 <p className="eyebrow">{activeModeSettings.title} Submitted</p>
                 <h2>
-                  {isActiveGroupLobby
+                  {usesLiveLeaderboard
                     ? "Waiting for other players to finish."
                     : "Waiting for opponent to finish."}
                 </h2>
@@ -2312,7 +2389,7 @@ function ArenaPage({
               </button>
             </div>
 
-            {isActiveGroupLobby ? (
+            {usesLiveLeaderboard ? (
               renderGroupLiveLeaderboard(activeRoom)
             ) : (
               <div className="duel-head-to-head">
@@ -2484,7 +2561,7 @@ function ArenaPage({
 
           {renderPrivateInvitePanel(activeRoom)}
 
-          {isActiveGroupLobby ? (
+          {usesLiveLeaderboard ? (
             <div className="duel-player-grid group-player-grid">
               {presentPlayers.map((player) => (
                 <div className="duel-player-card" key={player.id}>
@@ -2761,8 +2838,10 @@ function ArenaPage({
             ? "duel"
             : isGroup
               ? "group_lobby"
-              : null;
-          const theme: ArenaTheme = roomMode || (isParty ? "party" : "championship");
+              : isParty
+                ? "party_mode"
+                : null;
+          const theme: ArenaTheme = roomMode || "championship";
 
           return (
             <button
@@ -2811,8 +2890,46 @@ function ArenaPage({
         pendingInvite ||
         pendingPublicRoom ||
         inviteError ||
-        isInviteLoading) &&
-        renderDuelLobby()}
+        isInviteLoading) && (
+        <div
+          className="arena-mode-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !activeRoom &&
+              !pendingInvite &&
+              !inviteError
+            ) {
+              setActiveArenaMode(null);
+              setPendingPublicRoom(null);
+              setSelectedAlbum(null);
+              setAlbums([]);
+              setMessage("");
+            }
+          }}
+        >
+          <div className="arena-mode-modal">
+            {!activeRoom && !pendingInvite && !inviteError && (
+              <button
+                type="button"
+                className="arena-modal-close"
+                onClick={() => {
+                  setActiveArenaMode(null);
+                  setPendingPublicRoom(null);
+                  setSelectedAlbum(null);
+                  setAlbums([]);
+                  setMessage("");
+                }}
+              >
+                Back to Multiplayer
+              </button>
+            )}
+            {renderDuelLobby()}
+          </div>
+        </div>
+      )}
 
       <button type="button" onClick={onHome}>
         Back Home

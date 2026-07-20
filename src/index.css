@@ -2281,7 +2281,8 @@ button:hover {
   --arena-mode-accent-glow: rgba(97, 218, 251, 0.22);
 }
 
-.arena-theme-party {
+.arena-theme-party,
+.arena-theme-party_mode {
   --arena-mode-accent: #a78bfa;
   --arena-mode-accent-soft: rgba(167, 139, 250, 0.16);
   --arena-mode-accent-glow: rgba(167, 139, 250, 0.26);
@@ -2474,6 +2475,58 @@ button:hover {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+
+.arena-mode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  padding: 86px 18px 28px;
+  display: grid;
+  place-items: start center;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 50% 0%, var(--arena-mode-accent-glow), transparent 34%),
+    rgba(5, 5, 10, 0.84);
+  backdrop-filter: blur(18px);
+  animation: arenaOverlayIn 180ms var(--arena-ease) both;
+}
+
+.arena-mode-modal {
+  position: relative;
+  width: min(100%, 1180px);
+}
+
+.arena-modal-close {
+  width: fit-content;
+  margin: 0 0 14px auto;
+  display: flex;
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 58%);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
+@keyframes arenaOverlayIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .arena-mode-card {

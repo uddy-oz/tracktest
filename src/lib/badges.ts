@@ -29,7 +29,10 @@ export type BadgeIcon =
   | "users"
   | "party"
   | "comeback"
-  | "target";
+  | "target"
+  | "headphones"
+  | "stack"
+  | "key";
 
 export type ArenaBadge = {
   id: string;
@@ -222,6 +225,21 @@ export function getArenaBadges(stats: TrackTestStats) {
     0,
     ...Object.values(stats.albums).map((album) => album.timesPlayed)
   );
+  const albumEntries = Object.values(stats.albums);
+  const albumCount = albumEntries.length;
+  const perfectAlbumCount = albumEntries.filter(
+    (album) => album.bestAccuracy >= 100
+  ).length;
+  const maxAlbumsByArtist = Math.max(
+    0,
+    ...Object.values(
+      albumEntries.reduce<Record<string, number>>((counts, album) => {
+        const artistKey = album.artistName.toLowerCase().trim();
+        counts[artistKey] = (counts[artistKey] || 0) + 1;
+        return counts;
+      }, {})
+    )
+  );
   const masteredArtist = Object.values(stats.artists).find(
     (artist) => artist.quizzesPlayed >= 3 && artist.accuracy >= 85
   );
@@ -230,12 +248,32 @@ export function getArenaBadges(stats: TrackTestStats) {
   const totalPerfectRuns = stats.quizResults.filter(
     (result) => result.accuracyPercentage === 100
   ).length;
+  const currentPerfectRunStreak = stats.quizResults.reduce((streak, result, index) => {
+    if (index > 0 && streak !== index) {
+      return streak;
+    }
+
+    return result.accuracyPercentage === 100 ? streak + 1 : streak;
+  }, 0);
   const bestAccuracy = Math.max(
     0,
     ...stats.quizResults.map((result) => result.accuracyPercentage)
   );
 
   const badges: ArenaBadge[] = [
+    {
+      id: "first-track",
+      title: "First Track",
+      description: "Complete your first Single Player quiz.",
+      category: "Skill",
+      tier: "Bronze",
+      unlocked: stats.overall.totalQuizzesPlayed >= 1,
+      unlockedAt: stats.quizResults.at(-1)?.datePlayed,
+      progress: Math.min(stats.overall.totalQuizzesPlayed, 1),
+      target: 1,
+      icon: "headphones",
+      accent: "bronze",
+    },
     {
       id: "perfect-run",
       title: "Perfect Run",
@@ -316,6 +354,30 @@ export function getArenaBadges(stats: TrackTestStats) {
       accent: "gold",
     },
     {
+      id: "album-scholar",
+      title: "Album Scholar",
+      description: "Earn perfect scores on 5 different albums.",
+      category: "Skill",
+      tier: "Platinum",
+      unlocked: perfectAlbumCount >= 5,
+      progress: Math.min(perfectAlbumCount, 5),
+      target: 5,
+      icon: "stack",
+      accent: "cyan",
+    },
+    {
+      id: "untouchable",
+      title: "Untouchable",
+      description: "Complete 3 perfect quizzes in a row.",
+      category: "Skill",
+      tier: "Legendary",
+      unlocked: currentPerfectRunStreak >= 3,
+      progress: Math.min(currentPerfectRunStreak, 3),
+      target: 3,
+      icon: "shield",
+      accent: "gold",
+    },
+    {
       id: "album-demon",
       title: "Album Demon",
       description: "Play the same album 3 times and chase its best score.",
@@ -328,6 +390,42 @@ export function getArenaBadges(stats: TrackTestStats) {
       accent: "violet",
     },
     {
+      id: "replay-king",
+      title: "Replay King",
+      description: "Play the same album 5 times.",
+      category: "Skill",
+      tier: "Silver",
+      unlocked: maxAlbumPlays >= 5,
+      progress: Math.min(maxAlbumPlays, 5),
+      target: 5,
+      icon: "record",
+      accent: "violet",
+    },
+    {
+      id: "album-collector",
+      title: "Album Collector",
+      description: "Play 10 different albums.",
+      category: "Skill",
+      tier: "Gold",
+      unlocked: albumCount >= 10,
+      progress: Math.min(albumCount, 10),
+      target: 10,
+      icon: "stack",
+      accent: "amber",
+    },
+    {
+      id: "fifty-questions",
+      title: "Fifty Questions",
+      description: "Answer 50 total questions.",
+      category: "Skill",
+      tier: "Bronze",
+      unlocked: stats.overall.totalQuestionsAnswered >= 50,
+      progress: Math.min(stats.overall.totalQuestionsAnswered, 50),
+      target: 50,
+      icon: "star",
+      accent: "bronze",
+    },
+    {
       id: "hundred-question-club",
       title: "100 Question Club",
       description: "Answer 100 total questions across TrackTest Arena.",
@@ -338,6 +436,30 @@ export function getArenaBadges(stats: TrackTestStats) {
       target: 100,
       icon: "star",
       accent: "bronze",
+    },
+    {
+      id: "five-hundred-questions",
+      title: "500 Questions",
+      description: "Answer 500 total questions.",
+      category: "Skill",
+      tier: "Gold",
+      unlocked: stats.overall.totalQuestionsAnswered >= 500,
+      progress: Math.min(stats.overall.totalQuestionsAnswered, 500),
+      target: 500,
+      icon: "star",
+      accent: "gold",
+    },
+    {
+      id: "one-thousand-questions",
+      title: "1,000 Questions",
+      description: "Answer 1,000 total questions.",
+      category: "Skill",
+      tier: "Legendary",
+      unlocked: stats.overall.totalQuestionsAnswered >= 1000,
+      progress: Math.min(stats.overall.totalQuestionsAnswered, 1000),
+      target: 1000,
+      icon: "crown",
+      accent: "gold",
     },
     {
       id: "artist-master",
@@ -367,6 +489,56 @@ export function getArenaBadges(stats: TrackTestStats) {
       target: 5,
       icon: "discs",
       accent: "magenta",
+    },
+    {
+      id: "deep-discography",
+      title: "Deep Discography",
+      description: "Play 3 different albums by the same artist.",
+      category: "Artist Mastery",
+      tier: "Silver",
+      unlocked: maxAlbumsByArtist >= 3,
+      progress: Math.min(maxAlbumsByArtist, 3),
+      target: 3,
+      icon: "discs",
+      accent: "silver",
+    },
+    {
+      id: "five-artist-club",
+      title: "Five Artist Club",
+      description: "Build stats for 5 different artists.",
+      category: "Artist Mastery",
+      tier: "Silver",
+      unlocked: artistCount >= 5,
+      progress: Math.min(artistCount, 5),
+      target: 5,
+      icon: "headphones",
+      accent: "cyan",
+    },
+    {
+      id: "ten-artist-club",
+      title: "Ten Artist Club",
+      description: "Build stats for 10 different artists.",
+      category: "Artist Mastery",
+      tier: "Gold",
+      unlocked: artistCount >= 10,
+      progress: Math.min(artistCount, 10),
+      target: 10,
+      icon: "crown",
+      accent: "amber",
+    },
+    {
+      id: "album-specialist",
+      title: "Album Specialist",
+      description: "Play one album 5 times with 85% or better best accuracy.",
+      category: "Artist Mastery",
+      tier: "Gold",
+      unlocked: albumEntries.some(
+        (album) => album.timesPlayed >= 5 && album.bestAccuracy >= 85
+      ),
+      progress: Math.min(maxAlbumPlays, 5),
+      target: 5,
+      icon: "record",
+      accent: "gold",
     },
     {
       id: "three-day-listener",
@@ -403,6 +575,18 @@ export function getArenaBadges(stats: TrackTestStats) {
       target: 30,
       icon: "flame",
       accent: "gold",
+    },
+    {
+      id: "fourteen-day-music-run",
+      title: "14 Day Music Run",
+      description: "Play on 14 consecutive days.",
+      category: "Daily Streak",
+      tier: "Gold",
+      unlocked: dailyStreak >= 14,
+      progress: Math.min(dailyStreak, 14),
+      target: 14,
+      icon: "calendar",
+      accent: "amber",
     },
     {
       id: "hundred-day-legend",

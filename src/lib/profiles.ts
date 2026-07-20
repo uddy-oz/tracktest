@@ -22,6 +22,15 @@ type ProfileRow = {
 };
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/;
+const RESERVED_USERNAMES = new Set([
+  "admin",
+  "administrator",
+  "tracktest",
+  "support",
+  "moderator",
+  "null",
+  "undefined",
+]);
 
 export function normalizeUsername(username: string) {
   return username.trim().toLowerCase();
@@ -39,10 +48,54 @@ export function validateUsername(username: string) {
     };
   }
 
+  if (RESERVED_USERNAMES.has(normalizedUsername)) {
+    return {
+      ok: false,
+      username: normalizedUsername,
+      message: "That username is reserved. Pick another Arena handle.",
+    };
+  }
+
   return {
     ok: true,
     username: normalizedUsername,
     message: "",
+  };
+}
+
+export async function checkUsernameAvailability(usernameInput: string, userId?: string) {
+  if (!supabase) {
+    return { available: false, message: "Supabase is not configured yet." };
+  }
+
+  const validation = validateUsername(usernameInput);
+
+  if (!validation.ok) {
+    return { available: false, message: validation.message };
+  }
+
+  let query = supabase
+    .from("profiles")
+    .select("id")
+    .eq("username", validation.username)
+    .limit(1);
+
+  if (userId) {
+    query = query.neq("id", userId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return { available: false, message: "Could not check username yet." };
+  }
+
+  return {
+    available: (data || []).length === 0,
+    message:
+      (data || []).length === 0
+        ? "Username is available."
+        : "That username is already taken.",
   };
 }
 

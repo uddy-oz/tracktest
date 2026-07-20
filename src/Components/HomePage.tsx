@@ -115,7 +115,8 @@ function HomePage({
   const recentResults = stats.quizResults.slice(0, 3);
   const recoverableArenaRoom =
     activeArenaRoom &&
-    ["waiting", "starting", "active"].includes(activeArenaRoom.status)
+    (["waiting", "starting", "active"].includes(activeArenaRoom.status) ||
+      (activeArenaRoom.status === "finished" && activeArenaRoom.rematchRequestedBy))
       ? activeArenaRoom
       : null;
   const displayName = session

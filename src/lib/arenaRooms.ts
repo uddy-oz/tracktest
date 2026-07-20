@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
 
-export type ArenaRoomMode = "duel" | "group_lobby";
+export type ArenaRoomMode = "duel" | "group_lobby" | "party_mode";
 
 export type DuelQuizTrack = {
   id: string;
@@ -129,11 +129,12 @@ const ACTIVE_ARENA_STATUSES = [
   "waiting",
   "starting",
   "active",
+  "finished",
 ];
-const ARENA_ROOM_MODES: ArenaRoomMode[] = ["duel", "group_lobby"];
+const ARENA_ROOM_MODES: ArenaRoomMode[] = ["duel", "group_lobby", "party_mode"];
 
 function isArenaRoomMode(value: string | null | undefined): value is ArenaRoomMode {
-  return value === "duel" || value === "group_lobby";
+  return value === "duel" || value === "group_lobby" || value === "party_mode";
 }
 
 export function normalizeArenaInviteCode(value: string) {
@@ -199,10 +200,10 @@ function generateInviteCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-function getPlayerDisplay(profile: UserProfile | null, user: User) {
+function getPlayerDisplay(profile: UserProfile | null, _user: User) {
   return {
     displayName:
-      profile?.displayName || profile?.username || user.email || "Arena Player",
+      profile?.displayName || profile?.username || "Arena Player",
     username: profile?.username || null,
   };
 }
@@ -293,13 +294,15 @@ export async function fetchCurrentDuelRoom(user: User) {
     .in("mode", ARENA_ROOM_MODES)
     .in("status", ACTIVE_ARENA_STATUSES)
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(5);
 
   if (roomsError) {
     return { room: null, error: roomsError.message };
   }
 
-  const roomRow = ((roomsData || []) as ArenaRoomRow[])[0];
+  const roomRow = ((roomsData || []) as ArenaRoomRow[]).find(
+    (row) => row.status !== "finished" || Boolean(row.rematch_requested_by)
+  );
 
   if (!roomRow) {
     return { room: null, error: null };

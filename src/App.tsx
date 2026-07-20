@@ -18,14 +18,22 @@ import { supabase } from "./lib/supabaseClient";
 import { getArenaBadges } from "./lib/badges";
 import { fetchCloudBadgeStats } from "./lib/cloudBadgeStats";
 import { getCompactPlayerBadges, type CompactPlayerBadge } from "./lib/playerIdentity";
-import { ensureUserProfile, type UserProfile } from "./lib/profiles";
+import { ensureUserProfile, validateUsername, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
 type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
 
 function isRecoverableArenaRoom(room: ArenaRoom | null) {
-  return Boolean(room && ["waiting", "starting", "active"].includes(room.status));
+  return Boolean(
+    room &&
+      (["waiting", "starting", "active"].includes(room.status) ||
+        (room.status === "finished" && room.rematchRequestedBy))
+  );
+}
+
+function hasCompleteUsername(profile: UserProfile | null) {
+  return Boolean(profile?.username && validateUsername(profile.username).ok);
 }
 
 function getProfileUsernameFromPath() {
@@ -353,6 +361,9 @@ function App() {
     );
   }
 
+  const mustCompleteUsername =
+    Boolean(session?.user) && !isProfileLoading && !hasCompleteUsername(profile);
+
   return (
     <>
       <Navbar
@@ -369,7 +380,17 @@ function App() {
         activeView={activeView}
       />
 
-      {activeView === "home" && (
+      {mustCompleteUsername && (
+        <AuthPage
+          session={session}
+          profile={profile}
+          isProfileLoading={isProfileLoading}
+          onProfileSaved={setProfile}
+          onPlay={showHome}
+        />
+      )}
+
+      {!mustCompleteUsername && activeView === "home" && (
         <HomePage
           session={session}
           profile={profile}
@@ -384,7 +405,7 @@ function App() {
         />
       )}
 
-      {activeView === "play" && !isQuizStarted && (
+      {!mustCompleteUsername && activeView === "play" && !isQuizStarted && (
         <SinglePlayerPage
           session={session}
           profile={profile}
@@ -393,7 +414,7 @@ function App() {
         />
       )}
 
-      {activeView === "play" && isQuizStarted && selectedAlbum && (
+      {!mustCompleteUsername && activeView === "play" && isQuizStarted && selectedAlbum && (
         <Quiz
           selectedAlbum={selectedAlbum}
           onRestartApp={restartApp}
@@ -402,7 +423,7 @@ function App() {
         />
       )}
 
-      {activeView === "leaderboard" && (
+      {!mustCompleteUsername && activeView === "leaderboard" && (
         <Leaderboard
           onPlay={showHome}
           session={session}
@@ -410,7 +431,7 @@ function App() {
         />
       )}
 
-      {activeView === "multiplayer" && (
+      {!mustCompleteUsername && activeView === "multiplayer" && (
         <ArenaPage
           session={session}
           profile={profile}
@@ -428,7 +449,7 @@ function App() {
         />
       )}
 
-      {activeView === "auth" && (
+      {!mustCompleteUsername && activeView === "auth" && (
         <AuthPage
           session={session}
           profile={profile}
@@ -438,7 +459,7 @@ function App() {
         />
       )}
 
-      {activeView === "profile" && (
+      {!mustCompleteUsername && activeView === "profile" && (
         <ProfilePage
           session={session}
           profile={profile}

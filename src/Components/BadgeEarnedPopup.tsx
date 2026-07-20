@@ -8,23 +8,26 @@ type BadgeEarnedPopupProps = {
 };
 
 const iconSymbols: Record<ArenaBadge["icon"], string> = {
-  checkRing: "✓",
-  diamond: "◆",
-  bolt: "↯",
-  record: "◉",
-  crown: "♕",
-  discs: "◎",
-  calendar: "□",
-  flame: "▲",
-  trophy: "♛",
-  shield: "⬟",
-  star: "✦",
-  clutch: "◇",
-  swords: "×",
-  users: "●",
-  party: "✧",
-  comeback: "↺",
-  target: "⊙",
+  checkRing: "OK",
+  diamond: "<>",
+  bolt: "Z",
+  record: "O",
+  crown: "W",
+  discs: "OO",
+  calendar: "[]",
+  flame: "^",
+  trophy: "T",
+  shield: "H",
+  star: "*",
+  clutch: "<",
+  swords: "X",
+  users: "U",
+  party: "+",
+  comeback: "R",
+  target: "@",
+  headphones: "HP",
+  stack: "III",
+  key: "K",
 };
 
 function BadgeEarnedPopup({ badge, onDone }: BadgeEarnedPopupProps) {
@@ -40,7 +43,7 @@ function BadgeEarnedPopup({ badge, onDone }: BadgeEarnedPopupProps) {
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [badge]);
+  }, [badge, onDone]);
 
   if (!badge) {
     return null;

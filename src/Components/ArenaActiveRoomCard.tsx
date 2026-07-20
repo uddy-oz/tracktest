@@ -10,6 +10,10 @@ type ArenaActiveRoomCardProps = {
 };
 
 function getModeLabel(room: ArenaRoom) {
+  if (room.mode === "party_mode") {
+    return "Party Mode";
+  }
+
   return room.mode === "group_lobby" ? "Group Lobby" : "Duel";
 }
 
@@ -40,7 +44,7 @@ function ArenaActiveRoomCard({
   const presentPlayers = room.players.filter(
     (player) =>
       !player.leftAt &&
-      !["cancelled", "left", "forfeit"].includes(player.resultStatus)
+      !["cancelled", "left"].includes(player.resultStatus)
   );
   const isHost = room.hostUserId === currentUserId;
   const canClose = isHost && ["waiting", "starting"].includes(room.status);

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   getProfileDisplayLabel,
+  checkUsernameAvailability,
   normalizeUsername,
   saveUserProfile,
+  validateUsername,
   type UserProfile,
 } from "../lib/profiles";
 import { isSupabaseConfigured, supabase } from "../lib/supabaseClient";
@@ -28,8 +30,37 @@ function AuthPage({
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (!session?.user || profile?.username || !username) {
+      setUsernameStatus("");
+      return;
+    }
+
+    const validation = validateUsername(username);
+
+    if (!validation.ok) {
+      setUsernameStatus(validation.message);
+      return;
+    }
+
+    let isActive = true;
+    const checkId = window.setTimeout(() => {
+      checkUsernameAvailability(username, session.user.id).then((result) => {
+        if (isActive) {
+          setUsernameStatus(result.message);
+        }
+      });
+    }, 350);
+
+    return () => {
+      isActive = false;
+      window.clearTimeout(checkId);
+    };
+  }, [profile?.username, session?.user, username]);
 
   async function handleSignUp() {
     if (!supabase) {
@@ -166,15 +197,19 @@ function AuthPage({
                 <button
                   type="button"
                   onClick={handleSaveProfile}
-                  disabled={isSavingProfile}
+                  disabled={
+                    isSavingProfile ||
+                    !validateUsername(username).ok ||
+                    usernameStatus === "That username is already taken."
+                  }
                 >
                   {isSavingProfile ? "Saving..." : "Save Profile"}
                 </button>
               </div>
 
               <p className="profile-rules">
-                3 to 20 characters. Lowercase letters, numbers, and underscore
-                only.
+                {usernameStatus ||
+                  "3 to 20 characters. Lowercase letters, numbers, and underscore only."}
               </p>
             </>
           )}
