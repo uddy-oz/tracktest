@@ -5,8 +5,10 @@ import { supabase } from "./supabaseClient";
 import { fetchProfileDisplayInfo, type ProfileDisplayInfo } from "./profiles";
 import {
   getTrackTestStats,
+  buildArenaProgress,
   type AlbumStats,
   type ArtistStats,
+  type GameMode,
   type QuizResult,
   type TrackTestStats,
 } from "./stats";
@@ -54,6 +56,14 @@ type PublicQuizResultRow = {
   final_points: number;
   average_answer_time: number;
   played_at: string;
+  game_mode?: string | null;
+  is_private?: boolean | null;
+  is_winner?: boolean | null;
+  was_host?: boolean | null;
+  player_count?: number | null;
+  placement?: number | null;
+  score_margin?: number | null;
+  result_status?: string | null;
 };
 
 type PublicArtistRow = {
@@ -146,14 +156,7 @@ export async function fetchPublicProfileByUsername(
 
   const summaryRow = summary as PublicProfileSummaryRow;
   const [recentResults, artistStats, albumStats] = await Promise.all([
-    supabase
-      .from("public_profile_recent_results")
-      .select(
-        "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at"
-      )
-      .eq("username", username)
-      .order("played_at", { ascending: false })
-      .limit(100),
+    fetchPublicQuizResults(username),
     supabase
       .from("public_profile_artist_stats")
       .select(
@@ -198,6 +201,36 @@ export async function fetchPublicProfileByUsername(
   };
 }
 
+async function fetchPublicQuizResults(username: string) {
+  if (!supabase) {
+    return { data: null, error: { message: "Supabase is not configured yet." } };
+  }
+
+  const result = await supabase
+    .from("public_profile_recent_results")
+    .select(
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status"
+    )
+    .eq("username", username)
+    .order("played_at", { ascending: false })
+    .limit(1000);
+
+  if (!result.error) {
+    return result;
+  }
+
+  // Public profiles stay available if the frontend deploys before the new
+  // view columns. Those legacy results naturally map to Single Player.
+  return supabase
+    .from("public_profile_recent_results")
+    .select(
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at"
+    )
+    .eq("username", username)
+    .order("played_at", { ascending: false })
+    .limit(1000);
+}
+
 function getPublicFeaturedBadgeIds(row: PublicProfileSummaryRow) {
   if (Array.isArray(row.featured_badge_ids) && row.featured_badge_ids.length > 0) {
     return row.featured_badge_ids;
@@ -240,6 +273,7 @@ function buildPublicTrackTestStats(
         mapPublicAlbum(album),
       ])
     ),
+    arena: buildArenaProgress(quizResults),
   };
 }
 
@@ -262,6 +296,14 @@ function mapPublicQuizResult(row: PublicQuizResultRow): QuizResult {
     finalPoints: row.final_points,
     averageAnswerTime: row.average_answer_time,
     datePlayed: row.played_at,
+    gameMode: normalizeGameMode(row.game_mode),
+    isPrivate: Boolean(row.is_private),
+    isWinner: Boolean(row.is_winner),
+    wasHost: Boolean(row.was_host),
+    playerCount: row.player_count || 0,
+    placement: row.placement ?? null,
+    scoreMargin: row.score_margin || 0,
+    resultStatus: row.result_status || "completed",
   };
 }
 
@@ -292,4 +334,17 @@ function mapPublicAlbum(row: PublicAlbumRow): AlbumStats {
 
 function normalizeKey(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizeGameMode(value: string | null | undefined): GameMode {
+  if (
+    value === "duel" ||
+    value === "group_lobby" ||
+    value === "party_mode" ||
+    value === "championship"
+  ) {
+    return value;
+  }
+
+  return "single_player";
 }

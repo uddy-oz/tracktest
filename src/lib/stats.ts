@@ -1,3 +1,10 @@
+export type GameMode =
+  | "single_player"
+  | "duel"
+  | "group_lobby"
+  | "party_mode"
+  | "championship";
+
 export type QuizResult = {
   id: string;
   albumName: string;
@@ -8,6 +15,33 @@ export type QuizResult = {
   finalPoints: number;
   averageAnswerTime: number;
   datePlayed: string;
+  gameMode?: GameMode;
+  isPrivate?: boolean;
+  isWinner?: boolean;
+  wasHost?: boolean;
+  playerCount?: number;
+  placement?: number | null;
+  scoreMargin?: number;
+  resultStatus?: string;
+};
+
+export type ArenaProgressStats = {
+  gamesPlayed: number;
+  wins: number;
+  duelWins: number;
+  lobbyWins: number;
+  partyWins: number;
+  championshipWins: number;
+  partyGames: number;
+  partyRoomsHosted: number;
+  privateGames: number;
+  publicGames: number;
+  closeCallWins: number;
+  dominantDuelWins: number;
+  fullLobbyWins: number;
+  maxPartyPlayers: number;
+  currentWinStreak: number;
+  bestWinStreak: number;
 };
 
 export type OverallStats = {
@@ -47,9 +81,31 @@ export type TrackTestStats = {
   overall: OverallStats;
   artists: Record<string, ArtistStats>;
   albums: Record<string, AlbumStats>;
+  arena: ArenaProgressStats;
 };
 
 const STATS_STORAGE_KEY = "tracktest_arena_stats_v1";
+
+export function createEmptyArenaProgress(): ArenaProgressStats {
+  return {
+    gamesPlayed: 0,
+    wins: 0,
+    duelWins: 0,
+    lobbyWins: 0,
+    partyWins: 0,
+    championshipWins: 0,
+    partyGames: 0,
+    partyRoomsHosted: 0,
+    privateGames: 0,
+    publicGames: 0,
+    closeCallWins: 0,
+    dominantDuelWins: 0,
+    fullLobbyWins: 0,
+    maxPartyPlayers: 0,
+    currentWinStreak: 0,
+    bestWinStreak: 0,
+  };
+}
 
 function createEmptyStats(): TrackTestStats {
   return {
@@ -68,6 +124,73 @@ function createEmptyStats(): TrackTestStats {
     },
     artists: {},
     albums: {},
+    arena: createEmptyArenaProgress(),
+  };
+}
+
+export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
+  const arenaResults = results
+    .filter((result) => result.gameMode && result.gameMode !== "single_player")
+    .sort(
+      (a, b) =>
+        new Date(b.datePlayed).getTime() - new Date(a.datePlayed).getTime()
+    );
+  let currentWinStreak = 0;
+  let runningWinStreak = 0;
+  let bestWinStreak = 0;
+
+  for (const result of arenaResults) {
+    if (result.isWinner) {
+      runningWinStreak += 1;
+      bestWinStreak = Math.max(bestWinStreak, runningWinStreak);
+    } else {
+      runningWinStreak = 0;
+    }
+  }
+
+  for (const result of arenaResults) {
+    if (!result.isWinner) {
+      break;
+    }
+
+    currentWinStreak += 1;
+  }
+
+  const wins = arenaResults.filter((result) => result.isWinner);
+  const duelWins = wins.filter((result) => result.gameMode === "duel");
+  const partyResults = arenaResults.filter(
+    (result) => result.gameMode === "party_mode"
+  );
+
+  return {
+    gamesPlayed: arenaResults.length,
+    wins: wins.length,
+    duelWins: duelWins.length,
+    lobbyWins: wins.filter((result) => result.gameMode === "group_lobby").length,
+    partyWins: wins.filter((result) => result.gameMode === "party_mode").length,
+    championshipWins: wins.filter(
+      (result) => result.gameMode === "championship"
+    ).length,
+    partyGames: partyResults.length,
+    partyRoomsHosted: partyResults.filter((result) => result.wasHost).length,
+    privateGames: arenaResults.filter((result) => result.isPrivate).length,
+    publicGames: arenaResults.filter((result) => !result.isPrivate).length,
+    closeCallWins: duelWins.filter(
+      (result) => (result.scoreMargin || 0) > 0 && (result.scoreMargin || 0) <= 500
+    ).length,
+    dominantDuelWins: duelWins.filter(
+      (result) => (result.scoreMargin || 0) >= 2000
+    ).length,
+    fullLobbyWins: wins.filter(
+      (result) =>
+        result.gameMode === "group_lobby" && (result.playerCount || 0) >= 10
+    ).length,
+    maxPartyPlayers: Math.max(
+      0,
+      ...partyResults.map((result) => result.playerCount || 0)
+    ),
+    currentWinStreak,
+    bestWinStreak,
   };
 }
 
@@ -147,7 +270,10 @@ export function getTrackTestStats() {
       return createEmptyStats();
     }
 
-    return parsedStats;
+    return {
+      ...parsedStats,
+      arena: parsedStats.arena || createEmptyArenaProgress(),
+    };
   } catch (error) {
     console.error("Could not load TrackTest stats:", error);
     return createEmptyStats();

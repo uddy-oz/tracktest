@@ -37,26 +37,30 @@ export function calculateBadgeScore(badges: ArenaBadge[]) {
   }, 0);
 }
 
-export function calculatePlayerTier(badges: ArenaBadge[]) {
+export function calculatePlayerTier(
+  badges: ArenaBadge[],
+  stats?: TrackTestStats
+) {
   const badgeScore = calculateBadgeScore(badges);
+  const totalPoints = stats?.overall.totalPoints || 0;
 
-  if (badgeScore >= 550) {
+  if (badgeScore >= 550 || totalPoints >= 500_000) {
     return { tier: "Legendary" as const, badgeScore };
   }
 
-  if (badgeScore >= 360) {
+  if (badgeScore >= 360 || totalPoints >= 200_000) {
     return { tier: "Platinum" as const, badgeScore };
   }
 
-  if (badgeScore >= 220) {
+  if (badgeScore >= 220 || totalPoints >= 75_000) {
     return { tier: "Gold" as const, badgeScore };
   }
 
-  if (badgeScore >= 120) {
+  if (badgeScore >= 120 || totalPoints >= 25_000) {
     return { tier: "Silver" as const, badgeScore };
   }
 
-  if (badgeScore >= 50) {
+  if (badgeScore >= 10 || totalPoints > 0) {
     return { tier: "Bronze" as const, badgeScore };
   }
 
@@ -130,7 +134,7 @@ export function getCompactPlayerBadges(
   stats: TrackTestStats,
   badges: ArenaBadge[]
 ) {
-  const { tier } = calculatePlayerTier(badges);
+  const { tier } = calculatePlayerTier(badges, stats);
   const compactBadges: CompactPlayerBadge[] = [
     {
       id: `tier-${tier.toLowerCase()}`,

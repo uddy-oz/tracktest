@@ -85,6 +85,7 @@ function App() {
     CompactPlayerBadge[] | null
   >(null);
   const [activeArenaRoom, setActiveArenaRoom] = useState<ArenaRoom | null>(null);
+  const [progressionRevision, setProgressionRevision] = useState(0);
   const arenaRecoveryGenerationRef = useRef(0);
 
   const refreshActiveArenaRoom = useCallback(async () => {
@@ -224,12 +225,23 @@ function App() {
     void refreshActiveArenaRoom();
   }, [activeView, refreshActiveArenaRoom]);
 
+  useEffect(() => {
+    function refreshProgressionOnFocus() {
+      void refreshIdentityBadges();
+    }
+
+    window.addEventListener("focus", refreshProgressionOnFocus);
+
+    return () => window.removeEventListener("focus", refreshProgressionOnFocus);
+  }, [session?.user.id]);
+
   async function refreshIdentityBadges() {
     if (!session?.user) {
       const localStats = getTrackTestStats();
       setIdentityBadges(
         getCompactPlayerBadges(localStats, getArenaBadges(localStats))
       );
+      setProgressionRevision((revision) => revision + 1);
       return;
     }
 
@@ -241,10 +253,12 @@ function App() {
       setIdentityBadges(
         getCompactPlayerBadges(localStats, getArenaBadges(localStats))
       );
+      setProgressionRevision((revision) => revision + 1);
       return;
     }
 
     setIdentityBadges(getCompactPlayerBadges(data, getArenaBadges(data)));
+    setProgressionRevision((revision) => revision + 1);
   }
 
   function startQuiz(album: SpotifyAlbum) {
@@ -414,6 +428,7 @@ function App() {
           onProfile={showProfile}
           onResumeArenaRoom={showMultiplayer}
           onCloseArenaRoom={closeActiveArenaRoom}
+          progressionRevision={progressionRevision}
         />
       )}
 
@@ -440,6 +455,7 @@ function App() {
           onPlay={showHome}
           session={session}
           onOpenProfile={showPublicProfile}
+          progressionRevision={progressionRevision}
         />
       )}
 
@@ -452,6 +468,7 @@ function App() {
           inviteCode={arenaInviteCode}
           recoveredRoom={activeArenaRoom}
           onArenaRoomChange={handleArenaRoomChange}
+          onProgressionUpdated={refreshIdentityBadges}
           onInviteHandled={() => {
             window.history.pushState({}, "", "/multiplayer");
             setArenaInviteCode(null);
@@ -478,6 +495,7 @@ function App() {
           onShowAuth={showAuth}
           onPlay={showHome}
           onBackToLeaderboard={showLeaderboard}
+          progressionRevision={progressionRevision}
         />
       )}
     </>

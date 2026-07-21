@@ -1,6 +1,13 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
-import type { AlbumStats, ArtistStats, QuizResult, TrackTestStats } from "./stats";
+import {
+  buildArenaProgress,
+  type AlbumStats,
+  type ArtistStats,
+  type GameMode,
+  type QuizResult,
+  type TrackTestStats,
+} from "./stats";
 
 type QuizResultRow = {
   id: string;
@@ -12,25 +19,14 @@ type QuizResultRow = {
   final_points: number;
   average_answer_time: number;
   played_at: string;
-};
-
-type ArtistStatsRow = {
-  artist_name: string;
-  quizzes_played: number;
-  correct_answers: number;
-  total_questions: number;
-  accuracy: number;
-  total_points: number;
-  best_score: number;
-};
-
-type AlbumStatsRow = {
-  album_name: string;
-  artist_name: string;
-  times_played: number;
-  best_score: number;
-  best_accuracy: number;
-  last_played_at: string;
+  game_mode?: string | null;
+  is_private?: boolean | null;
+  is_winner?: boolean | null;
+  was_host?: boolean | null;
+  player_count?: number | null;
+  placement?: number | null;
+  score_margin?: number | null;
+  result_status?: string | null;
 };
 
 export async function fetchCloudBadgeStats(user: User) {
@@ -38,49 +34,42 @@ export async function fetchCloudBadgeStats(user: User) {
     return { data: null, error: "Supabase is not configured yet." };
   }
 
-  const [quizResults, artistStats, albumStats] = await Promise.all([
-    supabase
-      .from("quiz_results")
-      .select(
-        "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at"
-      )
-      .eq("user_id", user.id)
-      .order("played_at", { ascending: false }),
-    supabase
-      .from("artist_stats")
-      .select(
-        "artist_name, quizzes_played, correct_answers, total_questions, accuracy, total_points, best_score"
-      )
-      .eq("user_id", user.id),
-    supabase
-      .from("album_stats")
-      .select(
-        "album_name, artist_name, times_played, best_score, best_accuracy, last_played_at"
-      )
-      .eq("user_id", user.id),
-  ]);
+  const result = await supabase
+    .from("quiz_results")
+    .select(
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status"
+    )
+    .eq("user_id", user.id)
+    .order("played_at", { ascending: false });
 
-  const firstError = quizResults.error || artistStats.error || albumStats.error;
+  if (!result.error) {
+    return {
+      data: buildTrackTestStats((result.data || []) as QuizResultRow[]),
+      error: null,
+    };
+  }
 
-  if (firstError) {
-    return { data: null, error: firstError.message };
+  // Keep cloud stats readable while the progression migration is being
+  // deployed. Legacy rows are treated as Single Player results.
+  const legacyResult = await supabase
+    .from("quiz_results")
+    .select(
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at"
+    )
+    .eq("user_id", user.id)
+    .order("played_at", { ascending: false });
+
+  if (legacyResult.error) {
+    return { data: null, error: result.error.message };
   }
 
   return {
-    data: buildTrackTestStats(
-      (quizResults.data || []) as QuizResultRow[],
-      (artistStats.data || []) as ArtistStatsRow[],
-      (albumStats.data || []) as AlbumStatsRow[]
-    ),
+    data: buildTrackTestStats((legacyResult.data || []) as QuizResultRow[]),
     error: null,
   };
 }
 
-function buildTrackTestStats(
-  quizRows: QuizResultRow[],
-  artistRows: ArtistStatsRow[],
-  albumRows: AlbumStatsRow[]
-): TrackTestStats {
+function buildTrackTestStats(quizRows: QuizResultRow[]): TrackTestStats {
   const quizResults = quizRows.map(mapQuizResult);
   const totalQuestionsAnswered = quizResults.reduce(
     (total, result) => total + result.totalQuestions,
@@ -113,15 +102,9 @@ function buildTrackTestStats(
       currentDailyStreak: calculateCurrentDailyStreak(quizResults),
       lastPlayedDate: getLastPlayedDateKey(quizResults),
     },
-    artists: Object.fromEntries(
-      artistRows.map((artist) => [normalizeKey(artist.artist_name), mapArtist(artist)])
-    ),
-    albums: Object.fromEntries(
-      albumRows.map((album) => [
-        normalizeKey(`${album.artist_name}-${album.album_name}`),
-        mapAlbum(album),
-      ])
-    ),
+    artists: buildArtistStats(quizResults),
+    albums: buildAlbumStats(quizResults),
+    arena: buildArenaProgress(quizResults),
   };
 }
 
@@ -132,34 +115,89 @@ function mapQuizResult(row: QuizResultRow): QuizResult {
     artistName: row.artist_name,
     totalQuestions: row.total_questions,
     correctAnswers: row.correct_answers,
-    accuracyPercentage: row.accuracy,
+    accuracyPercentage: Number(row.accuracy),
     finalPoints: row.final_points,
-    averageAnswerTime: row.average_answer_time,
+    averageAnswerTime: Number(row.average_answer_time),
     datePlayed: row.played_at,
+    gameMode: normalizeGameMode(row.game_mode),
+    isPrivate: Boolean(row.is_private),
+    isWinner: Boolean(row.is_winner),
+    wasHost: Boolean(row.was_host),
+    playerCount: row.player_count || 0,
+    placement: row.placement ?? null,
+    scoreMargin: row.score_margin || 0,
+    resultStatus: row.result_status || "completed",
   };
 }
 
-function mapArtist(row: ArtistStatsRow): ArtistStats {
-  return {
-    artistName: row.artist_name,
-    quizzesPlayed: row.quizzes_played,
-    correctAnswers: row.correct_answers,
-    totalQuestions: row.total_questions,
-    accuracy: row.accuracy,
-    totalPoints: row.total_points,
-    bestScore: row.best_score,
-  };
+function buildArtistStats(results: QuizResult[]) {
+  const artists: Record<string, ArtistStats> = {};
+
+  for (const result of results) {
+    const key = normalizeKey(result.artistName);
+    const artist = artists[key] || {
+      artistName: result.artistName,
+      quizzesPlayed: 0,
+      correctAnswers: 0,
+      totalQuestions: 0,
+      accuracy: 0,
+      totalPoints: 0,
+      bestScore: 0,
+    };
+
+    artist.quizzesPlayed += 1;
+    artist.correctAnswers += result.correctAnswers;
+    artist.totalQuestions += result.totalQuestions;
+    artist.accuracy = calculateAccuracy(
+      artist.correctAnswers,
+      artist.totalQuestions
+    );
+    artist.totalPoints += result.finalPoints;
+    artist.bestScore = Math.max(artist.bestScore, result.finalPoints);
+    artists[key] = artist;
+  }
+
+  return artists;
 }
 
-function mapAlbum(row: AlbumStatsRow): AlbumStats {
-  return {
-    albumName: row.album_name,
-    artistName: row.artist_name,
-    timesPlayed: row.times_played,
-    bestScore: row.best_score,
-    bestAccuracy: row.best_accuracy,
-    lastPlayedDate: getDateKey(new Date(row.last_played_at)),
-  };
+function buildAlbumStats(results: QuizResult[]) {
+  const albums: Record<string, AlbumStats> = {};
+
+  for (const result of results) {
+    const key = normalizeKey(`${result.artistName}-${result.albumName}`);
+    const album = albums[key] || {
+      albumName: result.albumName,
+      artistName: result.artistName,
+      timesPlayed: 0,
+      bestScore: 0,
+      bestAccuracy: 0,
+      lastPlayedDate: "",
+    };
+
+    album.timesPlayed += 1;
+    album.bestScore = Math.max(album.bestScore, result.finalPoints);
+    album.bestAccuracy = Math.max(
+      album.bestAccuracy,
+      result.accuracyPercentage
+    );
+    album.lastPlayedDate = album.lastPlayedDate || result.datePlayed.slice(0, 10);
+    albums[key] = album;
+  }
+
+  return albums;
+}
+
+function normalizeGameMode(value: string | null | undefined): GameMode {
+  if (
+    value === "duel" ||
+    value === "group_lobby" ||
+    value === "party_mode" ||
+    value === "championship"
+  ) {
+    return value;
+  }
+
+  return "single_player";
 }
 
 function calculateAccuracy(correctAnswers: number, totalQuestions: number) {

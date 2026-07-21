@@ -33,6 +33,7 @@ type ProfilePageProps = {
   onShowAuth: () => void;
   onPlay: () => void;
   onBackToLeaderboard: () => void;
+  progressionRevision?: number;
 };
 
 type ProfileState = {
@@ -124,6 +125,7 @@ function ProfilePage({
   onShowAuth,
   onPlay,
   onBackToLeaderboard,
+  progressionRevision = 0,
 }: ProfilePageProps) {
   const [profileState, setProfileState] = useState<ProfileState>(() => ({
     displayInfo: null,
@@ -198,7 +200,7 @@ function ProfilePage({
     return () => {
       isActive = false;
     };
-  }, [publicUsername, session]);
+  }, [progressionRevision, publicUsername, session]);
 
   const badges = useMemo(
     () => getArenaBadges(profileState.stats),
@@ -208,7 +210,7 @@ function ProfilePage({
     !isPublicProfile && identityBadges
       ? identityBadges
       : getCompactPlayerBadges(profileState.stats, badges);
-  const tier = calculatePlayerTier(badges);
+  const tier = calculatePlayerTier(badges, profileState.stats);
   const unlockedBadges = badges.filter((badge) => badge.unlocked);
   const unlockedBadgeIds = new Set(unlockedBadges.map((badge) => badge.id));
   const customFeaturedBadgeIds = sanitizeFeaturedBadgeIds(

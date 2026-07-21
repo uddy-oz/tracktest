@@ -74,6 +74,7 @@ type DuelPhase =
   | "countdown"
   | "preparing"
   | "audioBlocked"
+  | "audioSkipped"
   | "answering"
   | "correctHold"
   | "reveal";
@@ -82,6 +83,7 @@ type DuelResult = {
   isCorrect: boolean;
   points: number;
   correctAnswer: string;
+  wasAudioSkipped?: boolean;
 };
 
 const ALBUMS_PER_PAGE = 8;
@@ -95,6 +97,10 @@ const CLIP_LENGTH_SECONDS = 5;
 const DUEL_SYNC_START_DELAY_MS = 5000;
 const DUEL_ROOM_REFRESH_MS = 2500;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
+const AUDIO_PLAY_START_TIMEOUT_MS = 2500;
+const AUDIO_PLAYBACK_HEALTHCHECK_MS = 1500;
+const AUDIO_BLOCKED_SKIP_DELAY_MS = 3500;
+const AUDIO_STALL_SKIP_DELAY_MS = 2500;
 const LEGACY_ARENA_ROOM_STORAGE_KEYS = [
   "tracktest.activeArenaRoomId",
   "tracktestArenaRoomId",
@@ -166,6 +172,7 @@ type ArenaPageProps = {
   recoveredRoom?: ArenaRoom | null;
   onArenaRoomChange?: (room: ArenaRoom | null) => void;
   onInviteHandled?: () => void;
+  onProgressionUpdated?: () => void;
 };
 
 type ArenaTheme = ArenaRoomMode | "championship";
@@ -179,6 +186,7 @@ function ArenaPage({
   recoveredRoom,
   onArenaRoomChange,
   onInviteHandled,
+  onProgressionUpdated,
 }: ArenaPageProps) {
   const [selectedArenaTheme, setSelectedArenaTheme] =
     useState<ArenaTheme | null>(null);
@@ -225,6 +233,8 @@ function ArenaPage({
   const [duelSelectedAnswer, setDuelSelectedAnswer] = useState("");
   const [duelPhase, setDuelPhase] = useState<DuelPhase>("idle");
   const [duelAudioFallbackMessage, setDuelAudioFallbackMessage] = useState("");
+  const [duelAudioRetryUsed, setDuelAudioRetryUsed] = useState(false);
+  const [isDuelAudioPrimed, setIsDuelAudioPrimed] = useState(false);
   const [isDuelClipPlaying, setIsDuelClipPlaying] = useState(false);
   const [isDuelFinished, setIsDuelFinished] = useState(false);
   const [duelRevealMessage, setDuelRevealMessage] = useState("");
@@ -235,13 +245,23 @@ function ArenaPage({
   const duelAudioRef = useRef<HTMLAudioElement | null>(null);
   const duelClipTimerRef = useRef<number | null>(null);
   const duelCorrectAnswerHoldTimerRef = useRef<number | null>(null);
+  const duelAudioFallbackTimerRef = useRef<number | null>(null);
+  const duelAudioHealthTimerRef = useRef<number | null>(null);
+  const duelAudioAttemptRef = useRef(0);
+  const duelAnswerDeadlineRef = useRef(0);
+  const duelClipCompletedRef = useRef(false);
+  const duelPhaseRef = useRef<DuelPhase>("idle");
+  const duelSelectedAnswerRef = useRef("");
   const isDuelCorrectHoldRef = useRef(false);
   const hasSubmittedDuelResultRef = useRef(false);
   const activeRoundKeyRef = useRef<string>("");
+  const progressionSyncedRoundRef = useRef<string>("");
   const leavingRoomIdRef = useRef<string | null>(null);
   const ignoredRoomIdsRef = useRef(new Set<string>());
 
   const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
+  duelPhaseRef.current = duelPhase;
+  duelSelectedAnswerRef.current = duelSelectedAnswer;
   const selectedMode =
     activeArenaMode || pendingInvite?.mode || pendingPublicRoom?.mode || activeRoom?.mode || null;
   const modeSettings =
@@ -461,6 +481,9 @@ function ArenaPage({
     return () => {
       clearDuelClipTimer();
       clearDuelCorrectAnswerHoldTimer();
+      clearDuelAudioFallbackTimer();
+      clearDuelAudioHealthTimer();
+      duelAudioAttemptRef.current += 1;
     };
   }, []);
 
@@ -478,6 +501,9 @@ function ArenaPage({
     return () => {
       clearDuelClipTimer();
       clearDuelCorrectAnswerHoldTimer();
+      clearDuelAudioFallbackTimer();
+      clearDuelAudioHealthTimer();
+      duelAudioAttemptRef.current += 1;
     };
   }, [currentDuelQuestion?.correctTrack.previewUrl, duelQuestionIndex]);
 
@@ -550,29 +576,48 @@ function ArenaPage({
   }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished]);
 
   useEffect(() => {
-    if (duelPhase !== "answering" || isDuelFinished || !currentDuelQuestion) {
+    if (
+      !["answering", "audioBlocked", "audioSkipped"].includes(duelPhase) ||
+      isDuelFinished ||
+      !currentDuelQuestion
+    ) {
       return;
     }
 
-    const timerId = window.setInterval(() => {
-      setDuelTimeRemaining((currentTime) => Math.max(0, currentTime - 1));
-    }, 1000);
+    const updateRemainingTime = () => {
+      const remainingSeconds = Math.max(
+        0,
+        Math.ceil((duelAnswerDeadlineRef.current - Date.now()) / 1000)
+      );
+      setDuelTimeRemaining(remainingSeconds);
+    };
+
+    updateRemainingTime();
+    const timerId = window.setInterval(updateRemainingTime, 250);
 
     return () => window.clearInterval(timerId);
   }, [currentDuelQuestion, duelPhase, isDuelFinished]);
 
   useEffect(() => {
     if (
-      duelPhase !== "answering" ||
+      !["answering", "audioBlocked", "audioSkipped"].includes(duelPhase) ||
       !currentDuelQuestion ||
-      duelSelectedAnswer ||
+      (duelSelectedAnswer && duelPhase !== "audioSkipped") ||
       isDuelFinished
     ) {
       return;
     }
 
     if (duelTimeRemaining === 0) {
-      recordDuelAnswer("", true);
+      if (duelPhase === "audioSkipped") {
+        startDuelRevealCountdown();
+      } else {
+        recordDuelAnswer(
+          "",
+          true,
+          duelPhase === "audioBlocked" ? "audioUnavailable" : "timeout"
+        );
+      }
     }
   }, [
     currentDuelQuestion,
@@ -634,6 +679,66 @@ function ArenaPage({
 
     return () => window.clearTimeout(flashId);
   }, [duelFlash]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible" || !currentDuelQuestion) {
+        return;
+      }
+
+      if (
+        ["answering", "audioBlocked", "audioSkipped"].includes(duelPhase) &&
+        duelAnswerDeadlineRef.current > 0
+      ) {
+        const remainingSeconds = Math.max(
+          0,
+          Math.ceil((duelAnswerDeadlineRef.current - Date.now()) / 1000)
+        );
+        setDuelTimeRemaining(remainingSeconds);
+
+        if (remainingSeconds === 0 && duelPhase !== "audioSkipped") {
+          recordDuelAnswer(
+            "",
+            true,
+            duelPhase === "audioBlocked" ? "audioUnavailable" : "timeout"
+          );
+          return;
+        }
+      }
+
+      const audio = duelAudioRef.current;
+
+      if (
+        duelPhase === "answering" &&
+        audio?.paused &&
+        !duelClipCompletedRef.current
+      ) {
+        enterDuelAudioFallback("Audio paused while this tab was inactive.");
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [currentDuelQuestion, duelPhase]);
+
+  useEffect(() => {
+    if (!activeRoom || activeRoom.status !== "finished" || !onProgressionUpdated) {
+      return;
+    }
+
+    const progressionKey = `${activeRoom.id}:${activeRoom.roundNumber}`;
+
+    if (progressionSyncedRoundRef.current === progressionKey) {
+      return;
+    }
+
+    progressionSyncedRoundRef.current = progressionKey;
+    const refreshId = window.setTimeout(onProgressionUpdated, 300);
+
+    return () => window.clearTimeout(refreshId);
+  }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, onProgressionUpdated]);
 
   function shuffleArray<T>(array: T[]) {
     return [...array].sort(() => Math.random() - 0.5);
@@ -725,11 +830,28 @@ function ArenaPage({
     isDuelCorrectHoldRef.current = false;
   }
 
+  function clearDuelAudioFallbackTimer() {
+    if (duelAudioFallbackTimerRef.current !== null) {
+      window.clearTimeout(duelAudioFallbackTimerRef.current);
+      duelAudioFallbackTimerRef.current = null;
+    }
+  }
+
+  function clearDuelAudioHealthTimer() {
+    if (duelAudioHealthTimerRef.current !== null) {
+      window.clearTimeout(duelAudioHealthTimerRef.current);
+      duelAudioHealthTimerRef.current = null;
+    }
+  }
+
   function stopDuelClip(resetToStart = true) {
     const audio = duelAudioRef.current;
 
+    duelAudioAttemptRef.current += 1;
     clearDuelClipTimer();
     clearDuelCorrectAnswerHoldTimer();
+    clearDuelAudioFallbackTimer();
+    clearDuelAudioHealthTimer();
 
     if (audio) {
       audio.pause();
@@ -749,8 +871,13 @@ function ArenaPage({
       return false;
     }
 
+    const attemptId = ++duelAudioAttemptRef.current;
+    let playTimeoutId: number | null = null;
+
     try {
       clearDuelClipTimer();
+      clearDuelAudioHealthTimer();
+      duelClipCompletedRef.current = false;
 
       const latestStart = Number.isFinite(audio.duration)
         ? Math.max(0, audio.duration - CLIP_LENGTH_SECONDS)
@@ -762,19 +889,163 @@ function ArenaPage({
 
       audio.pause();
       audio.currentTime = safeClipStart;
-      await audio.play();
+      const didStart = await Promise.race([
+        audio
+          .play()
+          .then(() => true)
+          .catch((error) => {
+            console.error("Could not play Arena audio clip:", error);
+            return false;
+          }),
+        new Promise<boolean>((resolve) => {
+          playTimeoutId = window.setTimeout(
+            () => resolve(false),
+            AUDIO_PLAY_START_TIMEOUT_MS
+          );
+        }),
+      ]);
+
+      if (playTimeoutId !== null) {
+        window.clearTimeout(playTimeoutId);
+      }
+
+      if (!didStart || attemptId !== duelAudioAttemptRef.current) {
+        audio.pause();
+        return false;
+      }
 
       setIsDuelClipPlaying(true);
+      setIsDuelAudioPrimed(true);
+
+      const playbackPosition = audio.currentTime;
+      clearDuelAudioHealthTimer();
+      duelAudioHealthTimerRef.current = window.setTimeout(() => {
+        duelAudioHealthTimerRef.current = null;
+
+        if (
+          duelPhaseRef.current === "answering" &&
+          !duelClipCompletedRef.current &&
+          (audio.paused || audio.currentTime <= playbackPosition + 0.1)
+        ) {
+          enterDuelAudioFallback("Audio did not start on this device.");
+        }
+      }, AUDIO_PLAYBACK_HEALTHCHECK_MS);
 
       duelClipTimerRef.current = window.setTimeout(() => {
+        duelClipCompletedRef.current = true;
         stopDuelClip();
       }, CLIP_LENGTH_SECONDS * 1000);
 
       return true;
     } catch (error) {
-      console.error("Could not play Duel audio clip:", error);
+      if (playTimeoutId !== null) {
+        window.clearTimeout(playTimeoutId);
+      }
+      console.error("Could not prepare Arena audio clip:", error);
+      audio.pause();
       setIsDuelClipPlaying(false);
       return false;
+    }
+  }
+
+  async function primeCurrentDuelAudio() {
+    const audio = duelAudioRef.current;
+
+    if (!audio || !currentDuelQuestion?.correctTrack.previewUrl) {
+      setDuelAudioFallbackMessage("This question does not have a playable preview.");
+      return;
+    }
+
+    const previousMuted = audio.muted;
+    const previousTime = audio.currentTime;
+    let timeoutId: number | null = null;
+
+    try {
+      audio.muted = true;
+      audio.currentTime = currentDuelQuestion.clipStartSeconds;
+      const didPrime = await Promise.race([
+        audio.play().then(() => true).catch(() => false),
+        new Promise<boolean>((resolve) => {
+          timeoutId = window.setTimeout(
+            () => resolve(false),
+            AUDIO_PLAY_START_TIMEOUT_MS
+          );
+        }),
+      ]);
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+
+      audio.pause();
+      audio.currentTime = previousTime;
+      audio.muted = previousMuted;
+      setIsDuelAudioPrimed(didPrime);
+      setDuelAudioFallbackMessage(
+        didPrime ? "Game audio enabled." : "Audio will retry when the question starts."
+      );
+    } catch {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      audio.pause();
+      audio.muted = previousMuted;
+      setDuelAudioFallbackMessage("Audio will retry when the question starts.");
+    }
+  }
+
+  function skipDuelQuestionForAudio() {
+    clearDuelAudioFallbackTimer();
+
+    if (
+      duelSelectedAnswerRef.current ||
+      ["reveal", "correctHold", "audioSkipped"].includes(duelPhaseRef.current)
+    ) {
+      return;
+    }
+
+    recordDuelAnswer("", true, "audioUnavailable");
+  }
+
+  function enterDuelAudioFallback(message: string) {
+    if (
+      !currentDuelQuestion ||
+      duelSelectedAnswerRef.current ||
+      ["reveal", "correctHold", "audioSkipped"].includes(duelPhaseRef.current)
+    ) {
+      return;
+    }
+
+    stopDuelClip(false);
+    duelPhaseRef.current = "audioBlocked";
+    setDuelPhase("audioBlocked");
+    setDuelAudioFallbackMessage(message);
+    clearDuelAudioFallbackTimer();
+    duelAudioFallbackTimerRef.current = window.setTimeout(
+      skipDuelQuestionForAudio,
+      AUDIO_BLOCKED_SKIP_DELAY_MS
+    );
+  }
+
+  function handleDuelAudioPlaying() {
+    clearDuelAudioHealthTimer();
+    setIsDuelAudioPrimed(true);
+  }
+
+  function handleDuelAudioWaiting() {
+    if (duelPhaseRef.current !== "answering" || duelClipCompletedRef.current) {
+      return;
+    }
+
+    clearDuelAudioHealthTimer();
+    duelAudioHealthTimerRef.current = window.setTimeout(() => {
+      enterDuelAudioFallback("Audio stalled on this device.");
+    }, AUDIO_STALL_SKIP_DELAY_MS);
+  }
+
+  function handleDuelAudioError() {
+    if (["answering", "audioBlocked"].includes(duelPhaseRef.current)) {
+      enterDuelAudioFallback("Audio could not load on this device.");
     }
   }
 
@@ -789,12 +1060,15 @@ function ArenaPage({
       audio.currentTime >= currentDuelQuestion.clipStartSeconds + CLIP_LENGTH_SECONDS &&
       !isDuelCorrectHoldRef.current
     ) {
+      duelClipCompletedRef.current = true;
       stopDuelClip();
     }
   }
 
   function handleDuelAudioEnded() {
+    duelClipCompletedRef.current = true;
     clearDuelClipTimer();
+    clearDuelAudioHealthTimer();
     setIsDuelClipPlaying(false);
   }
 
@@ -808,35 +1082,67 @@ function ArenaPage({
       return;
     }
 
+    if (isManualStart) {
+      setDuelAudioRetryUsed(true);
+    }
+
     setDuelAudioFallbackMessage("");
+
+    if (duelAnswerDeadlineRef.current === 0) {
+      duelAnswerDeadlineRef.current = Date.now() + QUESTION_TIME_SECONDS * 1000;
+    }
+
+    let remainingSeconds = getDuelAnswerTimeRemaining();
+
+    if (remainingSeconds === 0) {
+      recordDuelAnswer("", true, "audioUnavailable");
+      return;
+    }
 
     if (currentDuelQuestion.correctTrack.previewUrl) {
       const didPlay = await playDuelClip();
 
       if (!didPlay) {
-        setDuelPhase("audioBlocked");
-        setDuelAudioFallbackMessage(
-          isManualStart
-            ? "Audio is still blocked. Try the button again."
-            : "Click to play audio and continue."
-        );
+        if (isManualStart) {
+          setDuelAudioFallbackMessage("Audio unavailable on this device. Question skipped.");
+          skipDuelQuestionForAudio();
+        } else {
+          enterDuelAudioFallback("Click once to retry audio. The game will keep moving.");
+        }
         return;
       }
+
+      remainingSeconds = getDuelAnswerTimeRemaining();
+    } else {
+      setDuelAudioRetryUsed(true);
+      enterDuelAudioFallback("Audio unavailable on this device. Question will be skipped.");
+      return;
     }
 
-    setDuelTimeRemaining(QUESTION_TIME_SECONDS);
+    clearDuelAudioFallbackTimer();
+    setDuelTimeRemaining(remainingSeconds);
+    duelPhaseRef.current = "answering";
     setDuelPhase("answering");
   }
 
   function startDuelRevealCountdown() {
     setDuelRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
+    duelPhaseRef.current = "reveal";
     setDuelPhase("reveal");
+  }
+
+  function getDuelAnswerTimeRemaining() {
+    return Math.max(
+      0,
+      Math.ceil((duelAnswerDeadlineRef.current - Date.now()) / 1000)
+    );
   }
 
   function holdCorrectDuelClipBeforeReveal() {
     clearDuelClipTimer();
     clearDuelCorrectAnswerHoldTimer();
     isDuelCorrectHoldRef.current = true;
+    duelPhaseRef.current = "correctHold";
     setDuelPhase("correctHold");
 
     duelCorrectAnswerHoldTimerRef.current = window.setTimeout(() => {
@@ -849,19 +1155,26 @@ function ArenaPage({
 
   function resetDuelQuestionFlow() {
     stopDuelClip(false);
+    duelAnswerDeadlineRef.current = 0;
+    duelClipCompletedRef.current = false;
     setDuelSelectedAnswer("");
     setDuelTimeRemaining(QUESTION_TIME_SECONDS);
     setDuelStartCountdown(START_COUNTDOWN_SECONDS);
     setDuelRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
     setDuelAudioFallbackMessage("");
+    setDuelAudioRetryUsed(false);
     setDuelRevealMessage("");
     setDuelLastResult(null);
     setDuelFlash(null);
+    duelSelectedAnswerRef.current = "";
+    duelPhaseRef.current = "countdown";
     setDuelPhase("countdown");
   }
 
   function resetDuelLocalState(nextPhase: DuelPhase = "idle") {
     stopDuelClip(false);
+    duelAnswerDeadlineRef.current = 0;
+    duelClipCompletedRef.current = false;
     setDuelQuestionIndex(0);
     setDuelScore(0);
     setDuelCorrectAnswers(0);
@@ -873,11 +1186,14 @@ function ArenaPage({
     setDuelRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
     setDuelSelectedAnswer("");
     setDuelAudioFallbackMessage("");
+    setDuelAudioRetryUsed(false);
     setIsDuelClipPlaying(false);
     setIsDuelFinished(false);
     setDuelRevealMessage("");
     setDuelLastResult(null);
     setDuelFlash(null);
+    duelSelectedAnswerRef.current = "";
+    duelPhaseRef.current = nextPhase;
     setDuelPhase(nextPhase);
     hasSubmittedDuelResultRef.current = false;
   }
@@ -902,35 +1218,60 @@ function ArenaPage({
     resetDuelQuestionFlow();
   }
 
-  function recordDuelAnswer(answer: string, timedOut = false) {
+  function recordDuelAnswer(
+    answer: string,
+    timedOut = false,
+    reason: "answer" | "timeout" | "audioUnavailable" = timedOut
+      ? "timeout"
+      : "answer"
+  ) {
     if (!activeRoom || !session?.user || !currentDuelQuestion) {
       return;
     }
 
-    if (duelPhase !== "answering" || duelSelectedAnswer) {
+    if (
+      !["answering", "audioBlocked"].includes(duelPhaseRef.current) ||
+      duelSelectedAnswerRef.current
+    ) {
       return;
     }
 
     const correctAnswer =
       currentDuelQuestion.correctAnswer || currentDuelQuestion.correctTrack.name;
     const isCorrect = !timedOut && answer === correctAnswer;
-    const points = getPointsForAnswer(isCorrect, duelTimeRemaining);
-    const answerTime = QUESTION_TIME_SECONDS - duelTimeRemaining;
+    const scoredTimeRemaining = getDuelAnswerTimeRemaining();
+    const points = getPointsForAnswer(isCorrect, scoredTimeRemaining);
+    const answerTime =
+      reason === "audioUnavailable"
+        ? QUESTION_TIME_SECONDS
+        : QUESTION_TIME_SECONDS - scoredTimeRemaining;
     const nextScore = duelScore + points;
     const nextCorrectAnswers = duelCorrectAnswers + (isCorrect ? 1 : 0);
     const nextAnswerTimes = [...duelAnswerTimes, answerTime];
     const nextStreak = isCorrect ? duelStreak + 1 : 0;
     const answeredCount = duelQuestionIndex + 1;
 
-    setDuelSelectedAnswer(answer || "Timed out");
+    const selectedAnswer =
+      answer || (reason === "audioUnavailable" ? "Audio unavailable" : "Timed out");
+    duelSelectedAnswerRef.current = selectedAnswer;
+    setDuelSelectedAnswer(selectedAnswer);
     setDuelScore(nextScore);
     setDuelCorrectAnswers(nextCorrectAnswers);
     setDuelAnswerTimes(nextAnswerTimes);
     setDuelStreak(nextStreak);
-    setDuelLastResult({ isCorrect, points, correctAnswer });
-    setDuelFlash(isCorrect ? "good" : "bad");
+    setDuelLastResult({
+      isCorrect,
+      points,
+      correctAnswer,
+      wasAudioSkipped: reason === "audioUnavailable",
+    });
+    setDuelFlash(reason === "audioUnavailable" ? null : isCorrect ? "good" : "bad");
 
-    if (timedOut) {
+    if (reason === "audioUnavailable") {
+      stopDuelClip(false);
+      setDuelRevealMessage("Audio unavailable on this device. Question skipped.");
+      setDuelAudioFallbackMessage("Audio unavailable on this device. Question skipped.");
+    } else if (timedOut) {
       stopDuelClip(false);
       setDuelRevealMessage(`Time's up. Correct answer: ${correctAnswer}`);
       sounds.wrong();
@@ -957,6 +1298,12 @@ function ArenaPage({
       currentQuestionIndex: answeredCount,
       currentStreak: nextStreak,
     });
+
+    if (reason === "audioUnavailable") {
+      duelPhaseRef.current = "audioSkipped";
+      setDuelPhase("audioSkipped");
+      return;
+    }
 
     if (isCorrect) {
       holdCorrectDuelClipBeforeReveal();
@@ -2125,6 +2472,15 @@ function ArenaPage({
           <p className="game-state-detail">
             Players start from the same room clock.
           </p>
+          {!isDuelAudioPrimed && currentDuelQuestion?.correctTrack.previewUrl && (
+            <button
+              type="button"
+              className="clip-button audio-prime-button"
+              onClick={() => void primeCurrentDuelAudio()}
+            >
+              Enable game audio
+            </button>
+          )}
         </>
       );
     }
@@ -2137,6 +2493,15 @@ function ArenaPage({
             {duelStartCountdown === 0 ? "GO" : duelStartCountdown}
           </p>
           <p className="game-state-detail">Clip starts on go.</p>
+          {!isDuelAudioPrimed && currentDuelQuestion?.correctTrack.previewUrl && (
+            <button
+              type="button"
+              className="clip-button audio-prime-button"
+              onClick={() => void primeCurrentDuelAudio()}
+            >
+              Enable game audio
+            </button>
+          )}
         </>
       );
     }
@@ -2147,6 +2512,23 @@ function ArenaPage({
           <p className="game-state-label">Audio needs a tap</p>
           <p className="game-state-detail">
             {duelAudioFallbackMessage || "Click to play audio and continue."}
+          </p>
+          <p className="game-state-detail">
+            Question continues in {duelTimeRemaining}s on the shared timeline.
+          </p>
+        </>
+      );
+    }
+
+    if (duelPhase === "audioSkipped") {
+      return (
+        <>
+          <p className="game-state-label">Question skipped</p>
+          <p className="game-state-detail">
+            Audio unavailable on this device. Question skipped.
+          </p>
+          <p className="game-state-detail">
+            Next reveal in {duelTimeRemaining}s.
           </p>
         </>
       );
@@ -2200,7 +2582,9 @@ function ArenaPage({
     if (duelPhase === "reveal") {
       return (
         <>
-          <p className="game-state-label">Reveal</p>
+          <p className="game-state-label">
+            {duelLastResult?.wasAudioSkipped ? "Audio skipped" : "Reveal"}
+          </p>
           {duelLastResult?.isCorrect ? (
             <>
               <div className="correct-burst" aria-hidden="true">
@@ -2224,7 +2608,11 @@ function ArenaPage({
           {duelRevealMessage && (
             <p
               className={`hype-message ${
-                duelLastResult?.isCorrect ? "hype-good" : "hype-bad"
+                duelLastResult?.wasAudioSkipped
+                  ? ""
+                  : duelLastResult?.isCorrect
+                    ? "hype-good"
+                    : "hype-bad"
               }`}
             >
               {duelRevealMessage}
@@ -2551,6 +2939,10 @@ function ArenaPage({
                   className="hidden-audio-preview"
                   preload="auto"
                   src={question.correctTrack.previewUrl}
+                  onPlaying={handleDuelAudioPlaying}
+                  onWaiting={handleDuelAudioWaiting}
+                  onStalled={handleDuelAudioWaiting}
+                  onError={handleDuelAudioError}
                   onTimeUpdate={handleDuelAudioTimeUpdate}
                   onEnded={handleDuelAudioEnded}
                 >
@@ -2562,13 +2954,15 @@ function ArenaPage({
                 </p>
               )}
 
-              {duelPhase === "audioBlocked" && question.correctTrack.previewUrl && (
+              {duelPhase === "audioBlocked" &&
+                question.correctTrack.previewUrl &&
+                !duelAudioRetryUsed && (
                 <button
                   type="button"
                   className="clip-button"
                   onClick={() => void startDuelAnswerRound(true)}
                 >
-                  Click to play audio and continue
+                  Retry audio once
                 </button>
               )}
             </div>

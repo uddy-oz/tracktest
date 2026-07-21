@@ -29,6 +29,7 @@ type HomePageProps = {
   onProfile: () => void;
   onResumeArenaRoom: () => void;
   onCloseArenaRoom: (roomId: string) => Promise<string>;
+  progressionRevision?: number;
 };
 
 function formatNumber(value: number) {
@@ -57,6 +58,7 @@ function HomePage({
   onProfile,
   onResumeArenaRoom,
   onCloseArenaRoom,
+  progressionRevision = 0,
 }: HomePageProps) {
   const [stats, setStats] = useState<TrackTestStats>(() => getTrackTestStats());
   const [statsSource, setStatsSource] = useState<"cloud" | "local">("local");
@@ -105,12 +107,12 @@ function HomePage({
     return () => {
       isActive = false;
     };
-  }, [session?.user]);
+  }, [progressionRevision, session?.user]);
 
   const badges = useMemo(() => getArenaBadges(stats), [stats]);
   const playerBadges =
     identityBadges || getCompactPlayerBadges(stats, badges);
-  const tier = calculatePlayerTier(badges).tier;
+  const tier = calculatePlayerTier(badges, stats).tier;
   const featuredBadges = badges
     .filter((badge) => badge.unlocked)
     .slice(0, 3);

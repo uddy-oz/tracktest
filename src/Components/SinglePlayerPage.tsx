@@ -72,7 +72,7 @@ function SinglePlayerPage({
   }, [session?.user]);
 
   const badges = useMemo(() => getArenaBadges(stats), [stats]);
-  const tier = calculatePlayerTier(badges).tier;
+  const tier = calculatePlayerTier(badges, stats).tier;
   const playerBadges = identityBadges || getCompactPlayerBadges(stats, badges);
   const displayName = session
     ? getProfileDisplayLabel(profile, session.user.email)

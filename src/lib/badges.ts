@@ -170,6 +170,30 @@ const FUTURE_ARENA_BADGES: ArenaBadge[] = [
     accent: "amber",
   },
   {
+    id: "private-challenger",
+    title: "Private Challenger",
+    description: "Complete a private Arena match.",
+    category: "Arena Lobby",
+    tier: "Bronze",
+    unlocked: false,
+    progress: 0,
+    target: 1,
+    icon: "key",
+    accent: "violet",
+  },
+  {
+    id: "open-arena",
+    title: "Open Arena",
+    description: "Complete a public Arena match.",
+    category: "Arena Lobby",
+    tier: "Bronze",
+    unlocked: false,
+    progress: 0,
+    target: 1,
+    icon: "users",
+    accent: "cyan",
+  },
+  {
     id: "championship-winner",
     title: "Championship Winner",
     description: "Win a Championship Mode event.",
@@ -207,7 +231,40 @@ const FUTURE_ARENA_BADGES: ArenaBadge[] = [
   },
 ];
 
+function getMultiplayerBadges(stats: TrackTestStats) {
+  const arena = stats.arena;
+  const progressById: Record<string, number> = {
+    "back-to-back-champion": arena.bestWinStreak,
+    "three-peat": arena.bestWinStreak,
+    "arena-dynasty": arena.bestWinStreak,
+    "first-1v1-win": arena.duelWins,
+    "close-call": arena.closeCallWins,
+    "dominant-duel": arena.dominantDuelWins,
+    "first-lobby-win": arena.lobbyWins,
+    "lobby-sweeper": arena.fullLobbyWins,
+    "party-starter": arena.partyRoomsHosted,
+    "room-controller": arena.maxPartyPlayers,
+    "private-challenger": arena.privateGames,
+    "open-arena": arena.publicGames,
+    "championship-winner": arena.championshipWins,
+  };
+
+  return FUTURE_ARENA_BADGES.map((badge) => {
+    const progress = progressById[badge.id] || 0;
+    const target = badge.target || 1;
+
+    return {
+      ...badge,
+      progress: Math.min(progress, target),
+      unlocked: progress >= target,
+    };
+  });
+}
+
 export function getArenaBadges(stats: TrackTestStats) {
+  const singlePlayerResults = stats.quizResults.filter(
+    (result) => !result.gameMode || result.gameMode === "single_player"
+  );
   const perfectRun = stats.quizResults.find(
     (result) => result.accuracyPercentage === 100
   );
@@ -267,9 +324,9 @@ export function getArenaBadges(stats: TrackTestStats) {
       description: "Complete your first Single Player quiz.",
       category: "Skill",
       tier: "Bronze",
-      unlocked: stats.overall.totalQuizzesPlayed >= 1,
-      unlockedAt: stats.quizResults.at(-1)?.datePlayed,
-      progress: Math.min(stats.overall.totalQuizzesPlayed, 1),
+      unlocked: singlePlayerResults.length >= 1,
+      unlockedAt: singlePlayerResults.at(-1)?.datePlayed,
+      progress: Math.min(singlePlayerResults.length, 1),
       target: 1,
       icon: "headphones",
       accent: "bronze",
@@ -600,7 +657,7 @@ export function getArenaBadges(stats: TrackTestStats) {
       icon: "flame",
       accent: "gold",
     },
-    ...FUTURE_ARENA_BADGES,
+    ...getMultiplayerBadges(stats),
   ];
 
   return badges;

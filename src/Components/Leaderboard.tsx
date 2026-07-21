@@ -4,6 +4,7 @@ import {
   fetchGlobalLeaderboard,
   type GlobalLeaderboardData,
 } from "../lib/globalLeaderboard";
+import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import BadgeGrid from "./BadgeGrid";
 import { getArenaBadges, getRecentUnlockedBadge } from "../lib/badges";
 import { getDailyGoalFoundation, type DailyGoal } from "../lib/dailyGoals";
@@ -19,6 +20,7 @@ type LeaderboardProps = {
   onPlay: () => void;
   session: Session | null;
   onOpenProfile: (username: string) => void;
+  progressionRevision?: number;
 };
 
 type LeaderboardTab = "global" | "myStats";
@@ -93,7 +95,12 @@ function LimitNote({
   return <p className="leaderboard-limit-note">{label}</p>;
 }
 
-function Leaderboard({ onPlay, session, onOpenProfile }: LeaderboardProps) {
+function Leaderboard({
+  onPlay,
+  session,
+  onOpenProfile,
+  progressionRevision = 0,
+}: LeaderboardProps) {
   const [activeTab, setActiveTab] = useState<LeaderboardTab>("global");
   const [stats, setStats] = useState(getTrackTestStats);
   const [globalData, setGlobalData] = useState<GlobalLeaderboardData | null>(
@@ -109,7 +116,12 @@ function Leaderboard({ onPlay, session, onOpenProfile }: LeaderboardProps) {
       setIsGlobalLoading(true);
       setGlobalError("");
 
-      const { data, error } = await fetchGlobalLeaderboard();
+      const [{ data, error }, cloudStats] = await Promise.all([
+        fetchGlobalLeaderboard(),
+        session?.user
+          ? fetchCloudBadgeStats(session.user)
+          : Promise.resolve({ data: null, error: null }),
+      ]);
 
       if (!isActive) {
         return;
@@ -117,6 +129,7 @@ function Leaderboard({ onPlay, session, onOpenProfile }: LeaderboardProps) {
 
       setGlobalData(data);
       setGlobalError(error || "");
+      setStats(cloudStats.data || getTrackTestStats());
       setIsGlobalLoading(false);
     }
 
@@ -125,7 +138,7 @@ function Leaderboard({ onPlay, session, onOpenProfile }: LeaderboardProps) {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [progressionRevision, session?.user]);
 
   const artists = Object.values(stats.artists);
   const albums = Object.values(stats.albums);
