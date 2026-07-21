@@ -5,6 +5,13 @@ import type { SpotifyAlbum } from "./spotifyApi";
 
 export type ArenaRoomMode = "duel" | "group_lobby" | "party_mode";
 export type PartyAudioStatus = "idle" | "pending" | "playing" | "skipped";
+export type PartyQuestionPhase =
+  | "idle"
+  | "countdown"
+  | "awaiting_audio"
+  | "answering"
+  | "reveal"
+  | "finished";
 
 export type DuelQuizTrack = {
   id: string;
@@ -62,6 +69,12 @@ export type ArenaRoom = {
   expiresAt: string | null;
   partyAudioQuestionIndex: number | null;
   partyAudioStatus: PartyAudioStatus;
+  partyQuestionIndex: number;
+  partyQuestionPhase: PartyQuestionPhase;
+  partyClipStartsAt: string | null;
+  partyAnswerStartsAt: string | null;
+  partyAnswerEndsAt: string | null;
+  partyRevealEndsAt: string | null;
   quizQuestions: DuelQuizQuestion[];
   players: ArenaRoomPlayer[];
 };
@@ -105,6 +118,12 @@ type ArenaRoomRow = {
   expires_at?: string | null;
   party_audio_question_index?: number | null;
   party_audio_status?: string | null;
+  party_question_index?: number | null;
+  party_question_phase?: string | null;
+  party_clip_starts_at?: string | null;
+  party_answer_starts_at?: string | null;
+  party_answer_ends_at?: string | null;
+  party_reveal_ends_at?: string | null;
   quiz_questions?: unknown;
 };
 
@@ -689,10 +708,24 @@ export async function fetchArenaRoom(roomId: string) {
 export async function activateDuelRoom(
   roomId: string,
   questions: DuelQuizQuestion[],
-  startsAt: string
+  startsAt: string,
+  mode: ArenaRoomMode = "duel"
 ) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  if (mode === "party_mode") {
+    const { error } = await supabase.rpc("start_party_room", {
+      target_room_id: roomId,
+      target_questions: questions,
+    });
+
+    if (error) {
+      return { room: null, error: getFriendlyArenaError(error.message) };
+    }
+
+    return fetchArenaRoom(roomId);
   }
 
   const { error } = await supabase
@@ -753,7 +786,7 @@ export async function setPartyAudioState({
   roomId: string;
   roundNumber: number;
   questionIndex: number;
-  status: Exclude<PartyAudioStatus, "idle">;
+  status: "pending" | "playing";
 }) {
   if (!supabase) {
     return { error: "Supabase is not configured yet." };
@@ -767,6 +800,93 @@ export async function setPartyAudioState({
   });
 
   return { error: getFriendlyArenaError(error?.message) || null };
+}
+
+export async function syncPartyRoomTimeline(roomId: string) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("sync_party_room_timeline", {
+    target_room_id: roomId,
+  });
+
+  if (error) {
+    return { room: null, error: getFriendlyArenaError(error.message) };
+  }
+
+  return fetchArenaRoom(roomId);
+}
+
+export async function fetchPartyClockOffset(roomId: string) {
+  if (!supabase) {
+    return { offsetMs: 0, error: "Supabase is not configured yet." };
+  }
+
+  const requestStartedAt = Date.now();
+  const { data, error } = await supabase.rpc("get_party_server_time", {
+    target_room_id: roomId,
+  });
+  const requestFinishedAt = Date.now();
+
+  if (error || !data) {
+    return {
+      offsetMs: 0,
+      error: getFriendlyArenaError(error?.message) || "Could not sync Party clock.",
+    };
+  }
+
+  const serverTime = Date.parse(String(data));
+  const requestMidpoint = requestStartedAt + (requestFinishedAt - requestStartedAt) / 2;
+
+  return {
+    offsetMs: Number.isFinite(serverTime) ? serverTime - requestMidpoint : 0,
+    error: null,
+  };
+}
+
+export type PartyAnswerResult = {
+  accepted: boolean;
+  duplicate?: boolean;
+  isCorrect?: boolean;
+  points?: number;
+  correctAnswer?: string;
+  answerTimeSeconds?: number;
+};
+
+export async function submitPartyAnswer(roomId: string, answer: string) {
+  if (!supabase) {
+    return {
+      result: null,
+      error: "Supabase is not configured yet.",
+    };
+  }
+
+  const { data, error } = await supabase.rpc("submit_party_answer", {
+    target_room_id: roomId,
+    target_answer: answer,
+  });
+
+  return {
+    result: error ? null : (data as PartyAnswerResult),
+    error: getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function skipPartyQuestion(roomId: string) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("skip_party_question", {
+    target_room_id: roomId,
+  });
+
+  if (error) {
+    return { room: null, error: getFriendlyArenaError(error.message) };
+  }
+
+  return fetchArenaRoom(roomId);
 }
 
 export async function saveDuelPlayerResult({
@@ -971,6 +1091,15 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
         ? row.party_audio_question_index
         : null,
     partyAudioStatus: normalizePartyAudioStatus(row.party_audio_status),
+    partyQuestionIndex:
+      typeof row.party_question_index === "number"
+        ? row.party_question_index
+        : 0,
+    partyQuestionPhase: normalizePartyQuestionPhase(row.party_question_phase),
+    partyClipStartsAt: row.party_clip_starts_at || null,
+    partyAnswerStartsAt: row.party_answer_starts_at || null,
+    partyAnswerEndsAt: row.party_answer_ends_at || null,
+    partyRevealEndsAt: row.party_reveal_ends_at || null,
     quizQuestions: normalizeDuelQuestions(row.quiz_questions),
     players: [],
   };
@@ -983,6 +1112,22 @@ function normalizePartyAudioStatus(
     value === "pending" ||
     value === "playing" ||
     value === "skipped"
+  ) {
+    return value;
+  }
+
+  return "idle";
+}
+
+function normalizePartyQuestionPhase(
+  value: string | null | undefined
+): PartyQuestionPhase {
+  if (
+    value === "countdown" ||
+    value === "awaiting_audio" ||
+    value === "answering" ||
+    value === "reveal" ||
+    value === "finished"
   ) {
     return value;
   }

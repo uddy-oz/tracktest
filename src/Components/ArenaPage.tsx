@@ -7,6 +7,7 @@ import {
   endArenaRoom,
   fetchArenaRoom,
   fetchArenaInvite,
+  fetchPartyClockOffset,
   fetchOpenDuelRooms,
   finishDuelRoom,
   forfeitDuelRoom,
@@ -21,6 +22,9 @@ import {
   type ArenaInvite,
   saveDuelPlayerResult,
   setPartyAudioState,
+  skipPartyQuestion,
+  submitPartyAnswer,
+  syncPartyRoomTimeline,
   updateDuelPlayerProgress,
   type ArenaRoom,
   type ArenaRoomMode,
@@ -80,6 +84,7 @@ type DuelPhase =
   | "audioSkipped"
   | "answering"
   | "partyAnswerLocked"
+  | "partyHostWatching"
   | "correctHold"
   | "reveal";
 
@@ -245,6 +250,7 @@ function ArenaPage({
   const [duelLastResult, setDuelLastResult] = useState<DuelResult | null>(null);
   const [duelFlash, setDuelFlash] = useState<"good" | "bad" | null>(null);
   const [isDuelMuted, setIsDuelMuted] = useState(sounds.isMuted());
+  const [partyClockOffsetMs, setPartyClockOffsetMs] = useState(0);
 
   const duelAudioRef = useRef<HTMLAudioElement | null>(null);
   const duelClipTimerRef = useRef<number | null>(null);
@@ -260,15 +266,19 @@ function ArenaPage({
   const hasSubmittedDuelResultRef = useRef(false);
   const activeRoundKeyRef = useRef<string>("");
   const progressionSyncedRoundRef = useRef<string>("");
-  const partyAudioPendingKeyRef = useRef<string>("");
+  const partyQuestionKeyRef = useRef<string>("");
+  const partyAudioStartKeyRef = useRef<string>("");
   const leavingRoomIdRef = useRef<string | null>(null);
   const ignoredRoomIdsRef = useRef(new Set<string>());
 
-  const currentDuelQuestion = activeRoom?.quizQuestions[duelQuestionIndex];
   const isPartyMode = activeRoom?.mode === "party_mode";
   const isPartyHost = Boolean(
     isPartyMode && activeRoom?.hostUserId === session?.user.id
   );
+  const gameQuestionIndex = isPartyMode
+    ? activeRoom?.partyQuestionIndex || 0
+    : duelQuestionIndex;
+  const currentDuelQuestion = activeRoom?.quizQuestions[gameQuestionIndex];
   duelPhaseRef.current = duelPhase;
   duelSelectedAnswerRef.current = duelSelectedAnswer;
   const selectedMode =
@@ -282,7 +292,15 @@ function ArenaPage({
   const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
   const duelTimerProgress = Math.max(0, duelTimeRemaining / QUESTION_TIME_SECONDS);
   const duelRingOffset = RING_CIRCUMFERENCE * (1 - duelTimerProgress);
-  const duelAnsweredCount = duelAnswerTimes.length;
+  const currentArenaPlayer = activeRoom?.players.find(
+    (player) => player.userId === session?.user.id
+  );
+  const duelAnsweredCount = isPartyMode
+    ? Math.max(
+        currentArenaPlayer?.currentQuestionIndex || 0,
+        duelAnswerTimes.length
+      )
+    : duelAnswerTimes.length;
   const duelLiveAccuracy =
     duelAnsweredCount > 0
       ? Math.round((duelCorrectAnswers / duelAnsweredCount) * 100)
@@ -298,6 +316,9 @@ function ArenaPage({
             isArenaRoomRecoverableForUser(room, session?.user.id)
         )
     ) || null;
+  const shouldShowAlbumDock = Boolean(
+    selectedAlbum && (!activeRoom || isChoosingRematchAlbum)
+  );
 
   const burstPieces = useMemo(
     () =>
@@ -306,7 +327,7 @@ function ArenaPage({
         rotation: `${index * 30}deg`,
         color: ["#7c5cff", "#2ee66b", "#ff4fa0", "#f2f0ea"][index % 4],
       })),
-    [duelQuestionIndex]
+    [gameQuestionIndex]
   );
 
   useEffect(() => {
@@ -446,6 +467,18 @@ function ArenaPage({
           void refreshActiveRoom(false);
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "arena_room_players",
+          filter: `room_id=eq.${activeRoom.id}`,
+        },
+        () => {
+          void refreshActiveRoom(false);
+        }
+      )
       .subscribe();
 
     return () => {
@@ -483,7 +516,11 @@ function ArenaPage({
       return;
     }
 
-    if (activeRoom.status === "active" && activeRoom.quizQuestions.length > 0) {
+    if (
+      activeRoom.mode !== "party_mode" &&
+      activeRoom.status === "active" &&
+      activeRoom.quizQuestions.length > 0
+    ) {
       const startsAtMs = activeRoom.startedAt ? Date.parse(activeRoom.startedAt) : 0;
       resetDuelLocalState(startsAtMs && Date.now() < startsAtMs ? "syncing" : "idle");
     }
@@ -498,6 +535,34 @@ function ArenaPage({
   useEffect(() => {
     if (
       !activeRoom ||
+      activeRoom.mode !== "party_mode" ||
+      activeRoom.status !== "active"
+    ) {
+      return;
+    }
+
+    let isActive = true;
+
+    const syncClock = async () => {
+      const { offsetMs } = await fetchPartyClockOffset(activeRoom.id);
+      if (isActive) {
+        setPartyClockOffsetMs(offsetMs);
+      }
+    };
+
+    void syncClock();
+    const clockSyncId = window.setInterval(syncClock, 30000);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(clockSyncId);
+    };
+  }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.mode === "party_mode" ||
       activeRoom.status !== "active" ||
       activeRoom.quizQuestions.length === 0 ||
       isDuelFinished ||
@@ -552,10 +617,10 @@ function ArenaPage({
       clearDuelAudioHealthTimer();
       duelAudioAttemptRef.current += 1;
     };
-  }, [currentDuelQuestion?.correctTrack.previewUrl, duelQuestionIndex]);
+  }, [currentDuelQuestion?.correctTrack.previewUrl, gameQuestionIndex]);
 
   useEffect(() => {
-    if (duelPhase !== "syncing" || !activeRoom?.startedAt) {
+    if (isPartyMode || duelPhase !== "syncing" || !activeRoom?.startedAt) {
       return;
     }
 
@@ -573,11 +638,12 @@ function ArenaPage({
     }, 250);
 
     return () => window.clearInterval(syncId);
-  }, [activeRoom?.startedAt, duelPhase]);
+  }, [activeRoom?.startedAt, duelPhase, isPartyMode]);
 
   useEffect(() => {
     if (
       duelPhase !== "countdown" ||
+      isPartyMode ||
       isDuelFinished ||
       !currentDuelQuestion ||
       duelStartCountdown === 0
@@ -590,42 +656,15 @@ function ArenaPage({
     }, 1000);
 
     return () => window.clearInterval(timerId);
-  }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished]);
+  }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished, isPartyMode]);
 
   useEffect(() => {
     if (
-      !activeRoom ||
-      !isPartyHost ||
-      activeRoom.status !== "active" ||
-      duelPhase !== "countdown"
+      isPartyMode ||
+      duelPhase !== "countdown" ||
+      isDuelFinished ||
+      !currentDuelQuestion
     ) {
-      return;
-    }
-
-    const pendingKey = `${activeRoom.id}:${activeRoom.roundNumber}:${duelQuestionIndex}`;
-
-    if (partyAudioPendingKeyRef.current === pendingKey) {
-      return;
-    }
-
-    partyAudioPendingKeyRef.current = pendingKey;
-    void publishPartyAudioState("pending").then(({ error }) => {
-      if (error) {
-        partyAudioPendingKeyRef.current = "";
-        setMessage(error);
-      }
-    });
-  }, [
-    activeRoom?.id,
-    activeRoom?.roundNumber,
-    activeRoom?.status,
-    duelPhase,
-    duelQuestionIndex,
-    isPartyHost,
-  ]);
-
-  useEffect(() => {
-    if (duelPhase !== "countdown" || isDuelFinished || !currentDuelQuestion) {
       return;
     }
 
@@ -635,11 +674,12 @@ function ArenaPage({
     }
 
     sounds.go();
-  }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished]);
+  }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished, isPartyMode]);
 
   useEffect(() => {
     if (
       duelPhase !== "countdown" ||
+      isPartyMode ||
       duelStartCountdown !== 0 ||
       isDuelFinished ||
       !currentDuelQuestion
@@ -652,7 +692,7 @@ function ArenaPage({
     }, 600);
 
     return () => window.clearTimeout(startTimerId);
-  }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished]);
+  }, [currentDuelQuestion, duelPhase, duelStartCountdown, isDuelFinished, isPartyMode]);
 
   useEffect(() => {
     if (
@@ -663,6 +703,7 @@ function ArenaPage({
         "audioBlocked",
         "audioSkipped",
       ].includes(duelPhase) ||
+      isPartyMode ||
       isDuelFinished ||
       !currentDuelQuestion
     ) {
@@ -681,7 +722,7 @@ function ArenaPage({
     const timerId = window.setInterval(updateRemainingTime, 250);
 
     return () => window.clearInterval(timerId);
-  }, [currentDuelQuestion, duelPhase, isDuelFinished]);
+  }, [currentDuelQuestion, duelPhase, isDuelFinished, isPartyMode]);
 
   useEffect(() => {
     if (
@@ -692,6 +733,7 @@ function ArenaPage({
         "audioBlocked",
         "audioSkipped",
       ].includes(duelPhase) ||
+      isPartyMode ||
       !currentDuelQuestion ||
       (duelSelectedAnswer &&
         !["audioSkipped", "partyAnswerLocked"].includes(duelPhase)) ||
@@ -719,41 +761,16 @@ function ArenaPage({
     duelSelectedAnswer,
     duelTimeRemaining,
     isDuelFinished,
-  ]);
-
-  useEffect(() => {
-    if (
-      !activeRoom ||
-      !isPartyMode ||
-      isPartyHost ||
-      duelPhase !== "partyWaitingAudio" ||
-      activeRoom.partyAudioQuestionIndex !== duelQuestionIndex
-    ) {
-      return;
-    }
-
-    if (activeRoom.partyAudioStatus === "playing") {
-      clearDuelAudioFallbackTimer();
-      setDuelAudioFallbackMessage("Audio is playing from the host device.");
-      duelPhaseRef.current = "answering";
-      setDuelPhase("answering");
-      return;
-    }
-
-    if (activeRoom.partyAudioStatus === "skipped") {
-      recordDuelAnswer("", true, "audioUnavailable");
-    }
-  }, [
-    activeRoom?.partyAudioQuestionIndex,
-    activeRoom?.partyAudioStatus,
-    duelPhase,
-    duelQuestionIndex,
-    isPartyHost,
     isPartyMode,
   ]);
 
   useEffect(() => {
-    if (duelPhase !== "reveal" || isDuelFinished || !currentDuelQuestion) {
+    if (
+      isPartyMode ||
+      duelPhase !== "reveal" ||
+      isDuelFinished ||
+      !currentDuelQuestion
+    ) {
       return;
     }
 
@@ -764,11 +781,12 @@ function ArenaPage({
     }, 250);
 
     return () => window.clearInterval(timerId);
-  }, [currentDuelQuestion, duelPhase, isDuelFinished]);
+  }, [currentDuelQuestion, duelPhase, isDuelFinished, isPartyMode]);
 
   useEffect(() => {
     if (
       duelPhase !== "reveal" ||
+      isPartyMode ||
       duelRevealCountdown !== 0 ||
       isDuelFinished ||
       !currentDuelQuestion
@@ -782,6 +800,7 @@ function ArenaPage({
     duelPhase,
     duelRevealCountdown,
     isDuelFinished,
+    isPartyMode,
   ]);
 
   useEffect(() => {
@@ -796,6 +815,262 @@ function ArenaPage({
   }, [duelPhase, duelSelectedAnswer, duelTimeRemaining]);
 
   useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.mode !== "party_mode" ||
+      activeRoom.status !== "active" ||
+      activeRoom.quizQuestions.length === 0
+    ) {
+      return;
+    }
+
+    const questionKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.partyQuestionIndex}`;
+
+    if (partyQuestionKeyRef.current !== questionKey) {
+      partyQuestionKeyRef.current = questionKey;
+      partyAudioStartKeyRef.current = "";
+      stopDuelClip(false);
+      duelSelectedAnswerRef.current = "";
+      setDuelQuestionIndex(activeRoom.partyQuestionIndex);
+      setDuelSelectedAnswer("");
+      setDuelRevealMessage("");
+      setDuelLastResult(null);
+      setDuelFlash(null);
+      setDuelAudioFallbackMessage("");
+      setDuelAudioRetryUsed(false);
+      setIsDuelFinished(false);
+    }
+
+    const player = activeRoom.players.find(
+      (roomPlayer) => roomPlayer.userId === session?.user.id
+    );
+
+    if (player && !isPartyHost) {
+      setDuelScore(player.currentScore);
+      setDuelCorrectAnswers(player.currentCorrectAnswers);
+      setDuelStreak(player.currentStreak);
+    }
+
+    const updatePartyClock = () => {
+      const now = Date.now() + partyClockOffsetMs;
+      const answerStartsAt = Date.parse(activeRoom.partyAnswerStartsAt || "");
+      const answerEndsAt = Date.parse(activeRoom.partyAnswerEndsAt || "");
+      const revealEndsAt = Date.parse(activeRoom.partyRevealEndsAt || "");
+      const phase = activeRoom.partyQuestionPhase;
+
+      if (phase === "countdown") {
+        setDuelStartCountdown(
+          Number.isFinite(answerStartsAt)
+            ? Math.max(0, Math.ceil((answerStartsAt - now) / 1000))
+            : START_COUNTDOWN_SECONDS
+        );
+        if (
+          isPartyHost &&
+          duelPhaseRef.current === "audioBlocked" &&
+          Number.isFinite(answerStartsAt) &&
+          now >= answerStartsAt
+        ) {
+          return;
+        }
+        duelPhaseRef.current = "countdown";
+        setDuelPhase("countdown");
+        return;
+      }
+
+      if (phase === "awaiting_audio") {
+        setDuelTimeRemaining(
+          Number.isFinite(answerEndsAt)
+            ? Math.max(0, Math.ceil((answerEndsAt - now) / 1000))
+            : QUESTION_TIME_SECONDS
+        );
+
+        if (!(isPartyHost && duelPhaseRef.current === "audioBlocked")) {
+          duelPhaseRef.current = "partyWaitingAudio";
+          setDuelPhase("partyWaitingAudio");
+        }
+        return;
+      }
+
+      if (phase === "answering") {
+        setDuelTimeRemaining(
+          Number.isFinite(answerEndsAt)
+            ? Math.max(0, Math.ceil((answerEndsAt - now) / 1000))
+            : QUESTION_TIME_SECONDS
+        );
+
+        const nextPhase = isPartyHost
+          ? "partyHostWatching"
+          : duelSelectedAnswerRef.current ||
+              (player &&
+                player.currentQuestionIndex > activeRoom.partyQuestionIndex)
+            ? "partyAnswerLocked"
+            : "answering";
+        duelPhaseRef.current = nextPhase;
+        setDuelPhase(nextPhase);
+        return;
+      }
+
+      if (phase === "reveal") {
+        if (duelPhaseRef.current !== "reveal") {
+          stopDuelClip(false);
+        }
+        setDuelRevealCountdown(
+          Number.isFinite(revealEndsAt)
+            ? Math.max(0, Math.ceil((revealEndsAt - now) / 1000))
+            : REVEAL_COUNTDOWN_SECONDS
+        );
+        duelPhaseRef.current = "reveal";
+        setDuelPhase("reveal");
+        return;
+      }
+
+      if (phase === "finished") {
+        stopDuelClip(false);
+        duelPhaseRef.current = "idle";
+        setDuelPhase("idle");
+      }
+    };
+
+    updatePartyClock();
+    const clockId = window.setInterval(updatePartyClock, 200);
+
+    return () => window.clearInterval(clockId);
+  }, [
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.status,
+    activeRoom?.partyQuestionIndex,
+    activeRoom?.partyQuestionPhase,
+    activeRoom?.partyAnswerStartsAt,
+    activeRoom?.partyAnswerEndsAt,
+    activeRoom?.partyRevealEndsAt,
+    activeRoom?.quizQuestions.length,
+    currentArenaPlayer?.currentScore,
+    currentArenaPlayer?.currentCorrectAnswers,
+    currentArenaPlayer?.currentStreak,
+    isPartyHost,
+    partyClockOffsetMs,
+    session?.user.id,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.mode !== "party_mode" ||
+      activeRoom.status !== "active"
+    ) {
+      return;
+    }
+
+    const boundary =
+      activeRoom.partyQuestionPhase === "countdown"
+        ? activeRoom.partyAnswerStartsAt
+        : activeRoom.partyQuestionPhase === "awaiting_audio" ||
+            activeRoom.partyQuestionPhase === "answering"
+          ? activeRoom.partyAnswerEndsAt
+          : activeRoom.partyQuestionPhase === "reveal"
+            ? activeRoom.partyRevealEndsAt
+            : null;
+
+    if (!boundary) {
+      return;
+    }
+
+    let isCancelled = false;
+    let syncId: number | null = null;
+    const phaseAtSchedule = activeRoom.partyQuestionPhase;
+    const questionAtSchedule = activeRoom.partyQuestionIndex;
+
+    const syncAtBoundary = async () => {
+      const { room, error } = await syncPartyRoomTimeline(activeRoom.id);
+
+      if (isCancelled) {
+        return;
+      }
+
+      if (room) {
+        updateActiveRoom(room);
+
+        if (
+          room.status === "active" &&
+          room.partyQuestionPhase === phaseAtSchedule &&
+          room.partyQuestionIndex === questionAtSchedule
+        ) {
+          syncId = window.setTimeout(syncAtBoundary, 400);
+        }
+      } else if (error) {
+        setMessage(error);
+        syncId = window.setTimeout(syncAtBoundary, 1000);
+      }
+    };
+
+    const delay = Math.max(
+      0,
+      Date.parse(boundary) - (Date.now() + partyClockOffsetMs)
+    ) + 80;
+    syncId = window.setTimeout(syncAtBoundary, delay);
+
+    return () => {
+      isCancelled = true;
+      if (syncId !== null) {
+        window.clearTimeout(syncId);
+      }
+    };
+  }, [
+    activeRoom?.id,
+    activeRoom?.partyQuestionIndex,
+    activeRoom?.partyQuestionPhase,
+    activeRoom?.partyAnswerStartsAt,
+    activeRoom?.partyAnswerEndsAt,
+    activeRoom?.partyRevealEndsAt,
+    activeRoom?.status,
+    partyClockOffsetMs,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      !isPartyHost ||
+      activeRoom.status !== "active" ||
+      !["countdown", "awaiting_audio", "answering"].includes(
+        activeRoom.partyQuestionPhase
+      ) ||
+      !["pending", "playing"].includes(activeRoom.partyAudioStatus) ||
+      !activeRoom.partyClipStartsAt
+    ) {
+      return;
+    }
+
+    const audioKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.partyQuestionIndex}`;
+
+    if (partyAudioStartKeyRef.current === audioKey) {
+      return;
+    }
+
+    const delay = Math.max(
+      0,
+      Date.parse(activeRoom.partyClipStartsAt) -
+        (Date.now() + partyClockOffsetMs)
+    );
+    const audioStartId = window.setTimeout(() => {
+      partyAudioStartKeyRef.current = audioKey;
+      void startDuelAnswerRound(false);
+    }, delay);
+
+    return () => window.clearTimeout(audioStartId);
+  }, [
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.status,
+    activeRoom?.partyQuestionIndex,
+    activeRoom?.partyQuestionPhase,
+    activeRoom?.partyAudioStatus,
+    activeRoom?.partyClipStartsAt,
+    isPartyHost,
+    partyClockOffsetMs,
+  ]);
+
+  useEffect(() => {
     if (!duelFlash) {
       return;
     }
@@ -808,6 +1083,15 @@ function ArenaPage({
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.visibilityState !== "visible" || !currentDuelQuestion) {
+        return;
+      }
+
+      if (isPartyMode && activeRoom) {
+        void syncPartyRoomTimeline(activeRoom.id).then(({ room }) => {
+          if (room) {
+            updateActiveRoom(room);
+          }
+        });
         return;
       }
 
@@ -855,7 +1139,7 @@ function ArenaPage({
 
     return () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [currentDuelQuestion, duelPhase, isPartyHost, isPartyMode]);
+  }, [activeRoom, currentDuelQuestion, duelPhase, isPartyHost, isPartyMode]);
 
   useEffect(() => {
     if (!activeRoom || activeRoom.status !== "finished" || !onProgressionUpdated) {
@@ -998,7 +1282,7 @@ function ArenaPage({
     setIsDuelClipPlaying(false);
   }
 
-  async function playDuelClip() {
+  async function playDuelClip(timelineOffsetSeconds = 0) {
     const audio = duelAudioRef.current;
 
     if (!audio || !currentDuelQuestion?.correctTrack.previewUrl) {
@@ -1020,9 +1304,16 @@ function ArenaPage({
         currentDuelQuestion.clipStartSeconds,
         latestStart
       );
+      const safeTimelineOffset = Math.min(
+        Math.max(0, timelineOffsetSeconds),
+        CLIP_LENGTH_SECONDS
+      );
 
       audio.pause();
-      audio.currentTime = safeClipStart;
+      audio.currentTime = Math.min(
+        safeClipStart + safeTimelineOffset,
+        safeClipStart + CLIP_LENGTH_SECONDS
+      );
       const didStart = await Promise.race([
         audio
           .play()
@@ -1057,7 +1348,7 @@ function ArenaPage({
         duelAudioHealthTimerRef.current = null;
 
         if (
-          duelPhaseRef.current === "answering" &&
+          ["answering", "partyHostWatching"].includes(duelPhaseRef.current) &&
           !duelClipCompletedRef.current &&
           (audio.paused || audio.currentTime <= playbackPosition + 0.1)
         ) {
@@ -1068,7 +1359,7 @@ function ArenaPage({
       duelClipTimerRef.current = window.setTimeout(() => {
         duelClipCompletedRef.current = true;
         stopDuelClip();
-      }, CLIP_LENGTH_SECONDS * 1000);
+      }, Math.max(0, CLIP_LENGTH_SECONDS - safeTimelineOffset) * 1000);
 
       return true;
     } catch (error) {
@@ -1139,7 +1430,15 @@ function ArenaPage({
     }
 
     if (isPartyHost) {
-      void publishPartyAudioState("skipped");
+      void skipPartyQuestion(activeRoom!.id).then(({ room, error }) => {
+        if (room) {
+          updateActiveRoom(room);
+        }
+        setDuelAudioFallbackMessage(
+          error || "Host audio unavailable. Question skipped for everyone."
+        );
+      });
+      return;
     }
 
     recordDuelAnswer("", true, "audioUnavailable");
@@ -1171,7 +1470,10 @@ function ArenaPage({
   }
 
   function handleDuelAudioWaiting() {
-    if (duelPhaseRef.current !== "answering" || duelClipCompletedRef.current) {
+    if (
+      !["answering", "partyHostWatching"].includes(duelPhaseRef.current) ||
+      duelClipCompletedRef.current
+    ) {
       return;
     }
 
@@ -1182,7 +1484,11 @@ function ArenaPage({
   }
 
   function handleDuelAudioError() {
-    if (["answering", "audioBlocked"].includes(duelPhaseRef.current)) {
+    if (
+      ["answering", "partyHostWatching", "audioBlocked"].includes(
+        duelPhaseRef.current
+      )
+    ) {
       enterDuelAudioFallback("Audio could not load on this device.");
     }
   }
@@ -1211,7 +1517,7 @@ function ArenaPage({
   }
 
   async function publishPartyAudioState(
-    status: "pending" | "playing" | "skipped"
+    status: "pending" | "playing"
   ) {
     if (!activeRoom || !isPartyHost) {
       return { error: "Only the Party host can control room audio." };
@@ -1220,7 +1526,7 @@ function ArenaPage({
     return setPartyAudioState({
       roomId: activeRoom.id,
       roundNumber: activeRoom.roundNumber,
-      questionIndex: duelQuestionIndex,
+      questionIndex: gameQuestionIndex,
       status,
     });
   }
@@ -1241,6 +1547,70 @@ function ArenaPage({
 
     setDuelAudioFallbackMessage("");
 
+    if (isPartyMode) {
+      if (!isPartyHost || !activeRoom) {
+        return;
+      }
+
+      if (!currentDuelQuestion.correctTrack.previewUrl) {
+        setDuelAudioRetryUsed(true);
+        enterDuelAudioFallback(
+          "Audio unavailable on the host device. Question will be skipped."
+        );
+        return;
+      }
+
+      const clipStartsAt = Date.parse(activeRoom.partyClipStartsAt || "");
+      const timelineOffset = Number.isFinite(clipStartsAt)
+        ? Math.max(
+            0,
+            (Date.now() + partyClockOffsetMs - clipStartsAt) / 1000
+          )
+        : 0;
+
+      if (timelineOffset >= CLIP_LENGTH_SECONDS) {
+        clearDuelAudioFallbackTimer();
+        duelPhaseRef.current = "partyHostWatching";
+        setDuelPhase("partyHostWatching");
+        return;
+      }
+
+      const didPlay = await playDuelClip(timelineOffset);
+
+      if (!didPlay) {
+        if (isManualStart) {
+          setDuelAudioFallbackMessage(
+            "Audio unavailable on the host device. Question skipped."
+          );
+          skipDuelQuestionForAudio();
+        } else {
+          enterDuelAudioFallback(
+            "Host audio needs one tap. The shared game clock is still running."
+          );
+        }
+        return;
+      }
+
+      const { error } = await publishPartyAudioState("playing");
+
+      if (error) {
+        enterDuelAudioFallback(
+          "Host audio started, but the room could not sync. Retry once."
+        );
+        return;
+      }
+
+      clearDuelAudioFallbackTimer();
+      duelPhaseRef.current = "partyHostWatching";
+      setDuelPhase("partyHostWatching");
+      const refreshedRoom = await fetchArenaRoom(activeRoom.id);
+
+      if (refreshedRoom.room) {
+        updateActiveRoom(refreshedRoom.room);
+      }
+      return;
+    }
+
     if (duelAnswerDeadlineRef.current === 0) {
       duelAnswerDeadlineRef.current = Date.now() + QUESTION_TIME_SECONDS * 1000;
     }
@@ -1249,27 +1619,6 @@ function ArenaPage({
 
     if (remainingSeconds === 0) {
       recordDuelAnswer("", true, "audioUnavailable");
-      return;
-    }
-
-    if (isPartyMode && !isPartyHost) {
-      setDuelAudioFallbackMessage("Listen on the host device, then choose your answer.");
-      duelPhaseRef.current = "partyWaitingAudio";
-      setDuelPhase("partyWaitingAudio");
-
-      if (
-        activeRoom?.partyAudioQuestionIndex === duelQuestionIndex &&
-        activeRoom.partyAudioStatus === "playing"
-      ) {
-        duelPhaseRef.current = "answering";
-        setDuelPhase("answering");
-      } else if (
-        activeRoom?.partyAudioQuestionIndex === duelQuestionIndex &&
-        activeRoom.partyAudioStatus === "skipped"
-      ) {
-        recordDuelAnswer("", true, "audioUnavailable");
-      }
-
       return;
     }
 
@@ -1288,16 +1637,6 @@ function ArenaPage({
 
       remainingSeconds = getDuelAnswerTimeRemaining();
 
-      if (isPartyHost) {
-        const { error } = await publishPartyAudioState("playing");
-
-        if (error) {
-          enterDuelAudioFallback(
-            "Host audio started, but the room could not sync. Retry once."
-          );
-          return;
-        }
-      }
     } else {
       setDuelAudioRetryUsed(true);
       enterDuelAudioFallback("Audio unavailable on this device. Question will be skipped.");
@@ -1403,6 +1742,75 @@ function ArenaPage({
     resetDuelQuestionFlow();
   }
 
+  async function recordPartyAnswer(answer: string) {
+    if (
+      !activeRoom ||
+      !session?.user ||
+      !currentDuelQuestion ||
+      !isPartyMode ||
+      isPartyHost ||
+      duelPhaseRef.current !== "answering" ||
+      duelSelectedAnswerRef.current
+    ) {
+      return;
+    }
+
+    duelSelectedAnswerRef.current = answer;
+    setDuelSelectedAnswer(answer);
+    duelPhaseRef.current = "partyAnswerLocked";
+    setDuelPhase("partyAnswerLocked");
+
+    const { result, error } = await submitPartyAnswer(activeRoom.id, answer);
+
+    if (error || !result?.accepted) {
+      setMessage(
+        error ||
+          (result?.duplicate
+            ? "Answer already locked."
+            : "This question is no longer accepting answers.")
+      );
+      const refreshedRoom = await fetchArenaRoom(activeRoom.id);
+      if (refreshedRoom.room) {
+        updateActiveRoom(refreshedRoom.room);
+      }
+      return;
+    }
+
+    const isCorrect = Boolean(result.isCorrect);
+    const points = result.points || 0;
+    const correctAnswer =
+      result.correctAnswer || currentDuelQuestion.correctAnswer;
+    const answerTime = result.answerTimeSeconds || 0;
+    const nextStreak = isCorrect ? duelStreak + 1 : 0;
+
+    setDuelScore((currentScore) => currentScore + points);
+    setDuelCorrectAnswers((currentTotal) => currentTotal + (isCorrect ? 1 : 0));
+    setDuelAnswerTimes((currentTimes) => [...currentTimes, answerTime]);
+    setDuelStreak(nextStreak);
+    setDuelLastResult({ isCorrect, points, correctAnswer });
+    setDuelFlash(isCorrect ? "good" : "bad");
+    setDuelRevealMessage(
+      isCorrect
+        ? getStreakRewardLabel(nextStreak) || "Answer locked"
+        : `Correct answer: ${correctAnswer}`
+    );
+
+    if (isCorrect) {
+      if (nextStreak >= 3) {
+        sounds.streak();
+      } else {
+        sounds.correct();
+      }
+    } else {
+      sounds.wrong();
+    }
+
+    const refreshedRoom = await fetchArenaRoom(activeRoom.id);
+    if (refreshedRoom.room) {
+      updateActiveRoom(refreshedRoom.room);
+    }
+  }
+
   function recordDuelAnswer(
     answer: string,
     timedOut = false,
@@ -1410,7 +1818,12 @@ function ArenaPage({
       ? "timeout"
       : "answer"
   ) {
-    if (!activeRoom || !session?.user || !currentDuelQuestion) {
+    if (
+      !activeRoom ||
+      !session?.user ||
+      !currentDuelQuestion ||
+      isPartyMode
+    ) {
       return;
     }
 
@@ -1455,14 +1868,8 @@ function ArenaPage({
     setDuelFlash(reason === "audioUnavailable" ? null : isCorrect ? "good" : "bad");
 
     if (reason === "audioUnavailable") {
-      if (isPartyHost) {
-        void publishPartyAudioState("skipped");
-      }
-
       stopDuelClip(false);
-      const skippedMessage = isPartyMode
-        ? "Host audio unavailable. Question skipped for everyone."
-        : "Audio unavailable on this device. Question skipped.";
+      const skippedMessage = "Audio unavailable on this device. Question skipped.";
       setDuelRevealMessage(skippedMessage);
       setDuelAudioFallbackMessage(skippedMessage);
     } else if (timedOut) {
@@ -1965,6 +2372,19 @@ function ArenaPage({
     );
   }
 
+  function getPartyCompetitors(room: ArenaRoom) {
+    return getPresentPlayers(room).filter(
+      (player) =>
+        player.userId !== room.hostUserId && player.resultStatus !== "forfeit"
+    );
+  }
+
+  function getPartyAnsweredCount(room: ArenaRoom) {
+    return getPartyCompetitors(room).filter(
+      (player) => player.currentQuestionIndex > room.partyQuestionIndex
+    ).length;
+  }
+
   async function startArenaRoom(roomToStart: ArenaRoom) {
     if (!session?.user) {
       return;
@@ -2020,11 +2440,17 @@ function ArenaPage({
       }
     }
 
-    const startsAt = new Date(Date.now() + DUEL_SYNC_START_DELAY_MS).toISOString();
+    const startsAt = new Date(
+      Date.now() +
+        (freshRoom.mode === "party_mode"
+          ? START_COUNTDOWN_SECONDS * 1000
+          : DUEL_SYNC_START_DELAY_MS)
+    ).toISOString();
     const activatedRoom = await activateDuelRoom(
       freshRoom.id,
       questions,
-      startsAt
+      startsAt,
+      freshRoom.mode
     );
 
     updateActiveRoom(activatedRoom.room || { ...freshRoom, quizQuestions: questions });
@@ -2231,16 +2657,24 @@ function ArenaPage({
 
   function getLiveRankedPlayers(room: ArenaRoom, currentPlayerId?: string) {
     return room.players
-      .filter((player) => player.resultStatus !== "cancelled" && player.resultStatus !== "left")
+      .filter(
+        (player) =>
+          player.resultStatus !== "cancelled" &&
+          player.resultStatus !== "left" &&
+          (room.mode !== "party_mode" ||
+            (!player.leftAt &&
+              player.resultStatus !== "forfeit" &&
+              player.userId !== room.hostUserId))
+      )
       .map((player) =>
-        player.userId === currentPlayerId
+        player.userId === currentPlayerId && room.mode !== "party_mode"
           ? {
               ...player,
               currentScore: duelScore,
               currentCorrectAnswers: duelCorrectAnswers,
               currentQuestionIndex: duelSelectedAnswer
-                ? duelQuestionIndex + 1
-                : duelQuestionIndex,
+                ? gameQuestionIndex + 1
+                : gameQuestionIndex,
               currentStreak: duelStreak,
             }
           : player
@@ -2260,7 +2694,11 @@ function ArenaPage({
       <div className="group-live-board">
         <div className="profile-panel-heading">
           <div>
-            <p className="eyebrow">Live Group Leaderboard</p>
+            <p className="eyebrow">
+              {room.mode === "party_mode"
+                ? "Live Party Leaderboard"
+                : "Live Group Leaderboard"}
+            </p>
             <h2>Current Standings</h2>
           </div>
           <span>{rankedPlayers.length}/{room.maxPlayers}</span>
@@ -2536,6 +2974,14 @@ function ArenaPage({
 
           <button
             type="button"
+            className="secondary-button start-bar-clear"
+            onClick={() => setSelectedAlbum(null)}
+          >
+            Change
+          </button>
+
+          <button
+            type="button"
             disabled={isPreparingDuel}
             onClick={() => void handleHostRematch(selectedAlbum)}
           >
@@ -2559,6 +3005,14 @@ function ArenaPage({
           <strong>{selectedAlbum.title}</strong>
           <span>{selectedAlbum.artist}</span>
         </div>
+
+        <button
+          type="button"
+          className="secondary-button start-bar-clear"
+          onClick={() => setSelectedAlbum(null)}
+        >
+          Change
+        </button>
 
         <div className="arena-privacy-toggle" role="group" aria-label="Room privacy">
           <button
@@ -2726,7 +3180,9 @@ function ArenaPage({
     if (duelPhase === "partyWaitingAudio") {
       return (
         <>
-          <p className="game-state-label">Listen to the host</p>
+          <p className="game-state-label">
+            {isPartyHost ? "Starting host audio" : "Listen to the host"}
+          </p>
           <div
             className={`timer-ring ${
               duelTimeRemaining <= 3 ? "timer-ring-low" : ""
@@ -2747,7 +3203,42 @@ function ArenaPage({
             <span>{duelTimeRemaining}</span>
           </div>
           <p className="game-state-detail">
-            The clip plays only from the Party host device.
+            {isPartyHost
+              ? "Players remain on the shared clock while audio starts."
+              : "The clip plays only from the Party host device."}
+          </p>
+        </>
+      );
+    }
+
+    if (duelPhase === "partyHostWatching" && activeRoom) {
+      const competitors = getPartyCompetitors(activeRoom);
+      const answeredCount = getPartyAnsweredCount(activeRoom);
+
+      return (
+        <>
+          <p className="game-state-label">Players are answering</p>
+          <div
+            className={`timer-ring ${
+              duelTimeRemaining <= 3 ? "timer-ring-low" : ""
+            }`}
+            aria-label={`${duelTimeRemaining} seconds remaining`}
+          >
+            <svg viewBox="0 0 128 128" aria-hidden="true">
+              <circle className="timer-ring-bg" cx="64" cy="64" r={RING_RADIUS} />
+              <circle
+                className="timer-ring-fg"
+                cx="64"
+                cy="64"
+                r={RING_RADIUS}
+                strokeDasharray={RING_CIRCUMFERENCE}
+                strokeDashoffset={duelRingOffset}
+              />
+            </svg>
+            <span>{duelTimeRemaining}</span>
+          </div>
+          <p className="game-state-detail">
+            {answeredCount} of {competitors.length} players answered
           </p>
         </>
       );
@@ -2793,7 +3284,10 @@ function ArenaPage({
             <p className="points-pop">+{duelLastResult.points}</p>
           ) : (
             <p className="reveal-answer">
-              Correct answer: <strong>{duelLastResult?.correctAnswer}</strong>
+              Correct answer:{" "}
+              <strong>
+                {duelLastResult?.correctAnswer || currentDuelQuestion?.correctAnswer}
+              </strong>
             </p>
           )}
           {duelRevealMessage && (
@@ -2863,7 +3357,10 @@ function ArenaPage({
       return (
         <>
           <p className="game-state-label">
-            {duelLastResult?.wasAudioSkipped ? "Audio skipped" : "Reveal"}
+            {duelLastResult?.wasAudioSkipped ||
+            (isPartyMode && activeRoom?.partyAudioStatus === "skipped")
+              ? "Audio skipped"
+              : "Reveal"}
           </p>
           {duelLastResult?.isCorrect ? (
             <>
@@ -2882,7 +3379,10 @@ function ArenaPage({
             </>
           ) : (
             <p className="reveal-answer">
-              Correct answer: <strong>{duelLastResult?.correctAnswer}</strong>
+              Correct answer:{" "}
+              <strong>
+                {duelLastResult?.correctAnswer || currentDuelQuestion?.correctAnswer}
+              </strong>
             </p>
           )}
           {duelRevealMessage && (
@@ -2927,6 +3427,12 @@ function ArenaPage({
       const isActivePartyMode = activeRoom.mode === "party_mode";
       const usesLiveLeaderboard = activeRoom.mode !== "duel";
       const presentPlayers = getPresentPlayers(activeRoom);
+      const partyCompetitors = isActivePartyMode
+        ? getPartyCompetitors(activeRoom)
+        : [];
+      const partyAnsweredCount = isActivePartyMode
+        ? getPartyAnsweredCount(activeRoom)
+        : 0;
       const hostPlayer = presentPlayers.find(
         (player) => player.userId === activeRoom.hostUserId
       );
@@ -2943,13 +3449,14 @@ function ArenaPage({
         (player) =>
           !player.leftAt &&
           player.resultStatus !== "cancelled" &&
-          player.resultStatus !== "left"
+          player.resultStatus !== "left" &&
+          (!isActivePartyMode || player.userId !== activeRoom.hostUserId)
       );
       const bothPlayersFinished =
         activeRoom.status === "finished" ||
         (resultPlayers.length >= activeModeSettings.minPlayersToStart &&
           resultPlayers.every((player) => player.finishedAt));
-      const question = activeRoom.quizQuestions[duelQuestionIndex];
+      const question = activeRoom.quizQuestions[gameQuestionIndex];
       const isHost = activeRoom.hostUserId === session?.user.id;
 
       if (activeRoom.status === "cancelled") {
@@ -3079,13 +3586,18 @@ function ArenaPage({
               </div>
             </div>
             {isHost && renderRematchAlbumPicker()}
-            {isHost && renderSelectedAlbumStartBar()}
           </section>
         );
       }
 
       if (activeRoom.status === "active" && question) {
-        if (currentPlayer?.finishedAt || isDuelFinished) {
+        if (
+          currentPlayer?.finishedAt ||
+          isDuelFinished ||
+          (isActivePartyMode &&
+            isHost &&
+            activeRoom.partyQuestionPhase === "finished")
+        ) {
           return (
             <section className="duel-room-screen">
               <div className="duel-room-actions">
@@ -3108,13 +3620,21 @@ function ArenaPage({
               <div className="duel-results-card">
                 <p className="eyebrow">{activeModeSettings.title} Submitted</p>
                 <h2>
-                  {usesLiveLeaderboard
+                  {isActivePartyMode && isHost
+                    ? "Players are submitting final scores."
+                    : usesLiveLeaderboard
                     ? "Waiting for other players to finish."
                     : "Waiting for opponent to finish."}
                 </h2>
-                <p className="arena-note">
-                  Your score: {duelScore.toLocaleString()} points.
-                </p>
+                {!isActivePartyMode || !isHost ? (
+                  <p className="arena-note">
+                    Your score: {duelScore.toLocaleString()} points.
+                  </p>
+                ) : (
+                  <p className="arena-note">
+                    The Party host is not included in competitive standings.
+                  </p>
+                )}
               </div>
             </section>
           );
@@ -3135,7 +3655,7 @@ function ArenaPage({
                 <p className="eyebrow">{activeModeSettings.activeTitle}</p>
                 <h2>{activeRoom.albumName}</h2>
                 <p>
-                  Question {duelQuestionIndex + 1} of{" "}
+                  Question {gameQuestionIndex + 1} of{" "}
                   {activeRoom.quizQuestions.length}
                 </p>
                 <span>
@@ -3151,9 +3671,19 @@ function ArenaPage({
                 type="button"
                 className="secondary-button danger-button"
                 disabled={isLeavingRoom}
-                onClick={() => void handleForfeitDuelRoom()}
+                onClick={() =>
+                  void (isActivePartyMode && isHost
+                    ? handleEndArenaRoom()
+                    : handleForfeitDuelRoom())
+                }
               >
-                {isLeavingRoom ? "Forfeiting..." : "Forfeit Game"}
+                {isLeavingRoom
+                  ? isActivePartyMode && isHost
+                    ? "Ending..."
+                    : "Forfeiting..."
+                  : isActivePartyMode && isHost
+                    ? "End Party"
+                    : "Forfeit Game"}
               </button>
             </div>
 
@@ -3187,15 +3717,31 @@ function ArenaPage({
               </div>
             )}
 
-            <div className="quiz-status duel-game-status">
-              <span>Score: {duelScore.toLocaleString()}</span>
-              <span>
-                Correct: {duelCorrectAnswers} / {activeRoom.quizQuestions.length}
-              </span>
-              <span>Accuracy: {duelLiveAccuracy}%</span>
-              <span className={duelStreak >= 3 ? "streak-reward" : "streak-chip"}>
-                {getStreakRewardLabel(duelStreak) || `Streak: ${duelStreak}`}
-              </span>
+            <div className={`quiz-status duel-game-status ${
+              isActivePartyMode && isHost ? "party-host-status" : ""
+            }`}>
+              {isActivePartyMode && isHost ? (
+                <>
+                  <span>
+                    Answers: {partyAnsweredCount} / {partyCompetitors.length}
+                  </span>
+                  <span>Audio: {activeRoom.partyAudioStatus}</span>
+                  <span>
+                    Phase: {activeRoom.partyQuestionPhase.replace("_", " ")}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>Score: {duelScore.toLocaleString()}</span>
+                  <span>
+                    Correct: {duelCorrectAnswers} / {activeRoom.quizQuestions.length}
+                  </span>
+                  <span>Accuracy: {duelLiveAccuracy}%</span>
+                  <span className={duelStreak >= 3 ? "streak-reward" : "streak-chip"}>
+                    {getStreakRewardLabel(duelStreak) || `Streak: ${duelStreak}`}
+                  </span>
+                </>
+              )}
               <button
                 type="button"
                 className="mute-toggle"
@@ -3209,7 +3755,15 @@ function ArenaPage({
             <div className="game-state">{renderDuelGameState()}</div>
 
             <p className="quiz-clue">
-              Pick the correct track from <strong>{activeRoom.albumName}</strong>.
+              {isActivePartyMode && isHost ? (
+                <>
+                  Players are answering from <strong>{activeRoom.albumName}</strong>.
+                </>
+              ) : (
+                <>
+                  Pick the correct track from <strong>{activeRoom.albumName}</strong>.
+                </>
+              )}
             </p>
 
             <div className="audio-preview-wrapper">
@@ -3220,7 +3774,7 @@ function ArenaPage({
               ) : question.correctTrack.previewUrl ? (
                 <audio
                   ref={duelAudioRef}
-                  key={`${activeRoom.id}-${duelQuestionIndex}-${question.correctTrack.previewUrl}`}
+                  key={`${activeRoom.id}-${gameQuestionIndex}-${question.correctTrack.previewUrl}`}
                   className="hidden-audio-preview"
                   preload="auto"
                   src={question.correctTrack.previewUrl}
@@ -3253,30 +3807,43 @@ function ArenaPage({
               )}
             </div>
 
-            <div className="song-options">
-              {question.options.map((option) => (
-                <button
-                  type="button"
-                  className={`song-button ${
-                    duelSelectedAnswer === option.name ? "selected-song" : ""
-                  } ${
-                    duelSelectedAnswer && option.name === question.correctAnswer
-                      ? "correct-song"
-                      : ""
-                  } ${
-                    duelSelectedAnswer === option.name &&
-                    option.name !== question.correctAnswer
-                      ? "wrong-song"
-                      : ""
-                  }`}
-                  key={`${option.id}-${option.name}`}
-                  disabled={duelPhase !== "answering" || Boolean(duelSelectedAnswer)}
-                  onClick={() => recordDuelAnswer(option.name)}
-                >
-                  {option.name}
-                </button>
-              ))}
-            </div>
+            {isActivePartyMode && isHost ? (
+              <div className="party-host-answer-state" aria-live="polite">
+                <strong>Players are answering</strong>
+                <span>
+                  {partyAnsweredCount} of {partyCompetitors.length} players answered
+                </span>
+              </div>
+            ) : (
+              <div className="song-options">
+                {question.options.map((option) => (
+                  <button
+                    type="button"
+                    className={`song-button ${
+                      duelSelectedAnswer === option.name ? "selected-song" : ""
+                    } ${
+                      duelSelectedAnswer && option.name === question.correctAnswer
+                        ? "correct-song"
+                        : ""
+                    } ${
+                      duelSelectedAnswer === option.name &&
+                      option.name !== question.correctAnswer
+                        ? "wrong-song"
+                        : ""
+                    }`}
+                    key={`${option.id}-${option.name}`}
+                    disabled={duelPhase !== "answering" || Boolean(duelSelectedAnswer)}
+                    onClick={() =>
+                      isActivePartyMode
+                        ? void recordPartyAnswer(option.name)
+                        : recordDuelAnswer(option.name)
+                    }
+                  >
+                    {option.name}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <p className="score score-live">
               Score: {duelScore.toLocaleString()}
@@ -3542,14 +4109,13 @@ function ArenaPage({
             </p>
           )}
         </div>
-        {renderSelectedAlbumStartBar()}
       </section>
     );
   }
 
   return (
     <section
-      className={`arena-page ${
+      className={`arena-page ${shouldShowAlbumDock ? "arena-page-has-dock" : ""} ${
         selectedArenaTheme ? `arena-theme-${selectedArenaTheme}` : ""
       }`}
     >
@@ -3679,7 +4245,7 @@ function ArenaPage({
         <div
           className={`arena-mode-overlay ${
             activeRoom?.status === "active" ? "arena-game-overlay" : ""
-          }`}
+          } ${shouldShowAlbumDock ? "arena-overlay-has-dock" : ""}`}
           role="dialog"
           aria-modal="true"
           onMouseDown={(event) => {
@@ -3723,6 +4289,8 @@ function ArenaPage({
           </div>
         </div>
       )}
+
+      {shouldShowAlbumDock && renderSelectedAlbumStartBar()}
 
       <button type="button" onClick={onHome}>
         Back Home
