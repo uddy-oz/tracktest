@@ -63,11 +63,11 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       className={`album-search ${compact ? "album-search-compact" : ""}`}
       id="album-search"
     >
-      <p className="eyebrow">Step one</p>
-      <h2>Pick your battlefield</h2>
+      <p className="eyebrow">Start a new run</p>
+      <h2>Choose an album</h2>
 
       <p className="section-sub">
-        Search any album. Select one. TrackTest Arena will build the quiz.
+        Search by artist or album title, then lock in your pick.
       </p>
 
       <form className="search-box" onSubmit={handleSearch}>

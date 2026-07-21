@@ -146,6 +146,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const isCorrectAnswerHoldRef = useRef(false);
   const previewCacheRef = useRef<Record<string, string | null>>({});
   const hasSavedQuizResultRef = useRef(false);
+  const hasAnsweredRef = useRef(false);
 
   const CLIP_LENGTH_SECONDS = 5;
 
@@ -204,6 +205,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
         setQuizPhase("preparing");
         setHasAnswered(false);
+        hasAnsweredRef.current = false;
         setIsQuizComplete(false);
         setCloudSaveMessage("");
         setPreviewUrl("");
@@ -710,6 +712,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     setRevealMessage("");
     setFlash(null);
     setHasAnswered(false);
+    hasAnsweredRef.current = false;
     setQuizPhase("countdown");
   }
 
@@ -730,10 +733,12 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       return;
     }
 
-    if (hasAnswered || quizPhase !== "answering") {
+    if (hasAnsweredRef.current || hasAnswered || quizPhase !== "answering") {
       setMessage("You already answered this question.");
       return;
     }
+
+    hasAnsweredRef.current = true;
 
     const correctAnswer = currentQuestion.correctTrack.name;
     const normalizedGuess = selectedGuess.toLowerCase();
@@ -935,6 +940,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     setRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
     setAudioFallbackMessage("");
     setHasAnswered(false);
+    hasAnsweredRef.current = false;
     setIsQuizComplete(false);
     setCloudSaveMessage("");
     hasSavedQuizResultRef.current = false;

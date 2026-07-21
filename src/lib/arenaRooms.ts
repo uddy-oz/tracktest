@@ -4,6 +4,7 @@ import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
 
 export type ArenaRoomMode = "duel" | "group_lobby" | "party_mode";
+export type PartyAudioStatus = "idle" | "pending" | "playing" | "skipped";
 
 export type DuelQuizTrack = {
   id: string;
@@ -59,6 +60,8 @@ export type ArenaRoom = {
   startedAt: string | null;
   finishedAt: string | null;
   expiresAt: string | null;
+  partyAudioQuestionIndex: number | null;
+  partyAudioStatus: PartyAudioStatus;
   quizQuestions: DuelQuizQuestion[];
   players: ArenaRoomPlayer[];
 };
@@ -100,6 +103,8 @@ type ArenaRoomRow = {
   started_at: string | null;
   finished_at: string | null;
   expires_at?: string | null;
+  party_audio_question_index?: number | null;
+  party_audio_status?: string | null;
   quiz_questions?: unknown;
 };
 
@@ -739,6 +744,31 @@ export async function updateDuelPlayerProgress({
   return { error: getFriendlyArenaError(error?.message) || null };
 }
 
+export async function setPartyAudioState({
+  roomId,
+  roundNumber,
+  questionIndex,
+  status,
+}: {
+  roomId: string;
+  roundNumber: number;
+  questionIndex: number;
+  status: Exclude<PartyAudioStatus, "idle">;
+}) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("set_party_audio_state", {
+    target_room_id: roomId,
+    target_round_number: roundNumber,
+    target_question_index: questionIndex,
+    target_status: status,
+  });
+
+  return { error: getFriendlyArenaError(error?.message) || null };
+}
+
 export async function saveDuelPlayerResult({
   roomId,
   user,
@@ -936,9 +966,28 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     expiresAt: row.expires_at || null,
+    partyAudioQuestionIndex:
+      typeof row.party_audio_question_index === "number"
+        ? row.party_audio_question_index
+        : null,
+    partyAudioStatus: normalizePartyAudioStatus(row.party_audio_status),
     quizQuestions: normalizeDuelQuestions(row.quiz_questions),
     players: [],
   };
+}
+
+function normalizePartyAudioStatus(
+  value: string | null | undefined
+): PartyAudioStatus {
+  if (
+    value === "pending" ||
+    value === "playing" ||
+    value === "skipped"
+  ) {
+    return value;
+  }
+
+  return "idle";
 }
 
 function normalizeDuelQuestions(questions: unknown): DuelQuizQuestion[] {

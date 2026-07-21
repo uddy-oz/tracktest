@@ -46,6 +46,26 @@ function formatDate(value: string) {
   });
 }
 
+function getRankingClass(index: number) {
+  const rank = index + 1;
+
+  if (rank === 1) return "rank-first";
+  if (rank === 2) return "rank-second";
+  if (rank === 3) return "rank-third";
+  if (rank <= 5) return "rank-top-five";
+  return "rank-top-ten";
+}
+
+function getLeaderboardRowClass(
+  index: number,
+  userId: string,
+  currentUserId?: string
+) {
+  return `leaderboard-list-row ${getRankingClass(index)} ${
+    userId === currentUserId ? "leaderboard-current-user" : ""
+  }`;
+}
+
 function PlayerLabel({
   playerName,
   username,
@@ -220,6 +240,7 @@ function Leaderboard({
           error={globalError}
           isLoading={isGlobalLoading}
           onOpenProfile={onOpenProfile}
+          currentUserId={session?.user.id}
         />
       ) : (
         <MyStats
@@ -246,11 +267,13 @@ function GlobalArena({
   error,
   isLoading,
   onOpenProfile,
+  currentUserId,
 }: {
   data: GlobalLeaderboardData | null;
   error: string;
   isLoading: boolean;
   onOpenProfile: (username: string) => void;
+  currentUserId?: string;
 }) {
   if (isLoading) {
     return <p className="empty-stats">Loading Global Arena...</p>;
@@ -267,12 +290,19 @@ function GlobalArena({
   return (
     <>
       <div className="leaderboard-sections global-leaderboard-sections">
-        <div className="leaderboard-panel">
+        <div className="leaderboard-panel leaderboard-panel-overall">
           <h2>Overall Points</h2>
           {data.overallPoints.length > 0 ? (
             <div className="leaderboard-list">
               {data.overallPoints.map((entry, index) => (
-                <div className="leaderboard-list-row" key={entry.userId}>
+                <div
+                  className={getLeaderboardRowClass(
+                    index,
+                    entry.userId,
+                    currentUserId
+                  )}
+                  key={entry.userId}
+                >
                   <span className="rank-number">{index + 1}</span>
                   <div>
                     <strong>
@@ -299,12 +329,19 @@ function GlobalArena({
           )}
         </div>
 
-        <div className="leaderboard-panel">
+        <div className="leaderboard-panel leaderboard-panel-accuracy">
           <h2>Best Accuracy</h2>
           {data.bestAccuracy.length > 0 ? (
             <div className="leaderboard-list">
               {data.bestAccuracy.map((entry, index) => (
-                <div className="leaderboard-list-row" key={entry.userId}>
+                <div
+                  className={getLeaderboardRowClass(
+                    index,
+                    entry.userId,
+                    currentUserId
+                  )}
+                  key={entry.userId}
+                >
                   <span className="rank-number">{index + 1}</span>
                   <div>
                     <strong>
@@ -333,7 +370,7 @@ function GlobalArena({
           )}
         </div>
 
-        <div className="leaderboard-panel">
+        <div className="leaderboard-panel leaderboard-panel-albums">
           <h2>Best Album Scores</h2>
           {data.bestAlbumScores.length > 0 ? (
             <div className="leaderboard-list">
@@ -341,7 +378,11 @@ function GlobalArena({
                 .slice(0, LEADERBOARD_SECTION_LIMIT)
                 .map((entry, index) => (
                 <div
-                  className="leaderboard-list-row"
+                  className={getLeaderboardRowClass(
+                    index,
+                    entry.userId,
+                    currentUserId
+                  )}
                   key={`${entry.userId}-${entry.artistName}-${entry.albumName}`}
                 >
                   <span className="rank-number">{index + 1}</span>
@@ -376,7 +417,7 @@ function GlobalArena({
           )}
         </div>
 
-        <div className="leaderboard-panel">
+        <div className="leaderboard-panel leaderboard-panel-artists">
           <h2>Artist Masters</h2>
           {data.artistMasters.length > 0 ? (
             <div className="leaderboard-list">
@@ -384,7 +425,11 @@ function GlobalArena({
                 .slice(0, LEADERBOARD_SECTION_LIMIT)
                 .map((entry, index) => (
                 <div
-                  className="leaderboard-list-row"
+                  className={getLeaderboardRowClass(
+                    index,
+                    entry.userId,
+                    currentUserId
+                  )}
                   key={`${entry.userId}-${entry.artistName}`}
                 >
                   <span className="rank-number">{index + 1}</span>
@@ -426,7 +471,14 @@ function GlobalArena({
             {data.recentPerfectRuns
               .slice(0, RECENT_RESULTS_LIMIT)
               .map((entry) => (
-              <div className="result-row" key={entry.id}>
+              <div
+                className={`result-row ${
+                  entry.userId === currentUserId
+                    ? "leaderboard-current-user"
+                    : ""
+                }`}
+                key={entry.id}
+              >
                 <div>
                   <strong>{entry.albumName}</strong>
                   <span>

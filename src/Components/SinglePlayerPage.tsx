@@ -123,7 +123,10 @@ function SinglePlayerPage({
             </span>
             <span>
               Daily Streak
-              <strong>{stats.overall.currentDailyStreak} days</strong>
+              <strong>
+                {stats.overall.currentDailyStreak}{" "}
+                {stats.overall.currentDailyStreak === 1 ? "day" : "days"}
+              </strong>
             </span>
           </div>
         </aside>
