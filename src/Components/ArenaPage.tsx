@@ -270,6 +270,9 @@ function ArenaPage({
   const partyAudioStartKeyRef = useRef<string>("");
   const leavingRoomIdRef = useRef<string | null>(null);
   const ignoredRoomIdsRef = useRef(new Set<string>());
+  const activeRoomIdRef = useRef<string | null>(null);
+  const activeRoomRefreshRequestRef = useRef(0);
+  const activeQuestionRunKeyRef = useRef("");
 
   const isPartyMode = activeRoom?.mode === "party_mode";
   const isPartyHost = Boolean(
@@ -279,6 +282,11 @@ function ArenaPage({
     ? activeRoom?.partyQuestionIndex || 0
     : duelQuestionIndex;
   const currentDuelQuestion = activeRoom?.quizQuestions[gameQuestionIndex];
+  const activeQuestionRunKey = activeRoom
+    ? `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.status}:${gameQuestionIndex}`
+    : "";
+  activeRoomIdRef.current = activeRoom?.id || null;
+  activeQuestionRunKeyRef.current = activeQuestionRunKey;
   duelPhaseRef.current = duelPhase;
   duelSelectedAnswerRef.current = duelSelectedAnswer;
   const selectedMode =
@@ -1541,6 +1549,11 @@ function ArenaPage({
       return;
     }
 
+    const questionRunKey = activeQuestionRunKeyRef.current;
+    const isCurrentQuestionRun = () =>
+      Boolean(questionRunKey) &&
+      activeQuestionRunKeyRef.current === questionRunKey;
+
     if (isManualStart) {
       setDuelAudioRetryUsed(true);
     }
@@ -1577,6 +1590,10 @@ function ArenaPage({
 
       const didPlay = await playDuelClip(timelineOffset);
 
+      if (!isCurrentQuestionRun()) {
+        return;
+      }
+
       if (!didPlay) {
         if (isManualStart) {
           setDuelAudioFallbackMessage(
@@ -1593,6 +1610,10 @@ function ArenaPage({
 
       const { error } = await publishPartyAudioState("playing");
 
+      if (!isCurrentQuestionRun()) {
+        return;
+      }
+
       if (error) {
         enterDuelAudioFallback(
           "Host audio started, but the room could not sync. Retry once."
@@ -1605,7 +1626,7 @@ function ArenaPage({
       setDuelPhase("partyHostWatching");
       const refreshedRoom = await fetchArenaRoom(activeRoom.id);
 
-      if (refreshedRoom.room) {
+      if (refreshedRoom.room && isCurrentQuestionRun()) {
         updateActiveRoom(refreshedRoom.room);
       }
       return;
@@ -1624,6 +1645,10 @@ function ArenaPage({
 
     if (currentDuelQuestion.correctTrack.previewUrl) {
       const didPlay = await playDuelClip();
+
+      if (!isCurrentQuestionRun()) {
+        return;
+      }
 
       if (!didPlay) {
         if (isManualStart) {
@@ -1977,6 +2002,10 @@ function ArenaPage({
       return;
     }
 
+    // Any direct room update invalidates slower polling responses that were
+    // started from an older room snapshot.
+    activeRoomRefreshRequestRef.current += 1;
+    activeRoomIdRef.current = room?.id || null;
     setActiveRoom(room);
     onArenaRoomChange?.(room);
 
@@ -2268,6 +2297,7 @@ function ArenaPage({
     }
 
     const roomId = activeRoom.id;
+    const requestId = ++activeRoomRefreshRequestRef.current;
 
     if (ignoredRoomIdsRef.current.has(roomId)) {
       return;
@@ -2275,7 +2305,15 @@ function ArenaPage({
 
     const { room, error } = await fetchArenaRoom(roomId);
 
-    if (room && !ignoredRoomIdsRef.current.has(roomId)) {
+    if (
+      requestId !== activeRoomRefreshRequestRef.current ||
+      activeRoomIdRef.current !== roomId ||
+      ignoredRoomIdsRef.current.has(roomId)
+    ) {
+      return;
+    }
+
+    if (room) {
       updateActiveRoom(room);
     }
 
