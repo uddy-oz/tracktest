@@ -336,7 +336,7 @@ function ProfilePage({
       <section className="profile-page">
         <div className="profile-empty">
           <p className="eyebrow">Player Profile</p>
-          <h1>Log in to view your Arena profile</h1>
+          <h1>Log in to view your StanZer profile</h1>
           <p>
             Profiles use your saved cloud stats, badges, and username so they
             stay consistent across devices.
@@ -359,7 +359,7 @@ function ProfilePage({
       <section className="profile-page">
         <div className="profile-empty">
           <p className="eyebrow">Profile Setup</p>
-          <h1>Choose your Arena username</h1>
+          <h1>Choose your StanZer username</h1>
           <p>
             Add a username before your profile becomes leaderboard-ready.
           </p>
@@ -374,7 +374,7 @@ function ProfilePage({
   if (isLoading) {
     return (
       <section className="profile-page">
-        <p className="empty-stats">Loading Arena profile...</p>
+        <p className="empty-stats">Loading StanZer profile...</p>
       </section>
     );
   }
@@ -386,7 +386,7 @@ function ProfilePage({
           <p className="eyebrow">Public Profile</p>
           <h1>Profile not found</h1>
           <p>
-            No Arena player exists with the username @{publicUsername}.
+            No StanZer player exists with the username @{publicUsername}.
           </p>
           <button type="button" onClick={onBackToLeaderboard}>
             Back to Leaderboard

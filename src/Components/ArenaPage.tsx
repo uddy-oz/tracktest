@@ -2224,7 +2224,7 @@ function ArenaPage({
 
     try {
       await navigator.clipboard.writeText(inviteUrl);
-      setMessage("Invite link copied.");
+      setMessage("StanZer invite link copied.");
     } catch (error) {
       console.error(error);
       setMessage(inviteUrl);
@@ -2240,15 +2240,21 @@ function ArenaPage({
     const hostHandle = profile?.username
       ? `@${profile.username}`
       : getHostName(room);
-    const title =
+    const roomLabel =
       room.mode === "group_lobby"
-        ? `Join ${hostHandle}'s Group Lobby on ${room.albumName}`
-        : `Duel ${hostHandle} on ${room.albumName}`;
+        ? "Group Lobby"
+        : room.mode === "party_mode"
+          ? "Party Mode"
+          : "Duel";
+    const shareText =
+      room.mode === "duel"
+        ? `${hostHandle} challenged you to a StanZer Duel on ${room.albumName}.`
+        : `${hostHandle} invited you to a StanZer ${roomLabel} on ${room.albumName}.`;
 
     try {
       await navigator.share({
-        title,
-        text: "Accept my TrackTest Arena challenge.",
+        title: `StanZer ${roomLabel}`,
+        text: shareText,
         url: inviteUrl,
       });
     } catch (error) {
@@ -4120,11 +4126,10 @@ function ArenaPage({
       }`}
     >
       <div className="arena-hero">
-        <p className="eyebrow">TrackTest Arena</p>
-        <h1>Arena Modes</h1>
+        <p className="eyebrow">StanZer</p>
+        <h1>Multiplayer</h1>
         <p>
-          The multiplayer wing is being built for duels, live rooms, parties,
-          and championship runs.
+          Challenge your friends in live Duels, Group Lobbies, and Party Mode.
         </p>
       </div>
 

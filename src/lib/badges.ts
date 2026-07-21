@@ -485,7 +485,7 @@ export function getArenaBadges(stats: TrackTestStats) {
     {
       id: "hundred-question-club",
       title: "100 Question Club",
-      description: "Answer 100 total questions across TrackTest Arena.",
+      description: "Answer 100 total questions across StanZer.",
       category: "Skill",
       tier: "Bronze",
       unlocked: stats.overall.totalQuestionsAnswered >= 100,

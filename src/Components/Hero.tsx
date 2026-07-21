@@ -5,10 +5,10 @@ type HeroProps = {
 
 const MARQUEE_ITEMS = [
   "Five-second clips",
-  "Prove you know it",
+  "Prove you're a superfan",
   "Guess the track",
-  "Beat the clock",
-  "Any album on Earth",
+  "Challenge your friends",
+  "Master your favourite albums",
 ];
 
 function Hero({ onStartPlaying, onViewLeaderboard }: HeroProps) {
@@ -31,12 +31,12 @@ function Hero({ onStartPlaying, onViewLeaderboard }: HeroProps) {
           *
         </span>
 
-        <p className="eyebrow reveal d1">TrackTest Arena</p>
+        <p className="eyebrow reveal d1">StanZer</p>
 
         <h1 className="hero-title">
-          <span className="reveal d2">Do you really</span>
+          <span className="reveal d2">Prove you're</span>
           <span className="reveal d3">
-            <em>know your albums?</em>
+            <em>a superfan.</em>
           </span>
         </h1>
 

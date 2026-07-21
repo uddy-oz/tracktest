@@ -1,7 +1,8 @@
 {
-  "name": "tracktest",
+  "name": "stanzer",
   "private": true,
   "version": "0.0.0",
+  "description": "StanZer - Prove you're a superfan with album quizzes, live Duels, and Party Mode.",
   "type": "module",
   "scripts": {
     "dev": "vite",

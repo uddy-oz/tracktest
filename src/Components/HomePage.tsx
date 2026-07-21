@@ -144,11 +144,11 @@ function HomePage({
     <main className="home-dashboard">
       <section className="home-hero-panel">
         <div>
-          <p className="eyebrow">TrackTest Arena</p>
-          <h1>Do you really know your albums?</h1>
+          <p className="eyebrow">StanZer</p>
+          <h1>Prove you're a superfan.</h1>
           <p>
-            Build your solo record, unlock badges, and step into Duel rooms when
-            you are ready to prove it against another player.
+            Five second clips. Ten seconds to answer. Master your favourite
+            albums, build your solo record, and challenge your friends.
           </p>
           <div className="hero-buttons">
             <button type="button" onClick={onSinglePlayer}>
@@ -213,7 +213,7 @@ function HomePage({
         <article className="home-mode-card home-mode-solo">
           <span>Solo Career</span>
           <h2>Single Player</h2>
-          <p>Play album quizzes, build stats, unlock badges.</p>
+          <p>Play album quizzes, build stats, and unlock badges.</p>
           <button type="button" onClick={onSinglePlayer}>
             Start Single Player
           </button>
@@ -222,7 +222,7 @@ function HomePage({
         <article className="home-mode-card home-mode-arena">
           <span>Head to Head</span>
           <h2>Multiplayer / Arena</h2>
-          <p>Challenge players in Duel rooms and future lobbies.</p>
+          <p>Challenge your friends in live Duels, Group Lobbies, and Party Mode.</p>
           <button type="button" onClick={onMultiplayer}>
             Enter Multiplayer
           </button>
@@ -303,8 +303,8 @@ function HomePage({
             </div>
           </div>
           <p>
-            Cloud-saved quizzes feed the public leaderboard. Keep climbing from
-            solo albums into Duel rooms.
+            Cloud-saved runs feed StanZer's public rankings. Keep climbing from
+            solo albums into live multiplayer rooms.
           </p>
           <button type="button" className="secondary-button" onClick={onLeaderboard}>
             View Leaderboard

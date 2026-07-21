@@ -4,7 +4,7 @@ export default async function handler(req, res) {
 
     const response = await fetch(`https://itunes.apple.com/lookup?${query}`, {
       headers: {
-        "User-Agent": "TrackTest/1.0",
+        "User-Agent": "StanZer/1.0",
       },
     });
 

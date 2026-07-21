@@ -40,7 +40,7 @@ function Navbar({
   return (
     <nav className="navbar">
       <button type="button" className="logo logo-button" onClick={onShowHome}>
-        TrackTest Arena
+        StanZer
       </button>
 
       <div className="nav-links">

@@ -1,48 +1,63 @@
-# TrackTest
+# StanZer
 
-https://tracktest-xwee.vercel.app
+**Prove you're a superfan.**
 
+[Open the live app](https://tracktest-xwee.vercel.app)
 
-TrackTest is a music quiz web app that turns real albums into interactive song guessing games.
+StanZer is a competitive music quiz game built around real albums. Search for an artist or album, identify tracks from five second clips, and turn every run into points, badges, rankings, and multiplayer bragging rights.
 
-Users can connect their Spotify account, search for an album, choose an album, and play a quiz generated from real track data. The app uses Spotify for album metadata and track lists, then uses iTunes previews to provide playable 30 second audio clips when available.
+## Game Modes
 
-## Features
+- **Single Player:** Master your favourite albums, build stats, and unlock achievements.
+- **Duel:** Challenge one player on a shared, synchronized album quiz.
+- **Group Lobby:** Compete with a live room of players on the same questions and clips.
+- **Party Mode:** Play Kahoot-style with audio on the host device and answers on every player's phone.
 
-- Spotify login with OAuth
-- Real album search using the Spotify Web API
-- Album cover display
-- Quiz generation from real album track lists
-- 30 second audio previews using the iTunes Search API
-- Multiple choice song guessing
-- Score tracking
-- Correct and wrong answer feedback
-- Restart quiz and choose another album flow
+## Highlights
+
+- Smart album and artist search backed by iTunes data
+- Five second clips and ten seconds to answer
+- Speed-based scoring, streaks, perfect runs, and achievement badges
+- Local progress for guests and Supabase cloud progress for signed-in players
+- Public player profiles and Global Arena rankings
+- Public rooms, private invite links, rematches, room recovery, and forfeits
+- Responsive dark purple game interface for desktop and mobile
 
 ## Tech Stack
 
-- React
+- React 19
 - TypeScript
 - Vite
-- Spotify Web API
-- iTunes Search API
+- Supabase Auth and Postgres
+- iTunes Search and Lookup APIs
 - CSS
-- Git and GitHub
+- Vercel
 
-## How It Works
-
-1. The user logs in with Spotify.
-2. The user searches for an album.
-3. Spotify returns matching albums with cover art and metadata.
-4. The user selects an album.
-5. Spotify provides the track list for that album.
-6. TrackTest builds a quiz from the album tracks.
-7. iTunes previews are used to play short audio clips.
-8. The user guesses the correct song and receives score feedback.
-
-## Running Locally
-
-Clone the repository:
+## Run Locally
 
 ```bash
 git clone https://github.com/uddy-oz/tracktest.git
+cd tracktest
+npm install
+```
+
+Create a `.env.local` file with your public Supabase project values:
+
+```env
+VITE_SUPABASE_URL=your-project-url
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
+
+Never use a Supabase service role key in frontend environment variables.
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+Create a production build:
+
+```bash
+npm run build
+```

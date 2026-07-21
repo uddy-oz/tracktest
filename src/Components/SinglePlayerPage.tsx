@@ -84,7 +84,7 @@ function SinglePlayerPage({
     <main className="single-player-page">
       <section className="single-player-hero">
         <div>
-          <p className="eyebrow">Single Player</p>
+          <p className="eyebrow">StanZer Solo</p>
           <h1>Pick your battlefield</h1>
           <p>
             Search an album, start a synced countdown, and build your solo

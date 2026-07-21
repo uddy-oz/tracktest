@@ -155,14 +155,14 @@ function AuthPage({
           {isProfileLoading ? (
             <>
               <h1>Loading profile</h1>
-              <p>Getting your Arena profile ready...</p>
+              <p>Getting your StanZer profile ready...</p>
             </>
           ) : hasUsername ? (
             <>
               <h1>{accountLabel}</h1>
               <p>
-                Signed in as <strong>{session.user.email}</strong>. Your Arena
-                name is ready for future leaderboards.
+                Signed in as <strong>{session.user.email}</strong>. Your StanZer
+                name is ready for the leaderboards.
               </p>
               <button type="button" onClick={onPlay}>
                 Back Home
@@ -223,11 +223,11 @@ function AuthPage({
   return (
     <section className="auth-page">
       <div className="auth-panel">
-        <p className="eyebrow">TrackTest Arena Account</p>
+        <p className="eyebrow">StanZer Account</p>
         <h1>Log in or sign up</h1>
         <p>
-          Use email auth now. Local stats still save on this browser until cloud
-          sync is connected.
+          Prove you're a superfan, save your progress, and keep your player
+          identity consistent across devices.
         </p>
 
         {!isSupabaseConfigured && (

@@ -316,19 +316,38 @@ button:hover {
 }
 
 .logo-button {
+  position: relative;
   padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
-  color: white;
-  font: inherit;
+  color: #f8f4ff;
+  font-family: "Space Grotesk", sans-serif;
   font-size: 24px;
   font-weight: 900;
+  letter-spacing: 0;
+  text-shadow: 0 0 18px rgba(154, 93, 255, 0.45);
+  transition: color 160ms ease, text-shadow 160ms ease, transform 160ms ease;
+}
+
+.logo-button::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -7px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #8b5cf6, #e879f9, #4fd1ff);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.68);
+  opacity: 0.82;
 }
 
 .logo-button:hover {
   background: transparent;
-  color: var(--arena-accent-bright);
+  color: #ffffff;
+  text-shadow: 0 0 24px rgba(192, 132, 252, 0.74);
+  transform: translateY(-1px);
 }
 
 .nav-links {

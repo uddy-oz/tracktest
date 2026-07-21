@@ -186,7 +186,7 @@ function Leaderboard({
 
   function handleClearStats() {
     const shouldClear = window.confirm(
-      "Clear all local TrackTest Arena stats on this device?"
+      "Clear all local StanZer stats on this device?"
     );
 
     if (!shouldClear) {
@@ -200,7 +200,7 @@ function Leaderboard({
   return (
     <section className="leaderboard-page">
       <div className="leaderboard-header">
-        <p className="eyebrow">TrackTest Arena</p>
+        <p className="eyebrow">StanZer</p>
         <h1>{activeTab === "global" ? "Global Arena" : "Your Local Stats"}</h1>
         <p>
           Public Arena rankings use cloud quiz results and profile names. Emails
@@ -276,15 +276,15 @@ function GlobalArena({
   currentUserId?: string;
 }) {
   if (isLoading) {
-    return <p className="empty-stats">Loading Global Arena...</p>;
+    return <p className="empty-stats">Loading StanZer rankings...</p>;
   }
 
   if (error) {
-    return <p className="empty-stats">Global Arena unavailable: {error}</p>;
+    return <p className="empty-stats">StanZer rankings unavailable: {error}</p>;
   }
 
   if (!data) {
-    return <p className="empty-stats">No global leaderboard data yet.</p>;
+    return <p className="empty-stats">No StanZer leaderboard data yet.</p>;
   }
 
   return (
