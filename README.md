@@ -13,6 +13,7 @@ StanZer is a competitive album quiz game. Players identify songs from five secon
 - Speed scoring, streak feedback, perfect runs, achievement badges, and player tiers
 - Local guest stats plus Supabase-backed accounts, profiles, progression, and featured badges
 - Public profiles and Global Arena leaderboards
+- Complete email/password account flows with username setup, recovery, and account settings
 - Synchronized Duel, Group Lobby, and host-audio-only Party Mode
 - Public rooms, private invite links and codes, rematches, reconnect recovery, leaving, and forfeits
 - Responsive dark game interface for desktop and mobile
@@ -29,7 +30,7 @@ StanZer is a competitive album quiz game. Players identify songs from five secon
 
 StanZer is a React 19 and TypeScript application built with Vite.
 
-- `src/App.tsx` owns the lightweight route/view state and session-level progression refreshes.
+- `src/App.tsx` owns the lightweight route/view state, protected auth destinations, session-level progression refreshes, and route-level code splitting.
 - `src/Components` contains the Home, Single Player, Multiplayer, profile, leaderboard, badge, and authentication interfaces.
 - `src/lib` contains iTunes access, Supabase clients, Arena room operations, local/cloud stats, profile helpers, badge rules, sounds, and player identity calculations.
 - `api` contains the Vercel serverless proxies used for production iTunes requests.
@@ -58,7 +59,7 @@ Party Mode uses a server-authoritative question state machine implemented by Sup
 
 ### Prerequisites
 
-- Node.js 20 or newer
+- Node.js 22 or newer
 - npm
 - A Supabase project
 - A Vercel account only if deploying the included production API proxies
@@ -88,6 +89,21 @@ VITE_YOUTUBE_API_KEY=your-api-key
 
 Never place a Supabase service-role key or another private secret in a `VITE_` variable.
 
+### Supabase Auth URLs
+
+In Supabase Dashboard, open **Authentication > URL Configuration**. Set the production Site URL to the deployed StanZer origin and allow these redirect destinations for every environment you use:
+
+```text
+http://localhost:5173/login
+http://localhost:5173/reset-password
+https://your-production-domain/login
+https://your-production-domain/reset-password
+```
+
+Email/password authentication must be enabled. Hosted Supabase projects normally require email confirmation by default. For a production release, configure custom SMTP instead of relying on the limited best-effort development email service.
+
+The browser uses only `VITE_SUPABASE_URL` and the public anonymous key. Signup stores the requested username in user metadata for the email-confirmation handoff, then writes the canonical username to `public.profiles` after an authenticated session exists. Public username availability checks use the email-free `public_profile_summary` view; the database unique index remains the final authority for races.
+
 ### Database
 
 Run `supabase/tracktest_arena_stats.sql` for the base stats schema, then apply the dated SQL migrations in dependency order. The latest Party Mode implementation requires:
@@ -114,13 +130,26 @@ npm.cmd run build
 
 There is currently no automated end-to-end multiplayer suite, so release verification combines TypeScript/Vite compilation with a multi-device manual matrix.
 
-1. Run `npm.cmd run build`.
-2. Verify album and exact-title searches, album selection, Solo scoring, audio fallback, result saving, and restart.
-3. Open two authenticated sessions for Duel; test public/private join, synchronized questions, rematch, refresh recovery, leave, and forfeit.
-4. Open at least three sessions for Group Lobby; confirm shared questions, live rankings, completion ordering, and room cleanup.
-5. Open a Party room with one host and multiple players; confirm audio plays only on the host, all answer clocks match, duplicate answers are rejected, blocked host audio skips for everyone, and a backgrounded tab rejoins the current server phase.
-6. Confirm cloud totals, ranks, badges, profiles, and Global Arena data refresh after completed games.
-7. Repeat the active-game checks on a laptop and phone viewport.
+1. Run `npm.cmd run build` and `npm.cmd run lint`.
+2. Verify signup validation, email confirmation, mandatory unique username creation, login, logout, returning sessions, and invite redirect after login.
+3. Request a password reset, follow the email to `/reset-password`, set a new password, and confirm an expired link has a useful recovery state.
+4. Open `/settings`; edit username/display name, request an email change, change a password, toggle sound effects, and sign out locally.
+5. Verify album and exact-title searches, album selection, Solo scoring, audio fallback, result saving, and restart.
+6. Open two authenticated sessions for Duel; test public/private join, synchronized questions, rematch, refresh recovery, leave, and forfeit.
+7. Open at least three sessions for Group Lobby; confirm shared questions, live rankings, completion ordering, and room cleanup.
+8. Open a Party room with one host and multiple players; confirm audio plays only on the host, all answer clocks match, duplicate answers are rejected, blocked host audio skips for everyone, and a backgrounded tab rejoins the current server phase.
+9. Confirm cloud totals, ranks, badges, profiles, and Global Arena data refresh after completed games.
+10. Repeat the active-game checks at 375, 430, 768, 1024, 1440, and 1920 pixel widths.
+
+## UI and Auth References
+
+StanZer keeps its React/Vite/CSS stack and does not copy a third-party interface. The following projects informed patterns and review criteria:
+
+- [Supabase Auth UI](https://github.com/supabase-community/auth-ui) (MIT, archived): useful separation of auth views and provider-neutral form states; the package itself is not installed because it is archived.
+- [Supabase JavaScript](https://github.com/supabase/supabase-js) (MIT): source of truth for browser sessions, password recovery, and user updates.
+- [shadcn/ui](https://github.com/shadcn-ui/ui) (MIT): inspiration for source-owned accessible controls, semantic tokens, visible labels, and focus treatment without adopting Tailwind or Next.js.
+- [Navidrome](https://github.com/navidrome/navidrome) (GPL-3.0): information hierarchy inspiration for artwork-led music discovery; no GPL code or media-server architecture is used.
+- [Lichess](https://github.com/lichess-org/lila) (AGPL-3.0): inspiration for low-distraction competitive timers, lobby clarity, and strong game-state hierarchy; no AGPL code is used.
 
 ## Current Limitations
 
@@ -129,7 +158,9 @@ There is currently no automated end-to-end multiplayer suite, so release verific
 - Multiplayer depends on network access to Supabase. Server timestamps reduce drift, but UI updates are not frame-perfect on high-latency connections.
 - Championship tournament gameplay is not implemented.
 - The repository does not yet include automated browser or multi-client integration tests.
-- The production bundle currently triggers Vite's advisory warning for a JavaScript chunk larger than 500 kB.
+- There is no automated unit or browser test suite yet. The current ESLint configuration also reports pre-existing effect/dependency findings in timing-sensitive Solo and multiplayer code; those should be resolved alongside regression tests rather than by changing hook dependencies blindly.
+- Email confirmation and password recovery depend on correct Supabase redirect URL and SMTP configuration.
+- Route-level chunks reduce the initial bundle below Vite's advisory threshold, but the shared base bundle remains a future optimization target.
 
 ## Built with Codex and GPT-5.6
 

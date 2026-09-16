@@ -308,6 +308,8 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   useEffect(() => {
     clearClipTimer();
     clearCorrectAnswerHoldTimer();
+    // Reset media UI atomically when the question's preview source changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsClipPlaying(false);
 
     const audio = audioRef.current;
@@ -501,7 +503,6 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
   useEffect(() => {
     if (!isQuizComplete) {
-      setDisplayPoints(totalPoints);
       return;
     }
 
@@ -520,7 +521,6 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       }
     }
 
-    setDisplayPoints(0);
     animationFrame = window.requestAnimationFrame(animateScore);
 
     return () => {
@@ -747,7 +747,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     const pointsEarned = getPointsForAnswer(isCorrect, timeRemaining);
     const answerTimeSeconds = QUESTION_TIME_SECONDS - timeRemaining;
     let nextStreak = streak;
-    let hypeEvent: HypeEvent = "wrong";
+    let hypeEvent: HypeEvent;
 
     if (timedOut) {
       stopClip(false);

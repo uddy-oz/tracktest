@@ -74,26 +74,23 @@ export async function checkUsernameAvailability(usernameInput: string, userId?: 
     return { available: false, message: validation.message };
   }
 
-  let query = supabase
-    .from("profiles")
-    .select("id")
+  // The profiles table is owner-only. The public profile view exposes only
+  // leaderboard-safe display fields, so it can check availability before a
+  // user has completed signup without exposing email addresses.
+  const { data, error } = await supabase
+    .from("public_profile_summary")
+    .select("user_id, username")
     .eq("username", validation.username)
     .limit(1);
-
-  if (userId) {
-    query = query.neq("id", userId);
-  }
-
-  const { data, error } = await query;
 
   if (error) {
     return { available: false, message: "Could not check username yet." };
   }
 
   return {
-    available: (data || []).length === 0,
+    available: (data || []).every((row) => row.user_id === userId),
     message:
-      (data || []).length === 0
+      (data || []).every((row) => row.user_id === userId)
         ? "Username is available."
         : "That username is already taken.",
   };
@@ -132,7 +129,39 @@ export async function ensureUserProfile(user: User) {
     return { profile: null, error: upsertError.message };
   }
 
-  return fetchCurrentUserProfile(user);
+  const currentProfile = await fetchCurrentUserProfile(user);
+
+  if (currentProfile.error || currentProfile.profile?.username) {
+    return currentProfile;
+  }
+
+  const metadataUsername =
+    typeof user.user_metadata?.username === "string"
+      ? user.user_metadata.username
+      : "";
+  const metadataDisplayName =
+    typeof user.user_metadata?.display_name === "string"
+      ? user.user_metadata.display_name
+      : "";
+
+  if (!validateUsername(metadataUsername).ok) {
+    return currentProfile;
+  }
+
+  const metadataProfile = await saveUserProfile(
+    user,
+    metadataUsername,
+    metadataDisplayName
+  );
+
+  if (metadataProfile.error) {
+    return {
+      profile: currentProfile.profile,
+      error: metadataProfile.error,
+    };
+  }
+
+  return metadataProfile;
 }
 
 export async function fetchCurrentUserProfile(user: User) {

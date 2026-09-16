@@ -7,6 +7,7 @@ type NavbarProps = {
   onLogout: () => void;
   onShowHome: () => void;
   onShowAuth: () => void;
+  onShowSettings: () => void;
   onShowPlay: () => void;
   onShowLeaderboard: () => void;
   onShowMultiplayer: () => void;
@@ -21,6 +22,7 @@ function Navbar({
   onLogout,
   onShowHome,
   onShowAuth,
+  onShowSettings,
   onShowPlay,
   onShowLeaderboard,
   onShowMultiplayer,
@@ -82,7 +84,7 @@ function Navbar({
             <button
               type="button"
               className={`nav-link-button account-button ${
-                activeView === "profile" || activeView === "auth" ? "active" : ""
+                activeView === "profile" ? "active" : ""
               }`}
               onClick={profile?.username ? onShowProfile : onShowAuth}
             >
@@ -90,6 +92,15 @@ function Navbar({
               {identityBadges && (
                 <PlayerIdentityBadges badges={accountBadges} compact />
               )}
+            </button>
+            <button
+              type="button"
+              className={`nav-link-button ${
+                activeView === "auth" ? "active" : ""
+              }`}
+              onClick={onShowSettings}
+            >
+              Settings
             </button>
             <button type="button" className="nav-login-button" onClick={onLogout}>
               Logout

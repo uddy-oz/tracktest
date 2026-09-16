@@ -5,7 +5,6 @@ import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import { getDailyGoalFoundation } from "../lib/dailyGoals";
 import { fetchGlobalLeaderboard } from "../lib/globalLeaderboard";
 import {
-  calculatePlayerTier,
   getCompactPlayerBadges,
   type CompactPlayerBadge,
 } from "../lib/playerIdentity";
@@ -112,7 +111,6 @@ function HomePage({
   const badges = useMemo(() => getArenaBadges(stats), [stats]);
   const playerBadges =
     identityBadges || getCompactPlayerBadges(stats, badges);
-  const tier = calculatePlayerTier(badges, stats).tier;
   const featuredBadges = badges
     .filter((badge) => badge.unlocked)
     .slice(0, 3);
@@ -169,7 +167,6 @@ function HomePage({
           <p>{username}</p>
           <PlayerIdentityBadges badges={playerBadges} />
           <div className="home-tier-row">
-            <span>{tier}</span>
             <button type="button" className="secondary-button" onClick={onProfile}>
               View Profile
             </button>

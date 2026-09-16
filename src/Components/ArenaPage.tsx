@@ -582,6 +582,8 @@ function ArenaPage({
     const startsAtMs = activeRoom.startedAt ? Date.parse(activeRoom.startedAt) : 0;
 
     if (startsAtMs && Date.now() < startsAtMs) {
+      // The persisted room start timestamp is authoritative for reconnects.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDuelPhase("syncing");
       return;
     }
@@ -854,6 +856,8 @@ function ArenaPage({
     );
 
     if (player && !isPartyHost) {
+      // Mirror the latest server-owned player snapshot after reconnect/realtime updates.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDuelScore(player.currentScore);
       setDuelCorrectAnswers(player.currentCorrectAnswers);
       setDuelStreak(player.currentStreak);
@@ -4172,17 +4176,17 @@ function ArenaPage({
       </div>
 
       <div className="arena-status">
-        <span>{activeArenaMode ? `${modeSettings.title} MVP` : "Coming Soon"}</span>
+        <span>{activeArenaMode ? `${modeSettings.title} live` : "Live multiplayer"}</span>
         <div>
           <h2>
             {activeArenaMode
               ? `${modeSettings.title} rooms are playable`
-              : "Arena is coming soon"}
+              : "Choose your Arena"}
           </h2>
           <p>
             {activeArenaMode
               ? "Create or join a waiting room, start together, and play the same synced album quiz."
-              : "Solo stats, badges, profiles, and leaderboards are laying the foundation before live rooms open."}
+              : "Create a Duel, Group Lobby, or Party room, or join one with an invite code."}
           </p>
         </div>
       </div>

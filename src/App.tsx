@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
 import HomePage from "./Components/HomePage";
-import SinglePlayerPage from "./Components/SinglePlayerPage";
-import Quiz from "./Components/Quiz";
-import SpotifyCallback from "./Components/SpotifyCallback";
-import Leaderboard from "./Components/Leaderboard";
-import AuthPage from "./Components/AuthPage";
-import ProfilePage from "./Components/ProfilePage";
-import ArenaPage from "./Components/ArenaPage";
+import type { AuthPageMode } from "./Components/AuthPage";
 import {
   cancelDuelRoom,
   fetchCurrentDuelRoom,
@@ -23,7 +24,17 @@ import { ensureUserProfile, validateUsername, type UserProfile } from "./lib/pro
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 
+const SinglePlayerPage = lazy(() => import("./Components/SinglePlayerPage"));
+const Quiz = lazy(() => import("./Components/Quiz"));
+const SpotifyCallback = lazy(() => import("./Components/SpotifyCallback"));
+const Leaderboard = lazy(() => import("./Components/Leaderboard"));
+const AuthPage = lazy(() => import("./Components/AuthPage"));
+const ProfilePage = lazy(() => import("./Components/ProfilePage"));
+const ArenaPage = lazy(() => import("./Components/ArenaPage"));
+
 type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
+
+const AUTH_RETURN_STORAGE_KEY = "stanzer.auth.returnPath";
 
 function hasCompleteUsername(profile: UserProfile | null) {
   return Boolean(profile?.username && validateUsername(profile.username).ok);
@@ -41,6 +52,49 @@ function getArenaInviteCodeFromPath() {
   return match ? decodeURIComponent(match[1]).toUpperCase() : null;
 }
 
+function getAuthModeFromPath(): AuthPageMode {
+  switch (window.location.pathname) {
+    case "/signup":
+      return "signup";
+    case "/forgot-password":
+      return "forgot";
+    case "/reset-password":
+      return "reset";
+    case "/settings":
+      return "settings";
+    default:
+      return "login";
+  }
+}
+
+function getAuthPath(mode: AuthPageMode) {
+  switch (mode) {
+    case "signup":
+      return "/signup";
+    case "forgot":
+      return "/forgot-password";
+    case "reset":
+      return "/reset-password";
+    case "settings":
+      return "/settings";
+    default:
+      return "/login";
+  }
+}
+
+function isSafeInternalPath(path: string) {
+  return path.startsWith("/") && !path.startsWith("//") && !path.includes("://");
+}
+
+function RouteLoadingState() {
+  return (
+    <main className="route-loading-state" aria-busy="true">
+      <span className="auth-loading-dot" aria-hidden="true" />
+      <p>Loading this part of StanZer...</p>
+    </main>
+  );
+}
+
 function getInitialView(): AppView {
   if (getProfileUsernameFromPath()) {
     return "profile";
@@ -56,6 +110,10 @@ function getInitialView(): AppView {
       return "multiplayer";
     case "/login":
     case "/auth":
+    case "/signup":
+    case "/forgot-password":
+    case "/reset-password":
+    case "/settings":
       return "auth";
     case "/profile":
       return "profile";
@@ -70,6 +128,7 @@ function getInitialView(): AppView {
 
 function App() {
   const [activeView, setActiveView] = useState<AppView>(getInitialView);
+  const [authMode, setAuthMode] = useState<AuthPageMode>(getAuthModeFromPath);
   const [publicProfileUsername, setPublicProfileUsername] = useState<
     string | null
   >(getProfileUsernameFromPath);
@@ -79,6 +138,7 @@ function App() {
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [isQuizStarted, setIsQuizStarted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(Boolean(supabase));
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [identityBadges, setIdentityBadges] = useState<
@@ -127,14 +187,24 @@ function App() {
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
+    void supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      setIsAuthLoading(false);
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      setIsAuthLoading(false);
+
+      if (event === "PASSWORD_RECOVERY") {
+        window.history.replaceState({}, "", "/reset-password");
+        setAuthMode("reset");
+        setPublicProfileUsername(null);
+        setArenaInviteCode(null);
+        setActiveView("auth");
+      }
     });
 
     return () => {
@@ -151,6 +221,7 @@ function App() {
       setIsQuizStarted(false);
       setPublicProfileUsername(username);
       setArenaInviteCode(inviteCode);
+      setAuthMode(getAuthModeFromPath());
       setActiveView(username ? "profile" : inviteCode ? "multiplayer" : getInitialView());
     }
 
@@ -160,6 +231,29 @@ function App() {
       window.removeEventListener("popstate", handlePopState);
     };
   }, []);
+
+  useEffect(() => {
+    const pageLabel =
+      activeView === "play"
+        ? "Single Player"
+        : activeView === "multiplayer"
+          ? "Multiplayer"
+          : activeView === "leaderboard"
+            ? "Leaderboard"
+            : activeView === "profile"
+              ? "Player Profile"
+              : activeView === "auth"
+                ? authMode === "signup"
+                  ? "Create Account"
+                  : authMode === "forgot" || authMode === "reset"
+                    ? "Password Recovery"
+                    : authMode === "settings"
+                      ? "Account Settings"
+                      : "Log In"
+                : "Prove you're a superfan";
+
+    document.title = `${pageLabel} | StanZer`;
+  }, [activeView, authMode]);
 
   useEffect(() => {
     let isActive = true;
@@ -222,20 +316,14 @@ function App() {
   }, [session]);
 
   useEffect(() => {
-    void refreshActiveArenaRoom();
+    const refreshId = window.setTimeout(() => {
+      void refreshActiveArenaRoom();
+    }, 0);
+
+    return () => window.clearTimeout(refreshId);
   }, [activeView, refreshActiveArenaRoom]);
 
-  useEffect(() => {
-    function refreshProgressionOnFocus() {
-      void refreshIdentityBadges();
-    }
-
-    window.addEventListener("focus", refreshProgressionOnFocus);
-
-    return () => window.removeEventListener("focus", refreshProgressionOnFocus);
-  }, [session?.user.id]);
-
-  async function refreshIdentityBadges() {
+  const refreshIdentityBadges = useCallback(async () => {
     if (!session?.user) {
       const localStats = getTrackTestStats();
       setIdentityBadges(
@@ -259,7 +347,17 @@ function App() {
 
     setIdentityBadges(getCompactPlayerBadges(data, getArenaBadges(data)));
     setProgressionRevision((revision) => revision + 1);
-  }
+  }, [session?.user]);
+
+  useEffect(() => {
+    function refreshProgressionOnFocus() {
+      void refreshIdentityBadges();
+    }
+
+    window.addEventListener("focus", refreshProgressionOnFocus);
+
+    return () => window.removeEventListener("focus", refreshProgressionOnFocus);
+  }, [refreshIdentityBadges]);
 
   function startQuiz(album: SpotifyAlbum) {
     window.history.pushState({}, "", "/play");
@@ -323,13 +421,57 @@ function App() {
     return error || "";
   }
 
-  function showAuth() {
-    window.history.pushState({}, "", "/login");
+  function showAuth(mode: AuthPageMode = "login", returnPath = "") {
+    if (returnPath && isSafeInternalPath(returnPath)) {
+      window.sessionStorage.setItem(AUTH_RETURN_STORAGE_KEY, returnPath);
+    } else if (activeView !== "auth") {
+      window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
+    }
+
+    window.history.pushState({}, "", getAuthPath(mode));
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
+    setAuthMode(mode);
     setActiveView("auth");
+  }
+
+  function showSettings() {
+    showAuth("settings", session ? "" : "/settings");
+  }
+
+  function navigateToInternalPath(path: string, replace = true) {
+    const safePath = isSafeInternalPath(path) ? path : "/";
+
+    if (replace) {
+      window.history.replaceState({}, "", safePath);
+    } else {
+      window.history.pushState({}, "", safePath);
+    }
+
+    const username = getProfileUsernameFromPath();
+    const inviteCode = getArenaInviteCodeFromPath();
+
+    setPublicProfileUsername(username);
+    setArenaInviteCode(inviteCode);
+    setSelectedAlbum(null);
+    setIsQuizStarted(false);
+    setAuthMode(getAuthModeFromPath());
+    setActiveView(
+      username ? "profile" : inviteCode ? "multiplayer" : getInitialView()
+    );
+  }
+
+  function handleAuthenticated() {
+    if (authMode === "settings") {
+      navigateToInternalPath("/settings");
+      return;
+    }
+
+    const returnPath = window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY);
+    window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
+    navigateToInternalPath(returnPath || "/");
   }
 
   function showProfile() {
@@ -343,7 +485,11 @@ function App() {
     setArenaInviteCode(null);
     setSelectedAlbum(null);
     setIsQuizStarted(false);
-    setActiveView(session ? "profile" : "auth");
+    if (session) {
+      setActiveView("profile");
+    } else {
+      showAuth("login", "/profile");
+    }
   }
 
   function showPublicProfile(username: string) {
@@ -381,20 +527,34 @@ function App() {
 
   if (window.location.pathname === "/callback") {
     return (
-      <SpotifyCallback
-        onSpotifyConnected={() => undefined}
-      />
+      <Suspense fallback={<RouteLoadingState />}>
+        <SpotifyCallback onSpotifyConnected={() => undefined} />
+      </Suspense>
     );
   }
 
+  if (isAuthLoading) {
+    return (
+      <main className="app-loading-screen" aria-busy="true">
+        <span className="app-loading-mark" aria-hidden="true">S</span>
+        <p>Loading your StanZer session...</p>
+      </main>
+    );
+  }
+
+  const isPasswordRecovery = activeView === "auth" && authMode === "reset";
   const mustCompleteUsername =
-    Boolean(session?.user) && !isProfileLoading && !hasCompleteUsername(profile);
+    Boolean(session?.user) &&
+    !isProfileLoading &&
+    !hasCompleteUsername(profile) &&
+    !isPasswordRecovery;
 
   return (
     <>
       <Navbar
         onShowHome={showHome}
-        onShowAuth={showAuth}
+        onShowAuth={() => showAuth("login")}
+        onShowSettings={showSettings}
         onLogout={logoutSupabase}
         onShowPlay={showPlay}
         onShowLeaderboard={showLeaderboard}
@@ -406,15 +566,20 @@ function App() {
         activeView={activeView}
       />
 
-      {mustCompleteUsername && (
+      <Suspense fallback={<RouteLoadingState />}>
+        {mustCompleteUsername && (
         <AuthPage
+          mode="profile"
           session={session}
           profile={profile}
           isProfileLoading={isProfileLoading}
+          onNavigate={showAuth}
+          onAuthenticated={handleAuthenticated}
           onProfileSaved={setProfile}
+          onLogout={logoutSupabase}
           onPlay={showHome}
         />
-      )}
+        )}
 
       {!mustCompleteUsername && activeView === "home" && (
         <HomePage
@@ -464,7 +629,7 @@ function App() {
           session={session}
           profile={profile}
           onHome={showHome}
-          onLogin={showAuth}
+          onLogin={() => showAuth("login", window.location.pathname)}
           inviteCode={arenaInviteCode}
           recoveredRoom={activeArenaRoom}
           onArenaRoomChange={handleArenaRoomChange}
@@ -478,26 +643,31 @@ function App() {
 
       {!mustCompleteUsername && activeView === "auth" && (
         <AuthPage
+          mode={authMode}
           session={session}
           profile={profile}
           isProfileLoading={isProfileLoading}
+          onNavigate={showAuth}
+          onAuthenticated={handleAuthenticated}
           onProfileSaved={setProfile}
+          onLogout={logoutSupabase}
           onPlay={showHome}
         />
       )}
 
-      {!mustCompleteUsername && activeView === "profile" && (
+        {!mustCompleteUsername && activeView === "profile" && (
         <ProfilePage
           session={session}
           profile={profile}
           identityBadges={identityBadges}
           publicUsername={publicProfileUsername}
-          onShowAuth={showAuth}
+          onShowAuth={() => showAuth("login", window.location.pathname)}
           onPlay={showHome}
           onBackToLeaderboard={showLeaderboard}
           progressionRevision={progressionRevision}
         />
-      )}
+        )}
+      </Suspense>
     </>
   );
 }
