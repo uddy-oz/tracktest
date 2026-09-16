@@ -23,6 +23,12 @@ export type QuizResult = {
   placement?: number | null;
   scoreMargin?: number;
   resultStatus?: string;
+  scoringModel?: "legacy" | "round_points";
+  roundPoints?: number;
+  roundsWon?: number;
+  roundsPlayed?: number;
+  averageWinningResponseTime?: number;
+  fastestWinningResponseTime?: number | null;
 };
 
 export type ArenaProgressStats = {
@@ -42,6 +48,10 @@ export type ArenaProgressStats = {
   maxPartyPlayers: number;
   currentWinStreak: number;
   bestWinStreak: number;
+  roundWins: number;
+  roundsPlayed: number;
+  averageWinningResponseTime: number;
+  fastestWinningResponseTime: number;
 };
 
 export type OverallStats = {
@@ -104,6 +114,10 @@ export function createEmptyArenaProgress(): ArenaProgressStats {
     maxPartyPlayers: 0,
     currentWinStreak: 0,
     bestWinStreak: 0,
+    roundWins: 0,
+    roundsPlayed: 0,
+    averageWinningResponseTime: 0,
+    fastestWinningResponseTime: 0,
   };
 }
 
@@ -161,6 +175,26 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
   const partyResults = arenaResults.filter(
     (result) => result.gameMode === "party_mode"
   );
+  const roundPointResults = arenaResults.filter(
+    (result) => result.scoringModel === "round_points"
+  );
+  const roundWins = roundPointResults.reduce(
+    (total, result) => total + (result.roundsWon || 0),
+    0
+  );
+  const roundsPlayed = roundPointResults.reduce(
+    (total, result) => total + (result.roundsPlayed || 0),
+    0
+  );
+  const winningResponseTotal = roundPointResults.reduce(
+    (total, result) =>
+      total +
+      (result.averageWinningResponseTime || 0) * (result.roundsWon || 0),
+    0
+  );
+  const fastestWinningTimes = roundPointResults
+    .map((result) => result.fastestWinningResponseTime)
+    .filter((time): time is number => typeof time === "number" && time > 0);
 
   return {
     gamesPlayed: arenaResults.length,
@@ -176,10 +210,16 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
     privateGames: arenaResults.filter((result) => result.isPrivate).length,
     publicGames: arenaResults.filter((result) => !result.isPrivate).length,
     closeCallWins: duelWins.filter(
-      (result) => (result.scoreMargin || 0) > 0 && (result.scoreMargin || 0) <= 500
+      (result) =>
+        result.scoringModel === "round_points"
+          ? result.scoreMargin === 1
+          : (result.scoreMargin || 0) > 0 && (result.scoreMargin || 0) <= 500
     ).length,
     dominantDuelWins: duelWins.filter(
-      (result) => (result.scoreMargin || 0) >= 2000
+      (result) =>
+        result.scoringModel === "round_points"
+          ? (result.scoreMargin || 0) >= 3
+          : (result.scoreMargin || 0) >= 2000
     ).length,
     fullLobbyWins: wins.filter(
       (result) =>
@@ -191,6 +231,12 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
     ),
     currentWinStreak,
     bestWinStreak,
+    roundWins,
+    roundsPlayed,
+    averageWinningResponseTime:
+      roundWins > 0 ? winningResponseTotal / roundWins : 0,
+    fastestWinningResponseTime:
+      fastestWinningTimes.length > 0 ? Math.min(...fastestWinningTimes) : 0,
   };
 }
 
@@ -272,7 +318,10 @@ export function getTrackTestStats() {
 
     return {
       ...parsedStats,
-      arena: parsedStats.arena || createEmptyArenaProgress(),
+      arena: {
+        ...createEmptyArenaProgress(),
+        ...(parsedStats.arena || {}),
+      },
     };
   } catch (error) {
     console.error("Could not load TrackTest stats:", error);

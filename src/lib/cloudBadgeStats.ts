@@ -27,6 +27,12 @@ type QuizResultRow = {
   placement?: number | null;
   score_margin?: number | null;
   result_status?: string | null;
+  scoring_model?: string | null;
+  round_points?: number | null;
+  rounds_won?: number | null;
+  rounds_played?: number | null;
+  average_winning_response_time?: number | null;
+  fastest_winning_response_time?: number | null;
 };
 
 export async function fetchCloudBadgeStats(user: User) {
@@ -37,7 +43,7 @@ export async function fetchCloudBadgeStats(user: User) {
   const result = await supabase
     .from("quiz_results")
     .select(
-      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status"
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time"
     )
     .eq("user_id", user.id)
     .order("played_at", { ascending: false });
@@ -127,6 +133,18 @@ function mapQuizResult(row: QuizResultRow): QuizResult {
     placement: row.placement ?? null,
     scoreMargin: row.score_margin || 0,
     resultStatus: row.result_status || "completed",
+    scoringModel:
+      row.scoring_model === "round_points" ? "round_points" : "legacy",
+    roundPoints: row.round_points || 0,
+    roundsWon: row.rounds_won || 0,
+    roundsPlayed: row.rounds_played || 0,
+    averageWinningResponseTime: Number(
+      row.average_winning_response_time || 0
+    ),
+    fastestWinningResponseTime:
+      row.fastest_winning_response_time == null
+        ? null
+        : Number(row.fastest_winning_response_time),
   };
 }
 

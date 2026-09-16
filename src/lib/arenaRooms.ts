@@ -12,6 +12,12 @@ export type PartyQuestionPhase =
   | "answering"
   | "reveal"
   | "finished";
+export type CompetitiveRoundPhase =
+  | "idle"
+  | "countdown"
+  | "answering"
+  | "reveal"
+  | "finished";
 
 export type DuelQuizTrack = {
   id: string;
@@ -41,6 +47,14 @@ export type ArenaRoomPlayer = {
   currentCorrectAnswers: number;
   currentQuestionIndex: number;
   currentStreak: number;
+  roundPoints: number;
+  roundsWon: number;
+  roundsPlayed: number;
+  averageWinningResponseTime: number;
+  fastestWinningResponseTime: number | null;
+  competitiveAnsweredQuestionIndex: number;
+  competitiveSelectedAnswer: string | null;
+  competitiveAnswerWasCorrect: boolean | null;
   isReady: boolean;
   finishedAt: string | null;
   leftAt: string | null;
@@ -67,6 +81,15 @@ export type ArenaRoom = {
   startedAt: string | null;
   finishedAt: string | null;
   expiresAt: string | null;
+  competitiveQuestionIndex: number;
+  competitiveRoundId: string | null;
+  competitiveRoundPhase: CompetitiveRoundPhase;
+  competitiveAnswerStartsAt: string | null;
+  competitiveAnswerEndsAt: string | null;
+  competitiveRevealEndsAt: string | null;
+  competitiveRoundWinnerUserId: string | null;
+  competitiveWinningAnswerAt: string | null;
+  competitiveWinningResponseTime: number | null;
   partyAudioQuestionIndex: number | null;
   partyAudioStatus: PartyAudioStatus;
   partyQuestionIndex: number;
@@ -116,6 +139,15 @@ type ArenaRoomRow = {
   started_at: string | null;
   finished_at: string | null;
   expires_at?: string | null;
+  competitive_question_index?: number | null;
+  competitive_round_id?: string | null;
+  competitive_round_phase?: string | null;
+  competitive_answer_starts_at?: string | null;
+  competitive_answer_ends_at?: string | null;
+  competitive_reveal_ends_at?: string | null;
+  competitive_round_winner_user_id?: string | null;
+  competitive_winning_answer_at?: string | null;
+  competitive_winning_response_ms?: number | null;
   party_audio_question_index?: number | null;
   party_audio_status?: string | null;
   party_question_index?: number | null;
@@ -142,6 +174,14 @@ type ArenaRoomPlayerRow = {
   current_correct_answers?: number;
   current_question_index?: number;
   current_streak?: number;
+  round_points?: number;
+  rounds_won?: number;
+  rounds_played?: number;
+  average_winning_response_ms?: number;
+  fastest_winning_response_ms?: number | null;
+  competitive_answered_question_index?: number;
+  competitive_selected_answer?: string | null;
+  competitive_answer_was_correct?: boolean | null;
   is_ready?: boolean;
   finished_at?: string | null;
   left_at?: string | null;
@@ -708,7 +748,6 @@ export async function fetchArenaRoom(roomId: string) {
 export async function activateDuelRoom(
   roomId: string,
   questions: DuelQuizQuestion[],
-  startsAt: string,
   mode: ArenaRoomMode = "duel"
 ) {
   if (!supabase) {
@@ -728,14 +767,100 @@ export async function activateDuelRoom(
     return fetchArenaRoom(roomId);
   }
 
-  const { error } = await supabase
-    .from("arena_rooms")
-    .update({
-      status: "active",
-      started_at: startsAt,
-      quiz_questions: questions,
-    })
-    .eq("id", roomId);
+  const { error } = await supabase.rpc("start_competitive_arena_room", {
+    target_room_id: roomId,
+    target_questions: questions,
+  });
+
+  if (error) {
+    return { room: null, error: getFriendlyArenaError(error.message) };
+  }
+
+  return fetchArenaRoom(roomId);
+}
+
+export async function fetchCompetitiveClockOffset(roomId: string) {
+  if (!supabase) {
+    return { offsetMs: 0, error: "Supabase is not configured yet." };
+  }
+
+  const requestStartedAt = Date.now();
+  const { data, error } = await supabase.rpc("get_competitive_server_time", {
+    target_room_id: roomId,
+  });
+  const requestFinishedAt = Date.now();
+
+  if (error || !data) {
+    return {
+      offsetMs: 0,
+      error:
+        getFriendlyArenaError(error?.message) ||
+        "Could not sync the competitive room clock.",
+    };
+  }
+
+  const serverTime = Date.parse(String(data));
+  const requestMidpoint = requestStartedAt + (requestFinishedAt - requestStartedAt) / 2;
+
+  return {
+    offsetMs: Number.isFinite(serverTime) ? serverTime - requestMidpoint : 0,
+    error: null,
+  };
+}
+
+export type CompetitiveAnswerResult = {
+  accepted: boolean;
+  duplicate?: boolean;
+  staleRound?: boolean;
+  roundLocked?: boolean;
+  isCorrect?: boolean;
+  roundWon?: boolean;
+  winnerUserId?: string | null;
+  responseTimeMs?: number | null;
+};
+
+export async function submitCompetitiveArenaAnswer({
+  roomId,
+  roundId,
+  questionIndex,
+  answer,
+}: {
+  roomId: string;
+  roundId: string;
+  questionIndex: number;
+  answer: string | null;
+}) {
+  if (!supabase) {
+    return {
+      result: null,
+      error: "Supabase is not configured yet.",
+    };
+  }
+
+  const { data, error } = await supabase.rpc(
+    "submit_competitive_arena_answer",
+    {
+      target_room_id: roomId,
+      target_round_id: roundId,
+      target_question_index: questionIndex,
+      target_answer: answer,
+    }
+  );
+
+  return {
+    result: error ? null : (data as CompetitiveAnswerResult),
+    error: getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function syncCompetitiveArenaTimeline(roomId: string) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("sync_competitive_arena_timeline", {
+    target_room_id: roomId,
+  });
 
   if (error) {
     return { room: null, error: getFriendlyArenaError(error.message) };
@@ -1086,6 +1211,24 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     expiresAt: row.expires_at || null,
+    competitiveQuestionIndex:
+      typeof row.competitive_question_index === "number"
+        ? row.competitive_question_index
+        : 0,
+    competitiveRoundId: row.competitive_round_id || null,
+    competitiveRoundPhase: normalizeCompetitiveRoundPhase(
+      row.competitive_round_phase
+    ),
+    competitiveAnswerStartsAt: row.competitive_answer_starts_at || null,
+    competitiveAnswerEndsAt: row.competitive_answer_ends_at || null,
+    competitiveRevealEndsAt: row.competitive_reveal_ends_at || null,
+    competitiveRoundWinnerUserId:
+      row.competitive_round_winner_user_id || null,
+    competitiveWinningAnswerAt: row.competitive_winning_answer_at || null,
+    competitiveWinningResponseTime:
+      typeof row.competitive_winning_response_ms === "number"
+        ? row.competitive_winning_response_ms / 1000
+        : null,
     partyAudioQuestionIndex:
       typeof row.party_audio_question_index === "number"
         ? row.party_audio_question_index
@@ -1103,6 +1246,21 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     quizQuestions: normalizeDuelQuestions(row.quiz_questions),
     players: [],
   };
+}
+
+function normalizeCompetitiveRoundPhase(
+  value: string | null | undefined
+): CompetitiveRoundPhase {
+  if (
+    value === "countdown" ||
+    value === "answering" ||
+    value === "reveal" ||
+    value === "finished"
+  ) {
+    return value;
+  }
+
+  return "idle";
 }
 
 function normalizePartyAudioStatus(
@@ -1179,6 +1337,26 @@ function mapPlayerRow(row: ArenaRoomPlayerRow): ArenaRoomPlayer {
     currentCorrectAnswers: row.current_correct_answers || 0,
     currentQuestionIndex: row.current_question_index || 0,
     currentStreak: row.current_streak || 0,
+    roundPoints: row.round_points || 0,
+    roundsWon: row.rounds_won || 0,
+    roundsPlayed: row.rounds_played || 0,
+    averageWinningResponseTime:
+      typeof row.average_winning_response_ms === "number"
+        ? row.average_winning_response_ms / 1000
+        : 0,
+    fastestWinningResponseTime:
+      typeof row.fastest_winning_response_ms === "number"
+        ? row.fastest_winning_response_ms / 1000
+        : null,
+    competitiveAnsweredQuestionIndex:
+      typeof row.competitive_answered_question_index === "number"
+        ? row.competitive_answered_question_index
+        : -1,
+    competitiveSelectedAnswer: row.competitive_selected_answer || null,
+    competitiveAnswerWasCorrect:
+      typeof row.competitive_answer_was_correct === "boolean"
+        ? row.competitive_answer_was_correct
+        : null,
     isReady: Boolean(row.is_ready),
     finishedAt: row.finished_at || null,
     leftAt: row.left_at || null,
