@@ -112,6 +112,16 @@ Run `supabase/tracktest_arena_stats.sql` for the base stats schema, then apply t
 - `supabase/20260721_unified_progression_and_multiplayer_badges.sql`
 - `supabase/20260722_party_authoritative_timeline.sql`
 
+The server-authoritative Duel and Group Lobby flow additionally requires:
+
+- `supabase/20260916_competitive_round_authority.sql`
+- `supabase/20260921_competitive_audio_readiness.sql`
+
+The audio-readiness migration makes the round countdown wait until every active
+competitive client has buffered and seeked the authoritative preview. If any
+client fails or the readiness deadline expires, Supabase skips that question
+for the whole room so scores and progression remain synchronized.
+
 All migrations are additive and should be reviewed against the target Supabase project before execution.
 
 ### Development

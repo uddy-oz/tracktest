@@ -1,5 +1,6 @@
 export type ArenaAudioPhase =
   | "idle"
+  | "preparing_audio"
   | "countdown"
   | "answering"
   | "reveal"
@@ -9,6 +10,7 @@ export type ArenaAudioPhase =
 
 export type ArenaAudioRound = {
   roomId: string;
+  mode: "duel" | "group_lobby" | "party_mode";
   roundKey: string;
   roundId: string;
   roundIndex: number;
@@ -29,6 +31,11 @@ export type ArenaAudioPlayResult =
   | { status: "playing" }
   | { status: "failed"; message: string }
   | { status: "expired"; message: string }
+  | { status: "stale" };
+
+export type ArenaAudioReadyResult =
+  | { status: "ready" }
+  | { status: "failed"; message: string }
   | { status: "stale" };
 
 export type ArenaAudioFailure = {
@@ -52,10 +59,23 @@ type ActivePlayback = {
 };
 
 type DiagnosticEvent =
+  | "ROUND_STATE_RECEIVED"
+  | "QUESTION_CHANGED"
   | "ROUND_RECEIVED"
   | "ROUND_CHANGED"
   | "PREVIEW_CHANGED"
   | "AUDIO_LOAD_REQUESTED"
+  | "AUDIO_SOURCE_SET"
+  | "READINESS_CHECK_STARTED"
+  | "READINESS_CONFIRMED"
+  | "READINESS_FAILED"
+  | "MEDIA_UNLOCK_REQUESTED"
+  | "MEDIA_UNLOCKED"
+  | "MEDIA_UNLOCK_FAILED"
+  | "LOADSTART"
+  | "LOADEDDATA"
+  | "PAUSE"
+  | "SUSPEND"
   | "LOADEDMETADATA"
   | "CANPLAY"
   | "CANPLAYTHROUGH"
@@ -81,6 +101,7 @@ type DiagnosticEvent =
   | "MEDIA_ENDED";
 
 const MEDIA_READY_TIMEOUT_MS = 4000;
+const COMPETITIVE_READY_TIMEOUT_MS = 9000;
 const PLAY_PROMISE_TIMEOUT_MS = 3000;
 const PLAYBACK_PROGRESS_TIMEOUT_MS = 1800;
 const PLAYBACK_STALL_GRACE_MS = 1400;
@@ -119,6 +140,11 @@ function isDebugEnabled() {
   if (import.meta.env.DEV) return true;
 
   try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("audioDebug") === "1") {
+      window.localStorage.setItem("stanzer.arenaAudioDebug", "1");
+      return true;
+    }
     return window.localStorage.getItem("stanzer.arenaAudioDebug") === "1";
   } catch {
     return false;
@@ -136,6 +162,37 @@ function sameMediaUrl(left: string, right: string) {
   }
 }
 
+function createSilentWavDataUrl() {
+  const sampleRate = 8000;
+  const sampleCount = 800;
+  const buffer = new ArrayBuffer(44 + sampleCount * 2);
+  const view = new DataView(buffer);
+  const write = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  write(0, "RIFF");
+  view.setUint32(4, 36 + sampleCount * 2, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, sampleCount * 2, true);
+
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:audio/wav;base64,${window.btoa(binary)}`;
+}
+
 export class ArenaAudioController {
   private audio: HTMLAudioElement | null = null;
   private preloader: HTMLAudioElement | null = null;
@@ -148,6 +205,7 @@ export class ArenaAudioController {
   private stallRecoveryRoundKey = "";
   private clientId = getClientId();
   private debugEnabled = isDebugEnabled();
+  private mediaUnlocked = false;
 
   setCallbacks(callbacks: ArenaAudioCallbacks) {
     this.callbacks = callbacks;
@@ -161,6 +219,8 @@ export class ArenaAudioController {
     audio.preload = "auto";
     audio.controls = false;
     audio.addEventListener("loadedmetadata", this.handleLoadedMetadata);
+    audio.addEventListener("loadstart", this.handleLoadStart);
+    audio.addEventListener("loadeddata", this.handleLoadedData);
     audio.addEventListener("canplay", this.handleCanPlay);
     audio.addEventListener("canplaythrough", this.handleCanPlayThrough);
     audio.addEventListener("seeked", this.handleSeeked);
@@ -170,6 +230,8 @@ export class ArenaAudioController {
     audio.addEventListener("error", this.handleError);
     audio.addEventListener("timeupdate", this.handleTimeUpdate);
     audio.addEventListener("ended", this.handleEnded);
+    audio.addEventListener("pause", this.handlePause);
+    audio.addEventListener("suspend", this.handleSuspend);
 
     if (this.activeRound) {
       this.loadActiveRoundSource("ROUND_RECEIVED");
@@ -183,6 +245,8 @@ export class ArenaAudioController {
     this.stopTimers();
     audio.pause();
     audio.removeEventListener("loadedmetadata", this.handleLoadedMetadata);
+    audio.removeEventListener("loadstart", this.handleLoadStart);
+    audio.removeEventListener("loadeddata", this.handleLoadedData);
     audio.removeEventListener("canplay", this.handleCanPlay);
     audio.removeEventListener("canplaythrough", this.handleCanPlayThrough);
     audio.removeEventListener("seeked", this.handleSeeked);
@@ -192,6 +256,8 @@ export class ArenaAudioController {
     audio.removeEventListener("error", this.handleError);
     audio.removeEventListener("timeupdate", this.handleTimeUpdate);
     audio.removeEventListener("ended", this.handleEnded);
+    audio.removeEventListener("pause", this.handlePause);
+    audio.removeEventListener("suspend", this.handleSuspend);
     this.audio = null;
   }
 
@@ -210,6 +276,7 @@ export class ArenaAudioController {
 
     this.activeRound = null;
     this.activePlayback = null;
+    this.mediaUnlocked = false;
   }
 
   prepareRound(round: ArenaAudioRound, nextPreviewUrl = "") {
@@ -225,6 +292,9 @@ export class ArenaAudioController {
     }
 
     this.activeRound = round;
+    this.log("ROUND_STATE_RECEIVED", {
+      previousRoundKey: previousRound?.roundKey || null,
+    });
     this.log(isNewRound ? "ROUND_CHANGED" : "ROUND_RECEIVED", {
       previousRoundKey: previousRound?.roundKey || null,
     });
@@ -236,11 +306,107 @@ export class ArenaAudioController {
       this.log("NEXT_ROUND_RECEIVED", {
         previousRoundIndex: previousRound.roundIndex,
       });
+      this.log("QUESTION_CHANGED", {
+        previousRoundIndex: previousRound.roundIndex,
+        nextRoundIndex: round.roundIndex,
+      });
     }
     this.loadActiveRoundSource(isNewRound ? "PREVIEW_CHANGED" : "ROUND_RECEIVED");
 
     if (nextPreviewUrl && nextPreviewUrl !== round.previewUrl) {
       this.preloadNext(nextPreviewUrl, round);
+    }
+  }
+
+  unlockFromUserGesture() {
+    const audio = this.audio;
+    if (!audio || this.mediaUnlocked || this.activeRound) {
+      return Promise.resolve(this.mediaUnlocked);
+    }
+
+    const unlockUrl = createSilentWavDataUrl();
+    audio.src = unlockUrl;
+    audio.muted = false;
+    audio.volume = 1;
+    audio.load();
+    this.log("MEDIA_UNLOCK_REQUESTED");
+
+    const playPromise = audio.play();
+    return playPromise
+      .then(() => {
+        this.mediaUnlocked = true;
+        this.log("MEDIA_UNLOCKED");
+        audio.pause();
+        if (!this.activeRound && sameMediaUrl(audio.src, unlockUrl)) {
+          audio.removeAttribute("src");
+          audio.load();
+        }
+        return true;
+      })
+      .catch((error) => {
+        const details = getErrorDetails(error);
+        this.log("MEDIA_UNLOCK_FAILED", details);
+        return false;
+      });
+  }
+
+  async waitUntilRoundReady(
+    roundKey: string,
+    clipLengthSeconds: number
+  ): Promise<ArenaAudioReadyResult> {
+    const round = this.activeRound;
+    const audio = this.audio;
+
+    if (!round || !audio || round.roundKey !== roundKey) {
+      return { status: "stale" };
+    }
+
+    if (!round.previewUrl) {
+      return { status: "failed", message: "This preview URL is missing." };
+    }
+
+    const operationId = ++this.operationId;
+    this.stopTimers();
+    this.activePlayback = null;
+    this.log("READINESS_CHECK_STARTED");
+
+    try {
+      const hasMetadata = await this.waitForMetadata(
+        operationId,
+        round,
+        COMPETITIVE_READY_TIMEOUT_MS
+      );
+      if (!hasMetadata) {
+        return this.isCurrent(operationId, roundKey, round.previewUrl)
+          ? { status: "failed", message: "Preview metadata did not load in time." }
+          : { status: "stale" };
+      }
+
+      const targetTime = this.getSafeClipStart(
+        audio,
+        round.clipStartSeconds,
+        clipLengthSeconds
+      );
+      const isSeekable = await this.seekAndWait(
+        operationId,
+        round,
+        targetTime,
+        COMPETITIVE_READY_TIMEOUT_MS
+      );
+      if (!isSeekable) {
+        return this.isCurrent(operationId, roundKey, round.previewUrl)
+          ? { status: "failed", message: "Preview data was not playable in time." }
+          : { status: "stale" };
+      }
+
+      this.log("READINESS_CONFIRMED", { targetTime });
+      return { status: "ready" };
+    } catch (error) {
+      const details = getErrorDetails(error);
+      this.log("READINESS_FAILED", details);
+      return this.isCurrent(operationId, roundKey, round.previewUrl)
+        ? { status: "failed", message: `${details.name}: ${details.message}` }
+        : { status: "stale" };
     }
   }
 
@@ -563,6 +729,7 @@ export class ArenaAudioController {
 
     if (sourceChanged) {
       audio.src = round.previewUrl;
+      this.log("AUDIO_SOURCE_SET", { sourceChanged: true });
       this.log(event, { sourceChanged: true });
       audio.load();
       this.log("AUDIO_LOAD_REQUESTED", { reason: "prepare-round" });
@@ -614,7 +781,8 @@ export class ArenaAudioController {
 
   private async waitForMetadata(
     operationId: number,
-    round: ArenaAudioRound
+    round: ArenaAudioRound,
+    timeoutMs = MEDIA_READY_TIMEOUT_MS
   ) {
     const audio = this.audio;
     if (!audio) return false;
@@ -635,14 +803,15 @@ export class ArenaAudioController {
         Number.isFinite(audio.duration),
       operationId,
       round,
-      MEDIA_READY_TIMEOUT_MS
+      timeoutMs
     );
   }
 
   private async seekAndWait(
     operationId: number,
     round: ArenaAudioRound,
-    targetTime: number
+    targetTime: number,
+    timeoutMs = MEDIA_READY_TIMEOUT_MS
   ) {
     const audio = this.audio;
     if (!audio) return false;
@@ -659,7 +828,7 @@ export class ArenaAudioController {
           this.isBufferedAt(audio, audio.currentTime)),
       operationId,
       round,
-      MEDIA_READY_TIMEOUT_MS
+      timeoutMs
     );
   }
 
@@ -911,10 +1080,11 @@ export class ArenaAudioController {
 
     const audio = this.audio;
     const round = this.activeRound;
-    console.info("[StanZer Arena Audio]", {
+    const snapshot = {
       event,
       clientId: this.clientId,
       roomId: round?.roomId || null,
+      mode: round?.mode || null,
       roundId: round?.roundId || null,
       roundIndex: round?.roundIndex ?? null,
       roundKey: round?.roundKey || null,
@@ -926,12 +1096,30 @@ export class ArenaAudioController {
       paused: audio?.paused ?? null,
       seeking: audio?.seeking ?? null,
       currentTime: audio?.currentTime ?? null,
+      duration: audio?.duration ?? null,
+      ended: audio?.ended ?? null,
+      muted: audio?.muted ?? null,
+      volume: audio?.volume ?? null,
+      buffered: audio ? this.readTimeRanges(audio.buffered) : [],
+      seekable: audio ? this.readTimeRanges(audio.seekable) : [],
+      browserTimeMs: Date.now(),
+      generation: this.operationId,
       timestamp: new Date().toISOString(),
       serverTimestamp: round?.serverTimestamp || null,
       ...details,
-    });
+    };
+    console.info(`[STANZER_AUDIO] ${JSON.stringify(snapshot)}`);
   }
 
+  private readTimeRanges(ranges: TimeRanges) {
+    return Array.from({ length: ranges.length }, (_, index) => ({
+      start: ranges.start(index),
+      end: ranges.end(index),
+    }));
+  }
+
+  private handleLoadStart = () => this.log("LOADSTART");
+  private handleLoadedData = () => this.log("LOADEDDATA");
   private handleLoadedMetadata = () => this.log("LOADEDMETADATA");
   private handleCanPlay = () => this.log("CANPLAY");
   private handleCanPlayThrough = () => this.log("CANPLAYTHROUGH");
@@ -977,4 +1165,6 @@ export class ArenaAudioController {
       });
     }
   };
+  private handlePause = () => this.log("PAUSE");
+  private handleSuspend = () => this.log("SUSPEND");
 }

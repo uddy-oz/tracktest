@@ -14,6 +14,7 @@ export type PartyQuestionPhase =
   | "finished";
 export type CompetitiveRoundPhase =
   | "idle"
+  | "preparing_audio"
   | "countdown"
   | "answering"
   | "reveal"
@@ -90,6 +91,12 @@ export type ArenaRoom = {
   competitiveRoundWinnerUserId: string | null;
   competitiveWinningAnswerAt: string | null;
   competitiveWinningResponseTime: number | null;
+  competitiveAudioPrepareStartedAt: string | null;
+  competitiveAudioReadyDeadlineAt: string | null;
+  competitiveRequiredReadyCount: number;
+  competitiveReadyCount: number;
+  competitiveAudioFailed: boolean;
+  competitiveAudioFailureReason: string | null;
   partyAudioQuestionIndex: number | null;
   partyAudioStatus: PartyAudioStatus;
   partyQuestionIndex: number;
@@ -148,6 +155,12 @@ type ArenaRoomRow = {
   competitive_round_winner_user_id?: string | null;
   competitive_winning_answer_at?: string | null;
   competitive_winning_response_ms?: number | null;
+  competitive_audio_prepare_started_at?: string | null;
+  competitive_audio_ready_deadline_at?: string | null;
+  competitive_required_ready_count?: number | null;
+  competitive_ready_count?: number | null;
+  competitive_audio_failed?: boolean | null;
+  competitive_audio_failure_reason?: string | null;
   party_audio_question_index?: number | null;
   party_audio_status?: string | null;
   party_question_index?: number | null;
@@ -301,14 +314,38 @@ function getPlayerDisplay(profile: UserProfile | null) {
   };
 }
 
-export async function cancelStaleArenaRooms() {
+const STALE_ROOM_CLEANUP_INTERVAL_MS = 60_000;
+let staleRoomCleanupPromise: Promise<{ error: string | null }> | null = null;
+let lastStaleRoomCleanupAt = 0;
+
+export async function cancelStaleArenaRooms(force = false) {
   if (!supabase) {
     return { error: "Supabase is not configured yet." };
   }
 
-  const { error } = await supabase.rpc("cancel_stale_arena_rooms");
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    return { error: null };
+  }
 
-  return { error: error?.message || null };
+  const now = Date.now();
+  if (!force && now - lastStaleRoomCleanupAt < STALE_ROOM_CLEANUP_INTERVAL_MS) {
+    return staleRoomCleanupPromise || { error: null };
+  }
+
+  if (staleRoomCleanupPromise) {
+    return staleRoomCleanupPromise;
+  }
+
+  lastStaleRoomCleanupAt = now;
+  staleRoomCleanupPromise = Promise.resolve(
+    supabase.rpc("cancel_stale_arena_rooms")
+  )
+    .then(({ error }) => ({ error: error?.message || null }))
+    .finally(() => {
+      staleRoomCleanupPromise = null;
+    });
+
+  return staleRoomCleanupPromise;
 }
 
 export async function fetchOpenDuelRooms(mode: ArenaRoomMode = "duel") {
@@ -711,8 +748,6 @@ export async function fetchArenaRoom(roomId: string) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
-  await cancelStaleArenaRooms();
-
   const { data: roomData, error: roomError } = await supabase
     .from("arena_rooms")
     .select("*")
@@ -867,6 +902,71 @@ export async function syncCompetitiveArenaTimeline(roomId: string) {
   }
 
   return fetchArenaRoom(roomId);
+}
+
+export async function acknowledgeCompetitiveAudioReady({
+  roomId,
+  roundId,
+  questionIndex,
+  previewUrl,
+}: {
+  roomId: string;
+  roundId: string;
+  questionIndex: number;
+  previewUrl: string;
+}) {
+  if (!supabase) {
+    return { result: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc(
+    "acknowledge_competitive_audio_ready",
+    {
+      target_room_id: roomId,
+      target_round_id: roundId,
+      target_question_index: questionIndex,
+      target_preview_url: previewUrl,
+    }
+  );
+
+  return {
+    result: error ? null : (data as Record<string, unknown>),
+    error: getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function reportCompetitiveAudioFailure({
+  roomId,
+  roundId,
+  questionIndex,
+  previewUrl,
+  reason,
+}: {
+  roomId: string;
+  roundId: string;
+  questionIndex: number;
+  previewUrl: string;
+  reason: string;
+}) {
+  if (!supabase) {
+    return { result: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc(
+    "report_competitive_audio_failure",
+    {
+      target_room_id: roomId,
+      target_round_id: roundId,
+      target_question_index: questionIndex,
+      target_preview_url: previewUrl,
+      failure_reason: reason.slice(0, 240),
+    }
+  );
+
+  return {
+    result: error ? null : (data as Record<string, unknown>),
+    error: getFriendlyArenaError(error?.message) || null,
+  };
 }
 
 export async function updateDuelPlayerProgress({
@@ -1229,6 +1329,16 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
       typeof row.competitive_winning_response_ms === "number"
         ? row.competitive_winning_response_ms / 1000
         : null,
+    competitiveAudioPrepareStartedAt:
+      row.competitive_audio_prepare_started_at || null,
+    competitiveAudioReadyDeadlineAt:
+      row.competitive_audio_ready_deadline_at || null,
+    competitiveRequiredReadyCount:
+      row.competitive_required_ready_count || 0,
+    competitiveReadyCount: row.competitive_ready_count || 0,
+    competitiveAudioFailed: Boolean(row.competitive_audio_failed),
+    competitiveAudioFailureReason:
+      row.competitive_audio_failure_reason || null,
     partyAudioQuestionIndex:
       typeof row.party_audio_question_index === "number"
         ? row.party_audio_question_index
@@ -1252,6 +1362,7 @@ function normalizeCompetitiveRoundPhase(
   value: string | null | undefined
 ): CompetitiveRoundPhase {
   if (
+    value === "preparing_audio" ||
     value === "countdown" ||
     value === "answering" ||
     value === "reveal" ||

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
+  acknowledgeCompetitiveAudioReady,
   activateDuelRoom,
   cancelDuelRoom,
   createDuelRoom,
@@ -18,6 +19,7 @@ import {
   leaveArenaRoom,
   normalizeArenaInviteCode,
   requestArenaRematch,
+  reportCompetitiveAudioFailure,
   resetArenaRoomForRematch,
   type ArenaInvite,
   setPartyAudioState,
@@ -121,10 +123,11 @@ const ARENA_STATUS_ORDER: Record<string, number> = {
 };
 const COMPETITIVE_PHASE_ORDER = {
   idle: 0,
-  countdown: 1,
-  answering: 2,
-  reveal: 3,
-  finished: 4,
+  preparing_audio: 1,
+  countdown: 2,
+  answering: 3,
+  reveal: 4,
+  finished: 5,
 } as const;
 const PARTY_PHASE_ORDER = {
   idle: 0,
@@ -322,6 +325,8 @@ function ArenaPage({
   const progressionSyncedRoundRef = useRef<string>("");
   const competitiveQuestionKeyRef = useRef<string>("");
   const competitiveAudioStartKeyRef = useRef<string>("");
+  const competitiveAudioReadyKeyRef = useRef<string>("");
+  const competitiveAudioFailureKeyRef = useRef<string>("");
   const competitiveRevealSoundKeyRef = useRef<string>("");
   const partyQuestionKeyRef = useRef<string>("");
   const partyAudioStartKeyRef = useRef<string>("");
@@ -358,7 +363,14 @@ function ArenaPage({
         errorName,
         errorMessage,
       });
-      enterDuelAudioFallback(audioMessage, roundKey);
+      if (
+        activeRoomSnapshotRef.current?.mode !== "party_mode" &&
+        activeRoomSnapshotRef.current?.status === "active"
+      ) {
+        void failCompetitiveQuestionAudio(audioMessage, roundKey);
+      } else {
+        enterDuelAudioFallback(audioMessage, roundKey);
+      }
     },
   });
 
@@ -537,10 +549,18 @@ function ArenaPage({
     }
 
     const refreshId = window.setInterval(() => {
-      void refreshActiveRoom(false);
+      if (navigator.onLine) {
+        void refreshActiveRoom(false);
+      }
     }, DUEL_ROOM_REFRESH_MS);
 
-    return () => window.clearInterval(refreshId);
+    const handleOnline = () => void refreshActiveRoom(false);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      window.clearInterval(refreshId);
+      window.removeEventListener("online", handleOnline);
+    };
   }, [activeRoom?.id]);
 
   useEffect(() => {
@@ -725,6 +745,7 @@ function ArenaPage({
     arenaAudioController.prepareRound(
       {
         roomId: activeRoom.id,
+        mode: activeRoom.mode,
         roundKey,
         roundId:
           activeRoom.competitiveRoundId ||
@@ -745,6 +766,98 @@ function ArenaPage({
     gameQuestionIndex,
     isPartyHost,
     isPartyMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      !isCompetitiveMode ||
+      activeRoom.status !== "active" ||
+      activeRoom.competitiveRoundPhase !== "preparing_audio" ||
+      !activeRoom.competitiveRoundId ||
+      !currentDuelQuestion
+    ) {
+      return;
+    }
+
+    const roundKey = activeQuestionRunKey;
+    const readinessKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.competitiveRoundId}`;
+    const previewUrl = currentDuelQuestion.correctTrack.previewUrl || "";
+
+    if (competitiveAudioReadyKeyRef.current === readinessKey) {
+      return;
+    }
+
+    competitiveAudioReadyKeyRef.current = readinessKey;
+    let cancelled = false;
+
+    const prepareAndAcknowledge = async () => {
+      const readyResult = await arenaAudioController.waitUntilRoundReady(
+        roundKey,
+        CLIP_LENGTH_SECONDS
+      );
+
+      if (cancelled || readyResult.status === "stale") return;
+
+      if (readyResult.status === "failed") {
+        await failCompetitiveQuestionAudio(readyResult.message, roundKey);
+        return;
+      }
+
+      const readinessDeadline = Date.parse(
+        activeRoom.competitiveAudioReadyDeadlineAt || ""
+      );
+      let lastError = "";
+
+      while (
+        !cancelled &&
+        (!Number.isFinite(readinessDeadline) ||
+          Date.now() + competitiveClockOffsetMs < readinessDeadline)
+      ) {
+        if (!navigator.onLine) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          continue;
+        }
+
+        const { error } = await acknowledgeCompetitiveAudioReady({
+          roomId: activeRoom.id,
+          roundId: activeRoom.competitiveRoundId!,
+          questionIndex: activeRoom.competitiveQuestionIndex,
+          previewUrl,
+        });
+
+        if (!error) {
+          const refreshed = await fetchArenaRoom(activeRoom.id);
+          if (!cancelled && refreshed.room) updateActiveRoom(refreshed.room);
+          return;
+        }
+
+        lastError = error;
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+      }
+
+      if (!cancelled && lastError) {
+        setMessage(`Could not confirm audio readiness: ${lastError}`);
+      }
+    };
+
+    void prepareAndAcknowledge();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeQuestionRunKey,
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.competitiveQuestionIndex,
+    activeRoom?.competitiveRoundId,
+    activeRoom?.competitiveRoundPhase,
+    activeRoom?.competitiveAudioReadyDeadlineAt,
+    activeRoom?.status,
+    arenaAudioController,
+    currentDuelQuestion,
+    competitiveClockOffsetMs,
+    isCompetitiveMode,
   ]);
 
   useEffect(() => {
@@ -821,6 +934,20 @@ function ArenaPage({
       const revealEndsAt = Date.parse(activeRoom.competitiveRevealEndsAt || "");
       const phase = activeRoom.competitiveRoundPhase;
 
+      if (phase === "preparing_audio") {
+        arenaAudioController.updateRoundPhase(
+          activeQuestionRunKeyRef.current,
+          "preparing_audio",
+          activeRoom.competitiveAudioReadyDeadlineAt
+        );
+        duelPhaseRef.current = "preparing";
+        setDuelPhase("preparing");
+        setDuelAudioFallbackMessage(
+          `Preparing audio ${activeRoom.competitiveReadyCount}/${activeRoom.competitiveRequiredReadyCount || activeRoom.players.length}`
+        );
+        return;
+      }
+
       if (phase === "countdown") {
         arenaAudioController.updateRoundPhase(
           activeQuestionRunKeyRef.current,
@@ -890,9 +1017,12 @@ function ArenaPage({
           isCorrect: didCurrentPlayerWin,
           points: didCurrentPlayerWin ? 1 : 0,
           correctAnswer: currentDuelQuestion?.correctAnswer || "",
+          wasAudioSkipped: activeRoom.competitiveAudioFailed,
         });
         setDuelRevealMessage(
-          winner
+          activeRoom.competitiveAudioFailed
+            ? "Audio unavailable on a player device. Question skipped for everyone."
+            : winner
             ? `${winner.displayName} got it first in ${formatResponseTime(
                 activeRoom.competitiveWinningResponseTime
               )}`
@@ -941,6 +1071,10 @@ function ArenaPage({
     activeRoom?.competitiveRevealEndsAt,
     activeRoom?.competitiveRoundWinnerUserId,
     activeRoom?.competitiveWinningResponseTime,
+    activeRoom?.competitiveAudioReadyDeadlineAt,
+    activeRoom?.competitiveRequiredReadyCount,
+    activeRoom?.competitiveReadyCount,
+    activeRoom?.competitiveAudioFailed,
     activeRoom?.quizQuestions.length,
     competitiveClockOffsetMs,
     currentArenaPlayer?.roundPoints,
@@ -960,7 +1094,9 @@ function ArenaPage({
     }
 
     const boundary =
-      activeRoom.competitiveRoundPhase === "countdown"
+      activeRoom.competitiveRoundPhase === "preparing_audio"
+        ? activeRoom.competitiveAudioReadyDeadlineAt
+        : activeRoom.competitiveRoundPhase === "countdown"
         ? activeRoom.competitiveAnswerStartsAt
         : activeRoom.competitiveRoundPhase === "answering"
           ? activeRoom.competitiveAnswerEndsAt
@@ -978,6 +1114,11 @@ function ArenaPage({
     const questionAtSchedule = activeRoom.competitiveQuestionIndex;
 
     const syncAtBoundary = async () => {
+      if (!navigator.onLine) {
+        syncId = window.setTimeout(syncAtBoundary, 1000);
+        return;
+      }
+
       const { room, error } = await syncCompetitiveArenaTimeline(activeRoom.id);
 
       if (isCancelled) {
@@ -1019,6 +1160,7 @@ function ArenaPage({
     activeRoom?.competitiveAnswerStartsAt,
     activeRoom?.competitiveAnswerEndsAt,
     activeRoom?.competitiveRevealEndsAt,
+    activeRoom?.competitiveAudioReadyDeadlineAt,
     activeRoom?.status,
     competitiveClockOffsetMs,
     isCompetitiveMode,
@@ -1560,6 +1702,50 @@ function ArenaPage({
     );
   }
 
+  async function failCompetitiveQuestionAudio(
+    reason: string,
+    expectedRoundKey = activeQuestionRunKeyRef.current
+  ) {
+    const room = activeRoomSnapshotRef.current;
+    const question = room?.quizQuestions[room.competitiveQuestionIndex];
+
+    if (
+      !room ||
+      room.mode === "party_mode" ||
+      room.status !== "active" ||
+      !room.competitiveRoundId ||
+      activeQuestionRunKeyRef.current !== expectedRoundKey ||
+      competitiveAudioFailureKeyRef.current === expectedRoundKey
+    ) {
+      return;
+    }
+
+    competitiveAudioFailureKeyRef.current = expectedRoundKey;
+    stopDuelClip(false, expectedRoundKey, "competitive-audio-failed");
+    duelPhaseRef.current = "audioSkipped";
+    setDuelPhase("audioSkipped");
+    setDuelAudioFallbackMessage(
+      "Audio unavailable on a player device. Question skipped for everyone."
+    );
+
+    const { error } = await reportCompetitiveAudioFailure({
+      roomId: room.id,
+      roundId: room.competitiveRoundId,
+      questionIndex: room.competitiveQuestionIndex,
+      previewUrl: question?.correctTrack.previewUrl || "",
+      reason,
+    });
+
+    if (error) {
+      competitiveAudioFailureKeyRef.current = "";
+      setMessage(`Could not synchronize the audio skip: ${error}`);
+      return;
+    }
+
+    const refreshed = await fetchArenaRoom(room.id);
+    if (refreshed.room) updateActiveRoom(refreshed.room);
+  }
+
   function skipDuelQuestionForAudio(
     expectedRoundKey = activeQuestionRunKeyRef.current
   ) {
@@ -1585,6 +1771,14 @@ function ArenaPage({
           error || "Host audio unavailable. Question skipped for everyone."
         );
       });
+      return;
+    }
+
+    if (isCompetitiveMode) {
+      void failCompetitiveQuestionAudio(
+        "Local playback remained unavailable after retry.",
+        expectedRoundKey
+      );
       return;
     }
 
@@ -1807,16 +2001,10 @@ function ArenaPage({
           return;
         }
 
-        if (isManualStart) {
-          setDuelAudioFallbackMessage(
-            "Audio unavailable on this device. Your answer was skipped."
-          );
-          skipDuelQuestionForAudio();
-        } else {
-          enterDuelAudioFallback(
-            "Click once to retry audio. The shared round keeps moving."
-          );
-        }
+        await failCompetitiveQuestionAudio(
+          playResult.message,
+          questionRunKey
+        );
         return;
       }
 
@@ -2268,6 +2456,10 @@ function ArenaPage({
       return;
     }
 
+    // play() is invoked synchronously from the Join gesture so desktop browsers
+    // authorize the persistent Arena media element before asynchronous room work.
+    void arenaAudioController.unlockFromUserGesture();
+
     const isAlreadyInRoom = room.players.some(
       (player) => player.userId === session.user.id
     );
@@ -2307,6 +2499,8 @@ function ArenaPage({
     if (!pendingInvite) {
       return;
     }
+
+    void arenaAudioController.unlockFromUserGesture();
 
     if (!session?.user) {
       onLogin();
@@ -2533,6 +2727,8 @@ function ArenaPage({
     if (!session?.user) {
       return;
     }
+
+    void arenaAudioController.unlockFromUserGesture();
 
     setIsPreparingDuel(true);
     setMessage("");
@@ -3549,7 +3745,9 @@ function ArenaPage({
     return (
       <>
         <p className="game-state-label">Preparing question</p>
-        <p className="game-state-detail">Waiting for the shared room clock...</p>
+        <p className="game-state-detail">
+          {duelAudioFallbackMessage || "Waiting for the shared room clock..."}
+        </p>
       </>
     );
   }

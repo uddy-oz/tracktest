@@ -138,10 +138,11 @@
             controller.prepareRound(
               {
                 roomId: "harness",
+                mode: "duel",
                 roundKey,
                 roundId: `round-${index}`,
                 roundIndex: index,
-                phase: "countdown",
+                phase: "preparing_audio",
                 previewUrl: preview.url,
                 clipStartSeconds: 6 + (index % 12),
                 serverTimestamp: new Date().toISOString(),
@@ -149,7 +150,16 @@
               nextPreview?.url || ""
             );
             audio.addEventListener("timeupdate", observeProgress);
-            await sleep(index === 0 ? 1000 : 300);
+            const readiness = await controller.waitUntilRoundReady(
+              roundKey,
+              TEST_CLIP_SECONDS
+            );
+
+            if (readiness.status !== "ready") {
+              throw new Error(
+                `Round ${index + 1} readiness failed: ${readiness.message || readiness.status}`
+              );
+            }
 
             const result = await controller.startRound({
               roundKey,
@@ -164,6 +174,7 @@
               round: index + 1,
               track: preview.name,
               status: result.status,
+              readiness: readiness.status,
               actualPlaybackObserved: observedProgress > 0.05,
               readyState: audio.readyState,
               networkState: audio.networkState,
@@ -180,6 +191,7 @@
           const currentRoundKey = "harness:stale:current";
           controller.prepareRound({
             roomId: "harness",
+            mode: "duel",
             roundKey: staleRoundKey,
             roundId: "stale-old",
             roundIndex: TEST_ROUNDS,
@@ -195,6 +207,7 @@
           });
           controller.prepareRound({
             roomId: "harness",
+            mode: "duel",
             roundKey: currentRoundKey,
             roundId: "stale-current",
             roundIndex: TEST_ROUNDS + 1,
