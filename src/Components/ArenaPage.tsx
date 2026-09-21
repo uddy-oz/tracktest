@@ -621,7 +621,7 @@ function ArenaPage({
       clearDuelAudioHealthTimer();
       duelAudioAttemptRef.current += 1;
     };
-  }, [currentDuelQuestion?.correctTrack.previewUrl, gameQuestionIndex]);
+  }, [activeRoom?.id, currentDuelQuestion?.correctTrack.previewUrl, gameQuestionIndex]);
 
   useEffect(() => {
     if (
@@ -1370,6 +1370,59 @@ function ArenaPage({
     setIsDuelClipPlaying(false);
   }
 
+  function waitForDuelAudioReady(
+    audio: HTMLAudioElement,
+    attemptId: number
+  ): Promise<boolean> {
+    if (
+      audio.readyState >= HTMLMediaElement.HAVE_METADATA &&
+      Number.isFinite(audio.duration)
+    ) {
+      return Promise.resolve(attemptId === duelAudioAttemptRef.current);
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId: number | null = null;
+
+      const finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+
+        audio.removeEventListener("loadedmetadata", handleReady);
+        audio.removeEventListener("durationchange", handleReady);
+        audio.removeEventListener("canplay", handleReady);
+        audio.removeEventListener("error", handleError);
+        resolve(ready && attemptId === duelAudioAttemptRef.current);
+      };
+
+      const handleReady = () => {
+        if (
+          audio.readyState >= HTMLMediaElement.HAVE_METADATA &&
+          Number.isFinite(audio.duration)
+        ) {
+          finish(true);
+        }
+      };
+
+      const handleError = () => finish(false);
+
+      audio.addEventListener("loadedmetadata", handleReady);
+      audio.addEventListener("durationchange", handleReady);
+      audio.addEventListener("canplay", handleReady);
+      audio.addEventListener("error", handleError);
+      timeoutId = window.setTimeout(
+        () => finish(false),
+        AUDIO_PLAY_START_TIMEOUT_MS
+      );
+      handleReady();
+    });
+  }
+
   async function playDuelClip(timelineOffsetSeconds = 0) {
     const audio = duelAudioRef.current;
 
@@ -1385,6 +1438,20 @@ function ArenaPage({
       clearDuelAudioHealthTimer();
       duelClipCompletedRef.current = false;
 
+      // Keep one audio element alive across rounds. This preserves the browser's
+      // user-activation context and avoids seeking before a new preview has metadata.
+      if (audio.src !== currentDuelQuestion.correctTrack.previewUrl) {
+        audio.src = currentDuelQuestion.correctTrack.previewUrl;
+      }
+      audio.pause();
+      audio.load();
+
+      const isAudioReady = await waitForDuelAudioReady(audio, attemptId);
+      if (!isAudioReady || attemptId !== duelAudioAttemptRef.current) {
+        audio.pause();
+        return false;
+      }
+
       const latestStart = Number.isFinite(audio.duration)
         ? Math.max(0, audio.duration - CLIP_LENGTH_SECONDS)
         : currentDuelQuestion.clipStartSeconds;
@@ -1397,7 +1464,6 @@ function ArenaPage({
         CLIP_LENGTH_SECONDS
       );
 
-      audio.pause();
       audio.currentTime = Math.min(
         safeClipStart + safeTimelineOffset,
         safeClipStart + CLIP_LENGTH_SECONDS
@@ -1422,7 +1488,11 @@ function ArenaPage({
         window.clearTimeout(playTimeoutId);
       }
 
-      if (!didStart || attemptId !== duelAudioAttemptRef.current) {
+      if (
+        !didStart ||
+        audio.paused ||
+        attemptId !== duelAudioAttemptRef.current
+      ) {
         audio.pause();
         return false;
       }
@@ -3883,7 +3953,6 @@ function ArenaPage({
               ) : question.correctTrack.previewUrl ? (
                 <audio
                   ref={duelAudioRef}
-                  key={`${activeRoom.id}-${gameQuestionIndex}-${question.correctTrack.previewUrl}`}
                   className="hidden-audio-preview"
                   preload="auto"
                   src={question.correctTrack.previewUrl}
