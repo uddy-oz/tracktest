@@ -11,6 +11,10 @@ import {
 } from "../lib/profiles";
 import { sounds } from "../lib/sounds";
 import { isSupabaseConfigured, supabase } from "../lib/supabaseClient";
+import { resetCurrentUserProgress } from "../lib/accountProgress";
+import { clearLocalFeaturedBadgeIds } from "../lib/featuredBadges";
+import { clearTrackTestStats } from "../lib/stats";
+import { isAnonymousUser } from "../lib/authIdentity";
 
 export type AuthPageMode =
   | "login"
@@ -35,6 +39,8 @@ type AuthPageProps = {
   onProfileSaved: (profile: UserProfile) => void;
   onLogout: () => void | Promise<void>;
   onPlay: () => void;
+  onGuest?: () => Promise<string>;
+  onProgressReset?: () => void | Promise<void>;
 };
 
 type ProfileEditorProps = {
@@ -356,15 +362,27 @@ function LoginForm({
   onNavigate,
   onAuthenticated,
   onProfileSaved,
+  onGuest,
 }: {
   onNavigate: (mode: AuthPageMode) => void;
   onAuthenticated: () => void;
   onProfileSaved: (profile: UserProfile) => void;
+  onGuest?: () => Promise<string>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isStartingGuest, setIsStartingGuest] = useState(false);
+
+  async function handleGuest() {
+    if (!onGuest) return;
+    setIsStartingGuest(true);
+    setNotice(null);
+    const error = await onGuest();
+    if (error) setNotice({ kind: "error", text: error });
+    setIsStartingGuest(false);
+  }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -451,6 +469,17 @@ function LoginForm({
       >
         {isSubmitting ? "Logging in..." : "Log in"}
       </button>
+
+      {onGuest && (
+        <button
+          type="button"
+          className="auth-secondary-button auth-guest-button"
+          disabled={!isSupabaseConfigured || isStartingGuest}
+          onClick={() => void handleGuest()}
+        >
+          {isStartingGuest ? "Starting guest session..." : "Play multiplayer as guest"}
+        </button>
+      )}
 
       <AuthNotice notice={notice} />
 
@@ -877,11 +906,13 @@ function AccountSettings({
   profile,
   onProfileSaved,
   onLogout,
+  onProgressReset,
 }: {
   session: Session;
   profile: UserProfile | null;
   onProfileSaved: (profile: UserProfile) => void;
   onLogout: () => void | Promise<void>;
+  onProgressReset?: () => void | Promise<void>;
 }) {
   const [email, setEmail] = useState(session.user.email || "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -892,6 +923,35 @@ function AccountSettings({
   const [isSavingEmail, setIsSavingEmail] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [isMuted, setIsMuted] = useState(sounds.isMuted());
+  const [showResetConfirmation, setShowResetConfirmation] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState("");
+  const [resetNotice, setResetNotice] = useState<Notice | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+
+  async function handleProgressReset() {
+    if (resetConfirmation !== "RESET") return;
+
+    setIsResetting(true);
+    setResetNotice(null);
+    const result = await resetCurrentUserProgress();
+
+    if (result.error || !result.reset) {
+      setResetNotice({
+        kind: "error",
+        text: result.error || "Progress could not be reset.",
+      });
+      setIsResetting(false);
+      return;
+    }
+
+    clearTrackTestStats();
+    clearLocalFeaturedBadgeIds();
+    await onProgressReset?.();
+    setShowResetConfirmation(false);
+    setResetConfirmation("");
+    setResetNotice({ kind: "success", text: "Your StanZer progress was reset." });
+    setIsResetting(false);
+  }
 
   async function handleEmailChange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1078,6 +1138,69 @@ function AccountSettings({
           Log out
         </button>
       </section>
+
+      <section className="settings-section settings-danger-zone" aria-labelledby="settings-danger-heading">
+        <div className="settings-section-heading">
+          <p className="eyebrow">Danger zone</p>
+          <h3 id="settings-danger-heading">Reset game progress</h3>
+          <p>
+            Permanently deletes quiz results, stats, badges, and completed Arena records.
+            Your account, username, email, and password stay intact.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="auth-danger-button"
+          onClick={() => setShowResetConfirmation(true)}
+        >
+          Reset progress
+        </button>
+        <AuthNotice notice={resetNotice} />
+      </section>
+
+      {showResetConfirmation && (
+        <div className="settings-reset-backdrop" role="presentation">
+          <section
+            className="settings-reset-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-progress-title"
+          >
+            <p className="eyebrow">Permanent action</p>
+            <h3 id="reset-progress-title">Reset all game progress?</h3>
+            <p>This cannot be undone. Type <strong>RESET</strong> to confirm.</p>
+            <label htmlFor="reset-progress-confirmation">Confirmation</label>
+            <input
+              id="reset-progress-confirmation"
+              value={resetConfirmation}
+              onChange={(event) => setResetConfirmation(event.target.value)}
+              autoComplete="off"
+              autoFocus
+            />
+            <div className="settings-reset-actions">
+              <button
+                type="button"
+                className="auth-secondary-button"
+                disabled={isResetting}
+                onClick={() => {
+                  setShowResetConfirmation(false);
+                  setResetConfirmation("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="auth-danger-button"
+                disabled={resetConfirmation !== "RESET" || isResetting}
+                onClick={() => void handleProgressReset()}
+              >
+                {isResetting ? "Resetting..." : "Reset permanently"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -1092,6 +1215,8 @@ function AuthPage({
   onProfileSaved,
   onLogout,
   onPlay,
+  onGuest,
+  onProgressReset,
 }: AuthPageProps) {
   if (mode === "profile" && session) {
     return (
@@ -1136,6 +1261,25 @@ function AuthPage({
       );
     }
 
+    if (isAnonymousUser(session.user)) {
+      return (
+        <AuthShell
+          eyebrow="Guest session"
+          title="Create an account to save your progress"
+          description="Guest rooms are temporary. A free account keeps your stats, wins, badges, and rank across devices."
+        >
+          <div className="auth-session-actions">
+            <button type="button" className="auth-primary-button" onClick={() => onNavigate("signup")}>
+              Create account
+            </button>
+            <button type="button" className="auth-secondary-button" onClick={onPlay}>
+              Back home
+            </button>
+          </div>
+        </AuthShell>
+      );
+    }
+
     return (
       <section className="account-settings-page">
         <header className="settings-header">
@@ -1161,6 +1305,7 @@ function AuthPage({
             profile={profile}
             onProfileSaved={onProfileSaved}
             onLogout={onLogout}
+            onProgressReset={onProgressReset}
           />
         )}
       </section>
@@ -1168,6 +1313,34 @@ function AuthPage({
   }
 
   if (session && mode !== "reset") {
+    if (isAnonymousUser(session.user)) {
+      return (
+        <AuthShell
+          eyebrow="Guest session"
+          title="Make your StanZer record permanent"
+          description="Guest room scores disappear with this browser session. Create an account to start saving stats, badges, wins, and rank."
+        >
+          <div className="auth-session-actions">
+            <button
+              type="button"
+              className="auth-primary-button"
+              onClick={() => {
+                void Promise.resolve(onLogout()).then(() => onNavigate("signup"));
+              }}
+            >
+              Create account
+            </button>
+            <button type="button" className="auth-secondary-button" onClick={onPlay}>
+              Continue as guest
+            </button>
+          </div>
+          <p className="auth-field-help">
+            Creating an account ends this temporary guest identity. Finish or leave an active room first.
+          </p>
+        </AuthShell>
+      );
+    }
+
     return (
       <AuthShell
         eyebrow="Session active"
@@ -1252,6 +1425,7 @@ function AuthPage({
         onNavigate={onNavigate}
         onAuthenticated={onAuthenticated}
         onProfileSaved={onProfileSaved}
+        onGuest={onGuest}
       />
     </AuthShell>
   );

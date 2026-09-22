@@ -15,6 +15,8 @@ import {
   type CompactPlayerBadge,
 } from "../lib/playerIdentity";
 import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
+import { createEmptyTrackTestStats } from "../lib/stats";
+import { isAnonymousUser } from "../lib/authIdentity";
 
 type LeaderboardProps = {
   onPlay: () => void;
@@ -136,9 +138,10 @@ function Leaderboard({
       setIsGlobalLoading(true);
       setGlobalError("");
 
+      const isGuest = isAnonymousUser(session?.user);
       const [{ data, error }, cloudStats] = await Promise.all([
         fetchGlobalLeaderboard(),
-        session?.user
+        session?.user && !isGuest
           ? fetchCloudBadgeStats(session.user)
           : Promise.resolve({ data: null, error: null }),
       ]);
@@ -149,7 +152,11 @@ function Leaderboard({
 
       setGlobalData(data);
       setGlobalError(error || "");
-      setStats(cloudStats.data || getTrackTestStats());
+      setStats(
+        isGuest
+          ? createEmptyTrackTestStats()
+          : cloudStats.data || getTrackTestStats()
+      );
       setIsGlobalLoading(false);
     }
 
@@ -207,7 +214,9 @@ function Leaderboard({
           are never shown here.
         </p>
         <p className="cloud-sync-message">
-          {session
+          {isAnonymousUser(session?.user)
+            ? "Guest session. Create an account to save stats, badges, wins, and leaderboard progress."
+            : session
             ? "Signed in. Your completed cloud-saved quizzes can appear in Global Arena."
             : "Log in to save your stats across devices. Local stats are stored on this browser."}
         </p>

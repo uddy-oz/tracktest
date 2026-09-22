@@ -73,6 +73,14 @@ export function setLocalFeaturedBadgeIds(
   }
 }
 
+export function clearLocalFeaturedBadgeIds() {
+  try {
+    localStorage.removeItem(FEATURED_BADGES_STORAGE_KEY);
+  } catch {
+    // Local storage can be unavailable in privacy-restricted contexts.
+  }
+}
+
 export async function fetchCurrentUserFeaturedBadgeIds(
   user: User,
   username?: string | null

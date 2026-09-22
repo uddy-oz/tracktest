@@ -243,6 +243,7 @@ type ArenaPageProps = {
   profile: UserProfile | null;
   onHome: () => void;
   onLogin: () => void;
+  onGuest?: () => Promise<string>;
   inviteCode?: string | null;
   recoveredRoom?: ArenaRoom | null;
   onArenaRoomChange?: (room: ArenaRoom | null) => void;
@@ -257,6 +258,7 @@ function ArenaPage({
   profile,
   onHome,
   onLogin,
+  onGuest,
   inviteCode,
   recoveredRoom,
   onArenaRoomChange,
@@ -4385,8 +4387,32 @@ function ArenaPage({
           </div>
 
           {!session && (
-            <p className="arena-note">
-              Log in to create or join Arena rooms.
+            <div className="arena-guest-entry">
+              <p className="arena-note">
+                Log in to save multiplayer progression, or enter as a temporary guest.
+              </p>
+              <div className="arena-guest-actions">
+                <button type="button" className="secondary-button" onClick={onLogin}>
+                  Log in
+                </button>
+                {onGuest && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      void onGuest().then((error) => error && setMessage(error));
+                    }}
+                  >
+                    Play as Guest
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {session?.user.is_anonymous && (
+            <p className="arena-guest-banner">
+              Guest session. Create an account to save stats, badges, and wins.
             </p>
           )}
 

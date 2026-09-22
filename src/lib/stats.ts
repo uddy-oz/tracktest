@@ -121,7 +121,7 @@ export function createEmptyArenaProgress(): ArenaProgressStats {
   };
 }
 
-function createEmptyStats(): TrackTestStats {
+export function createEmptyTrackTestStats(): TrackTestStats {
   return {
     version: 1,
     quizResults: [],
@@ -307,13 +307,13 @@ export function getTrackTestStats() {
     const storedStats = localStorage.getItem(STATS_STORAGE_KEY);
 
     if (!storedStats) {
-      return createEmptyStats();
+      return createEmptyTrackTestStats();
     }
 
     const parsedStats: unknown = JSON.parse(storedStats);
 
     if (!isTrackTestStats(parsedStats)) {
-      return createEmptyStats();
+      return createEmptyTrackTestStats();
     }
 
     return {
@@ -325,7 +325,7 @@ export function getTrackTestStats() {
     };
   } catch (error) {
     console.error("Could not load TrackTest stats:", error);
-    return createEmptyStats();
+    return createEmptyTrackTestStats();
   }
 }
 

@@ -6252,3 +6252,85 @@ button:active:not(:disabled) {
     animation: none;
   }
 }
+
+.nav-guest-tag {
+  border: 1px solid rgba(36, 213, 232, 0.55);
+  color: #7cebf5;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.arena-guest-entry {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid rgba(36, 213, 232, 0.28);
+  background: rgba(36, 213, 232, 0.06);
+}
+
+.arena-guest-actions,
+.settings-reset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.arena-guest-banner {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid #24d5e8;
+  color: #b8c6d8;
+  background: rgba(36, 213, 232, 0.07);
+  font-size: 13px;
+}
+
+.auth-guest-button {
+  margin-top: 2px;
+}
+
+.settings-danger-zone {
+  border-color: rgba(255, 112, 67, 0.45);
+  background: rgba(255, 112, 67, 0.04);
+}
+
+.settings-reset-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 4, 10, 0.82);
+}
+
+.settings-reset-dialog {
+  width: min(460px, 100%);
+  padding: 24px;
+  border: 1px solid rgba(255, 112, 67, 0.55);
+  background: #171d2d;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
+.settings-reset-dialog h3 {
+  margin: 6px 0 10px;
+}
+
+.settings-reset-dialog label {
+  display: block;
+  margin: 18px 0 6px;
+  color: #eaf4f8;
+  font-weight: 700;
+}
+
+.settings-reset-dialog input {
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 112, 67, 0.55);
+  background: #070a12;
+  color: #eaf4f8;
+  padding: 10px 12px;
+}

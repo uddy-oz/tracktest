@@ -15,6 +15,7 @@ type NavbarProps = {
   session: Session | null;
   profile: UserProfile | null;
   identityBadges: CompactPlayerBadge[] | null;
+  isGuest?: boolean;
   activeView: "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
 };
 
@@ -30,6 +31,7 @@ function Navbar({
   session,
   profile,
   identityBadges,
+  isGuest = false,
   activeView,
 }: NavbarProps) {
   const accountLabel = profile?.username
@@ -89,6 +91,7 @@ function Navbar({
               onClick={profile?.username ? onShowProfile : onShowAuth}
             >
               <span>{accountLabel}</span>
+              {isGuest && <span className="nav-guest-tag">Guest</span>}
               {identityBadges && (
                 <PlayerIdentityBadges badges={accountBadges} compact />
               )}
@@ -98,9 +101,9 @@ function Navbar({
               className={`nav-link-button ${
                 activeView === "auth" ? "active" : ""
               }`}
-              onClick={onShowSettings}
+              onClick={isGuest ? onShowAuth : onShowSettings}
             >
-              Settings
+              {isGuest ? "Create account" : "Settings"}
             </button>
             <button type="button" className="nav-login-button" onClick={onLogout}>
               Logout

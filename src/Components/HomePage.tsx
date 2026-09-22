@@ -13,7 +13,12 @@ import {
   isArenaRoomRecoverableForUser,
   type ArenaRoom,
 } from "../lib/arenaRooms";
-import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
+import {
+  createEmptyTrackTestStats,
+  getTrackTestStats,
+  type TrackTestStats,
+} from "../lib/stats";
+import { isAnonymousUser } from "../lib/authIdentity";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 
@@ -71,6 +76,13 @@ function HomePage({
     async function loadHomeData() {
       if (!session?.user) {
         setStats(getTrackTestStats());
+        setStatsSource("local");
+        setGlobalRank(null);
+        return;
+      }
+
+      if (isAnonymousUser(session.user)) {
+        setStats(createEmptyTrackTestStats());
         setStatsSource("local");
         setGlobalRank(null);
         return;

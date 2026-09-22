@@ -23,6 +23,13 @@ import { getCompactPlayerBadges, type CompactPlayerBadge } from "./lib/playerIde
 import { ensureUserProfile, validateUsername, type UserProfile } from "./lib/profiles";
 import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
+import {
+  clearGuestName,
+  createGuestName,
+  getGuestName,
+  isAnonymousUser,
+  rememberGuestName,
+} from "./lib/authIdentity";
 
 const SinglePlayerPage = lazy(() => import("./Components/SinglePlayerPage"));
 const Quiz = lazy(() => import("./Components/Quiz"));
@@ -172,6 +179,40 @@ function App() {
     return room;
   }, [session?.user]);
 
+  const startGuestSession = useCallback(async () => {
+    if (!supabase) {
+      return "Supabase is not configured yet.";
+    }
+
+    if (session?.user && !isAnonymousUser(session.user)) {
+      showMultiplayer();
+      return "";
+    }
+
+    const guestName = getGuestName(session?.user) || createGuestName();
+    rememberGuestName(guestName);
+
+    const { data, error } = await supabase.auth.signInAnonymously({
+      options: {
+        data: {
+          guest_name: guestName,
+          display_name: guestName,
+        },
+      },
+    });
+
+    if (error || !data.user) {
+      clearGuestName();
+      return error?.message || "Could not start a guest session.";
+    }
+
+    navigateToInternalPath(
+      window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
+    );
+    window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
+    return "";
+  }, [session?.user]);
+
   const handleArenaRoomChange = useCallback(
     (room: ArenaRoom | null) => {
       arenaRecoveryGenerationRef.current += 1;
@@ -267,6 +308,11 @@ function App() {
         return;
       }
 
+      if (isAnonymousUser(session.user)) {
+        setIdentityBadges([]);
+        return;
+      }
+
       setIdentityBadges(null);
 
       const { data, error } = await fetchCloudBadgeStats(session.user);
@@ -288,6 +334,20 @@ function App() {
         setProfile(null);
         setIsProfileLoading(false);
         await loadIdentityBadges();
+        return;
+      }
+
+      if (isAnonymousUser(session.user)) {
+        const guestName = getGuestName(session.user) || createGuestName();
+        rememberGuestName(guestName);
+        setProfile({
+          id: session.user.id,
+          email: null,
+          username: guestName,
+          displayName: guestName,
+        });
+        setIdentityBadges([]);
+        setIsProfileLoading(false);
         return;
       }
 
@@ -329,6 +389,12 @@ function App() {
       setIdentityBadges(
         getCompactPlayerBadges(localStats, getArenaBadges(localStats))
       );
+      setProgressionRevision((revision) => revision + 1);
+      return;
+    }
+
+    if (isAnonymousUser(session.user)) {
+      setIdentityBadges([]);
       setProgressionRevision((revision) => revision + 1);
       return;
     }
@@ -475,6 +541,10 @@ function App() {
   }
 
   function showProfile() {
+    if (session?.user && isAnonymousUser(session.user)) {
+      showAuth("signup");
+      return;
+    }
     if (profile?.username) {
       showPublicProfile(profile.username);
       return;
@@ -519,6 +589,7 @@ function App() {
     }
 
     await supabase.auth.signOut({ scope: "local" });
+    clearGuestName();
     setSession(null);
     setProfile(null);
     setIdentityBadges(null);
@@ -543,8 +614,10 @@ function App() {
   }
 
   const isPasswordRecovery = activeView === "auth" && authMode === "reset";
+  const isGuestSession = isAnonymousUser(session?.user);
   const mustCompleteUsername =
     Boolean(session?.user) &&
+    !isGuestSession &&
     !isProfileLoading &&
     !hasCompleteUsername(profile) &&
     !isPasswordRecovery;
@@ -563,6 +636,7 @@ function App() {
         session={session}
         profile={profile}
         identityBadges={identityBadges}
+        isGuest={isGuestSession}
         activeView={activeView}
       />
 
@@ -611,7 +685,7 @@ function App() {
           selectedAlbum={selectedAlbum}
           onRestartApp={restartApp}
           onStatsUpdated={refreshIdentityBadges}
-          user={session?.user || null}
+          user={isGuestSession ? null : session?.user || null}
         />
       )}
 
@@ -630,6 +704,7 @@ function App() {
           profile={profile}
           onHome={showHome}
           onLogin={() => showAuth("login", window.location.pathname)}
+          onGuest={startGuestSession}
           inviteCode={arenaInviteCode}
           recoveredRoom={activeArenaRoom}
           onArenaRoomChange={handleArenaRoomChange}
@@ -652,6 +727,8 @@ function App() {
           onProfileSaved={setProfile}
           onLogout={logoutSupabase}
           onPlay={showHome}
+          onGuest={startGuestSession}
+          onProgressReset={refreshIdentityBadges}
         />
       )}
 
