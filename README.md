@@ -158,7 +158,16 @@ npm.cmd run build
 
 ## Testing
 
-There is currently no automated end-to-end multiplayer suite, so release verification combines TypeScript/Vite compilation with a multi-device manual matrix.
+Targeted lifecycle checks cover stale round identity and SQL phase guards. Full multiplayer release verification still combines those checks with a multi-device manual matrix.
+
+```bash
+npm.cmd run test:arena-rounds
+npm.cmd run test:arena-sql
+npm.cmd run build
+npm.cmd run lint
+```
+
+For browser media verification, run the dev server and open `/tools/arena-audio-harness.html`. Add `?stanzerDebug=1` to an Arena URL to enable structured round, RPC, and media diagnostics for that browser session.
 
 1. Run `npm.cmd run build` and `npm.cmd run lint`.
 2. Verify signup validation, email confirmation, mandatory unique username creation, login, logout, returning sessions, and invite redirect after login.
@@ -198,8 +207,7 @@ StanZer keeps its React/Vite/CSS stack and does not copy a third-party interface
 - Multiplayer depends on network access to Supabase. Server timestamps reduce drift, but UI updates are not frame-perfect on high-latency connections.
 - Guest multiplayer requires Supabase Anonymous Sign-Ins. CAPTCHA/Turnstile and a trusted scheduled stale-guest cleanup should be configured before broad public promotion.
 - Championship tournament gameplay is not implemented.
-- The repository does not yet include automated browser or multi-client integration tests.
-- There is no automated unit or browser test suite yet. The current ESLint configuration also reports pre-existing effect/dependency findings in timing-sensitive Solo and multiplayer code; those should be resolved alongside regression tests rather than by changing hook dependencies blindly.
+- The repository does not yet include automated multi-client browser integration tests. The current ESLint configuration also reports pre-existing effect/dependency findings in timing-sensitive Solo and multiplayer code; those should be resolved alongside broader regression tests rather than by changing hook dependencies blindly.
 - Email confirmation and password recovery depend on correct Supabase redirect URL and SMTP configuration.
 - Route-level chunks reduce the initial bundle below Vite's advisory threshold, but the shared base bundle remains a future optimization target.
 

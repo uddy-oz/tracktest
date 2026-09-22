@@ -2,6 +2,7 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
+import { logArenaDiagnostic } from "./arenaDiagnostics";
 
 export type ArenaRoomMode = "duel" | "group_lobby" | "party_mode";
 export type PartyAudioStatus = "idle" | "pending" | "playing" | "skipped";
@@ -893,11 +894,30 @@ export async function syncCompetitiveArenaTimeline(roomId: string) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
-  const { error } = await supabase.rpc("sync_competitive_arena_timeline", {
-    target_room_id: roomId,
-  });
+  const payload = { target_room_id: roomId };
+  let { error } = await supabase.rpc(
+    "sync_competitive_arena_timeline_v2",
+    payload
+  );
+
+  // The fallback keeps the frontend deployable before the companion SQL
+  // migration is applied. PostgREST uses PGRST202 for an unknown RPC.
+  if (error?.code === "PGRST202") {
+    ({ error } = await supabase.rpc(
+      "sync_competitive_arena_timeline",
+      payload
+    ));
+  }
 
   if (error) {
+    logArenaDiagnostic("RPC_ERROR", {
+      rpc: "sync_competitive_arena_timeline",
+      payload,
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     return { room: null, error: getFriendlyArenaError(error.message) };
   }
 
@@ -928,6 +948,17 @@ export async function acknowledgeCompetitiveAudioReady({
       target_preview_url: previewUrl,
     }
   );
+
+  if (error) {
+    logArenaDiagnostic("RPC_ERROR", {
+      rpc: "acknowledge_competitive_audio_ready",
+      payload: { roomId, roundId, questionIndex, previewUrl },
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+  }
 
   return {
     result: error ? null : (data as Record<string, unknown>),
@@ -962,6 +993,23 @@ export async function reportCompetitiveAudioFailure({
       failure_reason: reason.slice(0, 240),
     }
   );
+
+  if (error) {
+    logArenaDiagnostic("RPC_ERROR", {
+      rpc: "report_competitive_audio_failure",
+      payload: {
+        roomId,
+        roundId,
+        questionIndex,
+        previewUrl,
+        reason: reason.slice(0, 240),
+      },
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+  }
 
   return {
     result: error ? null : (data as Record<string, unknown>),

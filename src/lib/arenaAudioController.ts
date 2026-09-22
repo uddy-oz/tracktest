@@ -1,3 +1,5 @@
+import { getArenaClientId, isArenaDebugEnabled } from "./arenaDiagnostics";
+
 export type ArenaAudioPhase =
   | "idle"
   | "preparing_audio"
@@ -10,6 +12,8 @@ export type ArenaAudioPhase =
 
 export type ArenaAudioRound = {
   roomId: string;
+  matchGeneration: number;
+  userId?: string | null;
   mode: "duel" | "group_lobby" | "party_mode";
   roundKey: string;
   roundId: string;
@@ -116,46 +120,12 @@ const MINIMUM_PROGRESS_SECONDS = 0.08;
 const MINIMUM_BUFFER_SECONDS = 0.2;
 const MAXIMUM_TIMELINE_DRIFT_SECONDS = 0.25;
 
-function getClientId() {
-  const storageKey = "stanzer.arenaAudioClientId";
-  const createId = () =>
-    typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `arena-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-  try {
-    const storedId = window.sessionStorage.getItem(storageKey);
-    if (storedId) return storedId;
-
-    const nextId = createId();
-    window.sessionStorage.setItem(storageKey, nextId);
-    return nextId;
-  } catch {
-    return createId();
-  }
-}
-
 function getErrorDetails(error: unknown) {
   if (error instanceof DOMException || error instanceof Error) {
     return { name: error.name, message: error.message };
   }
 
   return { name: "UnknownError", message: String(error) };
-}
-
-function isDebugEnabled() {
-  if (import.meta.env.DEV) return true;
-
-  try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("audioDebug") === "1") {
-      window.localStorage.setItem("stanzer.arenaAudioDebug", "1");
-      return true;
-    }
-    return window.localStorage.getItem("stanzer.arenaAudioDebug") === "1";
-  } catch {
-    return false;
-  }
 }
 
 function sameMediaUrl(left: string, right: string) {
@@ -212,8 +182,8 @@ export class ArenaAudioController {
   private clipStopTimer: number | null = null;
   private stallTimer: number | null = null;
   private stallRecoveryRoundKey = "";
-  private clientId = getClientId();
-  private debugEnabled = isDebugEnabled();
+  private clientId = getArenaClientId();
+  private debugEnabled = isArenaDebugEnabled();
   private mediaUnlocked = false;
 
   setCallbacks(callbacks: ArenaAudioCallbacks) {
@@ -1196,6 +1166,8 @@ export class ArenaAudioController {
       event,
       clientId: this.clientId,
       roomId: round?.roomId || null,
+      matchGeneration: round?.matchGeneration ?? null,
+      userId: round?.userId || null,
       mode: round?.mode || null,
       roundId: round?.roundId || null,
       roundIndex: round?.roundIndex ?? null,

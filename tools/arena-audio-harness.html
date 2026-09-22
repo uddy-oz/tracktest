@@ -138,6 +138,7 @@
             controller.prepareRound(
               {
                 roomId: "harness",
+                matchGeneration: 1,
                 mode: "duel",
                 roundKey,
                 roundId: `round-${index}`,
@@ -193,6 +194,7 @@
           const currentRoundKey = "harness:stale:current";
           controller.prepareRound({
             roomId: "harness",
+            matchGeneration: 1,
             mode: "duel",
             roundKey: staleRoundKey,
             roundId: "stale-old",
@@ -209,6 +211,7 @@
           });
           controller.prepareRound({
             roomId: "harness",
+            matchGeneration: 1,
             mode: "duel",
             roundKey: currentRoundKey,
             roundId: "stale-current",
@@ -234,6 +237,7 @@
           const failureRoundKey = "harness:failure:bounded";
           controller.prepareRound({
             roomId: "harness",
+            matchGeneration: 1,
             mode: "duel",
             roundKey: failureRoundKey,
             roundId: "failure-bounded",

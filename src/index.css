@@ -2405,6 +2405,32 @@ button:hover {
   --arena-mode-accent-glow: rgba(255, 215, 106, 0.24);
 }
 
+.arena-page[class*="arena-theme-"] .eyebrow,
+.arena-page[class*="arena-theme-"] .duel-room-status {
+  color: var(--arena-mode-accent);
+}
+
+.arena-page[class*="arena-theme-"] .duel-builder,
+.arena-page[class*="arena-theme-"] .duel-lobby-list,
+.arena-page[class*="arena-theme-"] .duel-room-card {
+  border-color: color-mix(in srgb, var(--arena-mode-accent), transparent 58%);
+}
+
+.arena-page[class*="arena-theme-"] .duel-album-card:hover,
+.arena-page[class*="arena-theme-"] .duel-album-card.selected {
+  border-color: var(--arena-mode-accent);
+  box-shadow: 0 10px 30px var(--arena-mode-accent-glow);
+}
+
+.arena-page[class*="arena-theme-"] .duel-room-status {
+  border-color: color-mix(in srgb, var(--arena-mode-accent), transparent 48%);
+  background: var(--arena-mode-accent-soft);
+}
+
+.arena-page[class*="arena-theme-"] :is(button, input):focus-visible {
+  outline-color: var(--arena-mode-accent);
+}
+
 .arena-hero {
   width: min(100%, 760px);
   margin: 0 auto 28px;

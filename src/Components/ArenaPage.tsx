@@ -47,6 +47,11 @@ import {
   type SpotifyTrack,
 } from "../lib/spotifyApi";
 import { sounds } from "../lib/sounds";
+import { logArenaDiagnostic } from "../lib/arenaDiagnostics";
+import {
+  canReportCompetitiveAudioFailure,
+  getCompetitiveRoundKey,
+} from "../lib/arenaRoundLifecycle";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 
 const arenaModes = [
@@ -369,11 +374,29 @@ function ArenaPage({
         errorName,
         errorMessage,
       });
+      const room = activeRoomSnapshotRef.current;
       if (
-        activeRoomSnapshotRef.current?.mode !== "party_mode" &&
-        activeRoomSnapshotRef.current?.status === "active"
+        room?.mode !== "party_mode" &&
+        room?.status === "active" &&
+        room.competitiveRoundPhase === "preparing_audio"
       ) {
         void failCompetitiveQuestionAudio(audioMessage, roundKey);
+      } else if (room?.mode !== "party_mode" && room?.status === "active") {
+        logArenaDiagnostic("STALE_AUDIO_FAILURE_IGNORED", {
+          roomId: room.id,
+          matchGeneration: room.roundNumber,
+          roundId: room.competitiveRoundId,
+          roundIndex: room.competitiveQuestionIndex,
+          serverPhase: room.competitiveRoundPhase,
+          clientPhase: duelPhaseRef.current,
+          roundKey,
+          audioMessage,
+          errorName,
+          errorMessage,
+        });
+        setDuelAudioFallbackMessage(
+          "Audio stopped on this device. The shared round continues."
+        );
       } else {
         enterDuelAudioFallback(audioMessage, roundKey);
       }
@@ -392,9 +415,16 @@ function ArenaPage({
     : activeRoom?.competitiveQuestionIndex || 0;
   const currentDuelQuestion = activeRoom?.quizQuestions[gameQuestionIndex];
   const activeQuestionRunKey = activeRoom
-    ? `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.status}:${
-        activeRoom.competitiveRoundId || "party"
-      }:${gameQuestionIndex}`
+    ? activeRoom.mode === "party_mode"
+      ? `${activeRoom.id}:${activeRoom.roundNumber}:party:${gameQuestionIndex}`
+      : activeRoom.competitiveRoundId
+        ? getCompetitiveRoundKey({
+            roomId: activeRoom.id,
+            matchGeneration: activeRoom.roundNumber,
+            roundId: activeRoom.competitiveRoundId,
+            questionIndex: gameQuestionIndex,
+          })
+        : `${activeRoom.id}:${activeRoom.roundNumber}:pending:${gameQuestionIndex}`
     : "";
   activeRoomIdRef.current = activeRoom?.id || null;
   activeRoomSnapshotRef.current = activeRoom;
@@ -769,6 +799,8 @@ function ArenaPage({
     arenaAudioController.prepareRound(
       {
         roomId: activeRoom.id,
+        matchGeneration: activeRoom.roundNumber,
+        userId: session?.user.id,
         mode: activeRoom.mode,
         roundKey,
         roundId:
@@ -790,6 +822,7 @@ function ArenaPage({
     gameQuestionIndex,
     isPartyHost,
     isPartyMode,
+    session?.user.id,
   ]);
 
   useEffect(() => {
@@ -1805,29 +1838,50 @@ function ArenaPage({
   ) {
     const room = activeRoomSnapshotRef.current;
     const question = room?.quizQuestions[room.competitiveQuestionIndex];
+    const roundIdentity = room?.competitiveRoundId
+      ? {
+          roomId: room.id,
+          matchGeneration: room.roundNumber,
+          roundId: room.competitiveRoundId,
+          questionIndex: room.competitiveQuestionIndex,
+        }
+      : null;
 
     if (
       !room ||
       room.mode === "party_mode" ||
-      room.status !== "active" ||
-      !room.competitiveRoundId ||
+      !roundIdentity ||
       activeQuestionRunKeyRef.current !== expectedRoundKey ||
+      !canReportCompetitiveAudioFailure(
+        {
+          ...roundIdentity,
+          mode: room.mode,
+          status: room.status,
+          phase: room.competitiveRoundPhase,
+        },
+        roundIdentity
+      ) ||
       competitiveAudioFailureKeyRef.current === expectedRoundKey
     ) {
+      logArenaDiagnostic("AUDIO_FAILURE_REPORT_IGNORED", {
+        roomId: room?.id,
+        matchGeneration: room?.roundNumber,
+        roundId: room?.competitiveRoundId,
+        roundIndex: room?.competitiveQuestionIndex,
+        serverPhase: room?.competitiveRoundPhase,
+        clientPhase: duelPhaseRef.current,
+        expectedRoundKey,
+        currentRoundKey: activeQuestionRunKeyRef.current,
+        reason,
+      });
       return;
     }
 
     competitiveAudioFailureKeyRef.current = expectedRoundKey;
-    stopDuelClip(false, expectedRoundKey, "competitive-audio-failed");
-    duelPhaseRef.current = "audioSkipped";
-    setDuelPhase("audioSkipped");
-    setDuelAudioFallbackMessage(
-      "Audio unavailable on a player device. Question skipped for everyone."
-    );
 
-    const { error } = await reportCompetitiveAudioFailure({
+    const { result, error } = await reportCompetitiveAudioFailure({
       roomId: room.id,
-      roundId: room.competitiveRoundId,
+      roundId: roundIdentity.roundId,
       questionIndex: room.competitiveQuestionIndex,
       previewUrl: question?.correctTrack.previewUrl || "",
       reason,
@@ -1837,6 +1891,27 @@ function ArenaPage({
       competitiveAudioFailureKeyRef.current = "";
       setMessage(`Could not synchronize the audio skip: ${error}`);
       return;
+    }
+
+    if (
+      activeQuestionRunKeyRef.current === expectedRoundKey &&
+      result?.accepted === true
+    ) {
+      stopDuelClip(false, expectedRoundKey, "competitive-audio-failed");
+      duelPhaseRef.current = "audioSkipped";
+      setDuelPhase("audioSkipped");
+      setDuelAudioFallbackMessage(
+        "Audio unavailable on a player device. Question skipped for everyone."
+      );
+    } else {
+      competitiveAudioFailureKeyRef.current = "";
+      logArenaDiagnostic("AUDIO_FAILURE_REJECTED_BY_SERVER", {
+        roomId: room.id,
+        matchGeneration: room.roundNumber,
+        roundId: roundIdentity.roundId,
+        roundIndex: roundIdentity.questionIndex,
+        result,
+      });
     }
 
     const refreshed = await fetchArenaRoom(room.id);
@@ -1872,10 +1947,14 @@ function ArenaPage({
     }
 
     if (isCompetitiveMode) {
-      void failCompetitiveQuestionAudio(
-        "Local playback remained unavailable after retry.",
-        expectedRoundKey
-      );
+      if (activeRoomSnapshotRef.current?.competitiveRoundPhase === "preparing_audio") {
+        void failCompetitiveQuestionAudio(
+          "Local playback remained unavailable after retry.",
+          expectedRoundKey
+        );
+      } else {
+        void recordDuelAnswer("", true, "audioUnavailable");
+      }
       return;
     }
 
@@ -2098,10 +2177,25 @@ function ArenaPage({
           return;
         }
 
-        await failCompetitiveQuestionAudio(
-          playResult.message,
-          questionRunKey
+        logArenaDiagnostic("PLAYBACK_FAILED_AFTER_ACTIVATION", {
+          roomId: activeRoom.id,
+          matchGeneration: activeRoom.roundNumber,
+          roundId: activeRoom.competitiveRoundId,
+          roundIndex: activeRoom.competitiveQuestionIndex,
+          serverPhase: activeRoom.competitiveRoundPhase,
+          clientPhase: duelPhaseRef.current,
+          roundKey: questionRunKey,
+          reason: playResult.message,
+        });
+        duelPhaseRef.current = "audioBlocked";
+        setDuelPhase("audioBlocked");
+        setDuelAudioFallbackMessage(
+          "Audio unavailable on this device. The shared round continues."
         );
+        clearDuelAudioFallbackTimer();
+        duelAudioFallbackTimerRef.current = window.setTimeout(() => {
+          skipDuelQuestionForAudio(questionRunKey);
+        }, AUDIO_BLOCKED_SKIP_DELAY_MS);
         return;
       }
 
@@ -2114,6 +2208,11 @@ function ArenaPage({
 
   function resetDuelLocalState(nextPhase: DuelPhase = "idle") {
     arenaAudioController.stopAll("reset-local-state");
+    competitiveQuestionKeyRef.current = "";
+    competitiveAudioStartKeyRef.current = "";
+    competitiveAudioReadyKeyRef.current = "";
+    competitiveAudioFailureKeyRef.current = "";
+    competitiveCountdownSoundKeyRef.current = "";
     duelClipCompletedRef.current = false;
     setDuelScore(0);
     setDuelCorrectAnswers(0);

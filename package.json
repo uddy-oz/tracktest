@@ -8,6 +8,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:arena-rounds": "node --experimental-strip-types tools/arena-round-lifecycle.test.ts",
+    "test:arena-sql": "node tools/check-arena-sql.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
