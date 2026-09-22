@@ -60,12 +60,11 @@
     <script type="module">
       import { ArenaAudioController } from "/src/lib/arenaAudioController.ts";
 
-      const TEST_ALBUM_ID = "1584449196";
+      const harnessParams = new URLSearchParams(window.location.search);
+      const TEST_ALBUM_ID = harnessParams.get("album") || "1584449196";
       const TEST_ROUNDS = 12;
       const TEST_CLIP_SECONDS = 2;
-      const repeatOnePreview = new URLSearchParams(window.location.search).has(
-        "repeat"
-      );
+      const repeatOnePreview = harnessParams.has("repeat");
       const output = document.querySelector("#results");
       const runButton = document.querySelector("#run");
       const audio = document.querySelector("#arena-audio");

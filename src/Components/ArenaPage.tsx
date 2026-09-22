@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
+  acknowledgeCompetitiveLobbyAudioReady,
   acknowledgeCompetitiveAudioReady,
   activateDuelRoom,
   cancelDuelRoom,
@@ -28,6 +29,7 @@ import {
   submitPartyAnswer,
   syncCompetitiveArenaTimeline,
   syncPartyRoomTimeline,
+  startPreparedCompetitiveArenaRoom,
   type ArenaRoom,
   type ArenaRoomMode,
   type ArenaRoomPlayer,
@@ -37,6 +39,7 @@ import type { UserProfile } from "../lib/profiles";
 import { supabase } from "../lib/supabaseClient";
 import {
   ArenaAudioController,
+  type ArenaAudioDiagnosticSnapshot,
   type ArenaAudioPhase,
 } from "../lib/arenaAudioController";
 import {
@@ -47,7 +50,7 @@ import {
   type SpotifyTrack,
 } from "../lib/spotifyApi";
 import { sounds } from "../lib/sounds";
-import { logArenaDiagnostic } from "../lib/arenaDiagnostics";
+import { isArenaDebugEnabled, logArenaDiagnostic } from "../lib/arenaDiagnostics";
 import {
   canReportCompetitiveAudioFailure,
   getCompetitiveRoundKey,
@@ -326,6 +329,10 @@ function ArenaPage({
   const [isDuelMuted, setIsDuelMuted] = useState(sounds.isMuted());
   const [competitiveClockOffsetMs, setCompetitiveClockOffsetMs] = useState(0);
   const [partyClockOffsetMs, setPartyClockOffsetMs] = useState(0);
+  const [isArenaAudioUnlocked, setIsArenaAudioUnlocked] = useState(false);
+  const [lobbyAudioMessage, setLobbyAudioMessage] = useState("");
+  const [audioDebugSnapshot, setAudioDebugSnapshot] =
+    useState<ArenaAudioDiagnosticSnapshot | null>(null);
 
   const duelAudioRef = useRef<HTMLAudioElement | null>(null);
   const duelAudioFallbackTimerRef = useRef<number | null>(null);
@@ -338,6 +345,8 @@ function ArenaPage({
   const competitiveAudioStartKeyRef = useRef<string>("");
   const competitiveAudioReadyKeyRef = useRef<string>("");
   const competitiveAudioFailureKeyRef = useRef<string>("");
+  const competitiveLobbyReadyKeyRef = useRef<string>("");
+  const competitiveLobbyStartKeyRef = useRef<string>("");
   const competitiveRevealSoundKeyRef = useRef<string>("");
   const competitiveCountdownSoundKeyRef = useRef<string>("");
   const partyQuestionKeyRef = useRef<string>("");
@@ -401,6 +410,7 @@ function ArenaPage({
         enterDuelAudioFallback(audioMessage, roundKey);
       }
     },
+    onDiagnostic: setAudioDebugSnapshot,
   });
 
   const isPartyMode = activeRoom?.mode === "party_mode";
@@ -769,11 +779,35 @@ function ArenaPage({
   }, [arenaAudioController]);
 
   useEffect(() => {
+    if (!activeRoom) return;
+    arenaAudioController.noteDiagnostic("SERVER_PHASE_SEEN", {
+      roomStatus: activeRoom.status,
+      serverPhase: isPartyMode
+        ? activeRoom.partyQuestionPhase
+        : activeRoom.competitiveRoundPhase,
+      readyCount: activeRoom.competitiveReadyCount,
+      requiredReadyCount: activeRoom.competitiveRequiredReadyCount,
+    });
+  }, [
+    activeRoom?.id,
+    activeRoom?.status,
+    activeRoom?.roundNumber,
+    activeRoom?.competitiveRoundId,
+    activeRoom?.competitiveRoundPhase,
+    activeRoom?.partyQuestionPhase,
+    activeRoom?.competitiveReadyCount,
+    activeRoom?.competitiveRequiredReadyCount,
+    arenaAudioController,
+    isPartyMode,
+  ]);
+
+  useEffect(() => {
     const roundKey = activeQuestionRunKey;
     const previewUrl = currentDuelQuestion?.correctTrack.previewUrl || "";
     const ownsRoundAudio = Boolean(
       activeRoom &&
-        activeRoom.status === "active" &&
+        (activeRoom.status === "active" ||
+          (isCompetitiveMode && activeRoom.status === "starting")) &&
         roundKey &&
         previewUrl &&
         (!isPartyMode || isPartyHost)
@@ -822,6 +856,87 @@ function ArenaPage({
     gameQuestionIndex,
     isPartyHost,
     isPartyMode,
+    session?.user.id,
+    isCompetitiveMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      !isCompetitiveMode ||
+      activeRoom.status !== "starting" ||
+      !activeRoom.competitiveRoundId ||
+      !currentDuelQuestion ||
+      currentArenaPlayer?.isReady
+    ) {
+      return;
+    }
+
+    const readinessKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.competitiveRoundId}:lobby`;
+    if (competitiveLobbyReadyKeyRef.current === readinessKey) return;
+
+    if (!arenaAudioController.isMediaUnlocked()) {
+      setIsArenaAudioUnlocked(false);
+      setLobbyAudioMessage("Tap to enable game audio before the match starts.");
+      return;
+    }
+
+    competitiveLobbyReadyKeyRef.current = readinessKey;
+    void confirmCompetitiveLobbyAudio(false).finally(() => {
+      if (competitiveLobbyReadyKeyRef.current === readinessKey) {
+        competitiveLobbyReadyKeyRef.current = "";
+      }
+    });
+  }, [
+    activeQuestionRunKey,
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.status,
+    activeRoom?.competitiveRoundId,
+    currentArenaPlayer?.isReady,
+    currentDuelQuestion,
+    isArenaAudioUnlocked,
+    isCompetitiveMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      !isCompetitiveMode ||
+      activeRoom.status !== "starting" ||
+      activeRoom.hostUserId !== session?.user.id
+    ) {
+      return;
+    }
+
+    const presentPlayers = getPresentPlayers(activeRoom);
+    if (
+      presentPlayers.length === 0 ||
+      presentPlayers.some((player) => !player.isReady)
+    ) {
+      return;
+    }
+
+    const startKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.competitiveRoundId}`;
+    if (competitiveLobbyStartKeyRef.current === startKey) return;
+    competitiveLobbyStartKeyRef.current = startKey;
+
+    const startPreparedRoom = async () => {
+      setLobbyAudioMessage("Audio ready on every device. Starting match...");
+      const result = await startPreparedCompetitiveArenaRoom(activeRoom.id);
+      if (result.room) {
+        updateActiveRoom(result.room);
+        resetDuelLocalState("syncing");
+      } else if (result.error) {
+        setLobbyAudioMessage(result.error);
+        competitiveLobbyStartKeyRef.current = "";
+      }
+    };
+
+    void startPreparedRoom();
+  }, [
+    activeRoom,
+    isCompetitiveMode,
     session?.user.id,
   ]);
 
@@ -901,6 +1016,9 @@ function ArenaPage({
           continue;
         }
 
+        arenaAudioController.noteDiagnostic("READY_ACK_ATTEMPTED", {
+          gate: "competitive-round",
+        });
         const { error } = await acknowledgeCompetitiveAudioReady({
           roomId: activeRoom.id,
           roundId: activeRoom.competitiveRoundId!,
@@ -909,6 +1027,9 @@ function ArenaPage({
         });
 
         if (!error) {
+          arenaAudioController.noteDiagnostic("READY_ACK_SUCCESS", {
+            gate: "competitive-round",
+          });
           if (import.meta.env.DEV) {
             console.info("[STANZER_ROUND]", {
               room: activeRoom.id,
@@ -945,6 +1066,10 @@ function ArenaPage({
           return;
         }
 
+        arenaAudioController.noteDiagnostic("READY_ACK_FAILURE", {
+          gate: "competitive-round",
+          message: error,
+        });
         lastError = error;
         await new Promise((resolve) => window.setTimeout(resolve, 750));
       }
@@ -2212,6 +2337,8 @@ function ArenaPage({
     competitiveAudioStartKeyRef.current = "";
     competitiveAudioReadyKeyRef.current = "";
     competitiveAudioFailureKeyRef.current = "";
+    competitiveLobbyReadyKeyRef.current = "";
+    competitiveLobbyStartKeyRef.current = "";
     competitiveCountdownSoundKeyRef.current = "";
     duelClipCompletedRef.current = false;
     setDuelScore(0);
@@ -2224,6 +2351,7 @@ function ArenaPage({
     setDuelRevealCountdown(REVEAL_COUNTDOWN_SECONDS);
     setDuelSelectedAnswer("");
     setDuelAudioFallbackMessage("");
+    setLobbyAudioMessage("");
     setDuelAudioRetryUsed(false);
     setIsDuelClipPlaying(false);
     setIsDuelFinished(false);
@@ -2704,7 +2832,9 @@ function ArenaPage({
     // play() is invoked synchronously from the Join gesture so desktop browsers
     // authorize the persistent Arena media element before asynchronous room work.
     sounds.prime();
-    void arenaAudioController.unlockFromUserGesture();
+    void arenaAudioController
+      .unlockFromUserGesture()
+      .then(setIsArenaAudioUnlocked);
 
     const isAlreadyInRoom = room.players.some(
       (player) => player.userId === session.user.id
@@ -2747,7 +2877,9 @@ function ArenaPage({
     }
 
     sounds.prime();
-    void arenaAudioController.unlockFromUserGesture();
+    void arenaAudioController
+      .unlockFromUserGesture()
+      .then(setIsArenaAudioUnlocked);
 
     if (!session?.user) {
       onLogin();
@@ -2970,6 +3102,82 @@ function ArenaPage({
     ).length;
   }
 
+  async function confirmCompetitiveLobbyAudio(fromUserGesture: boolean) {
+    const room = activeRoomSnapshotRef.current;
+    const question = room?.quizQuestions[0];
+    const roundKey = activeQuestionRunKeyRef.current;
+
+    if (
+      !room ||
+      room.status !== "starting" ||
+      room.mode === "party_mode" ||
+      !room.competitiveRoundId ||
+      !question?.correctTrack.previewUrl ||
+      !roundKey
+    ) {
+      return false;
+    }
+
+    setLobbyAudioMessage("Checking this device's audio...");
+
+    if (fromUserGesture) {
+      sounds.prime();
+      const primed = await arenaAudioController.unlockFromUserGesture();
+      setIsArenaAudioUnlocked(primed);
+      if (!primed) {
+        setLobbyAudioMessage(
+          "Audio is still blocked. Check browser sound permissions, then tap again."
+        );
+        return false;
+      }
+    } else if (!arenaAudioController.isMediaUnlocked()) {
+      setLobbyAudioMessage("Tap to enable game audio before the match starts.");
+      return false;
+    }
+
+    const readyResult = await arenaAudioController.waitUntilRoundReady(
+      roundKey,
+      CLIP_LENGTH_SECONDS,
+      { deadlineMs: Date.now() + 20000, maxAttempts: 3 }
+    );
+
+    if (readyResult.status !== "ready") {
+      const failure =
+        readyResult.status === "failed"
+          ? readyResult.message
+          : "The staged audio changed before it became ready.";
+      setLobbyAudioMessage(`${failure} Tap to retry audio.`);
+      return false;
+    }
+
+    arenaAudioController.noteDiagnostic("READY_ACK_ATTEMPTED", {
+      gate: "competitive-lobby",
+    });
+    const acknowledgement = await acknowledgeCompetitiveLobbyAudioReady({
+      roomId: room.id,
+      roundId: room.competitiveRoundId,
+      previewUrl: question.correctTrack.previewUrl,
+    });
+
+    if (acknowledgement.error) {
+      arenaAudioController.noteDiagnostic("READY_ACK_FAILURE", {
+        gate: "competitive-lobby",
+        message: acknowledgement.error,
+      });
+      setLobbyAudioMessage(`Could not confirm audio readiness: ${acknowledgement.error}`);
+      return false;
+    }
+
+    arenaAudioController.noteDiagnostic("READY_ACK_SUCCESS", {
+      gate: "competitive-lobby",
+    });
+    setIsArenaAudioUnlocked(true);
+    setLobbyAudioMessage("Audio ready. Waiting for the other players...");
+    const refreshed = await fetchArenaRoom(room.id);
+    if (refreshed.room) updateActiveRoom(refreshed.room);
+    return true;
+  }
+
   async function startArenaRoom(roomToStart: ArenaRoom) {
     if (!session?.user) {
       return;
@@ -3032,7 +3240,8 @@ function ArenaPage({
       questions[0]?.correctTrack.previewUrl || "",
       0
     );
-    await mediaUnlock;
+    const didUnlockAudio = await mediaUnlock;
+    setIsArenaAudioUnlocked(didUnlockAudio);
     const activatedRoom = await activateDuelRoom(
       freshRoom.id,
       questions,
@@ -3043,7 +3252,9 @@ function ArenaPage({
     resetDuelLocalState("syncing");
     setMessage(
       activatedRoom.error ||
-        `${freshModeSettings.title} starting. Everyone gets the same questions.`
+        (freshRoom.mode === "party_mode"
+          ? `${freshModeSettings.title} starting. Everyone gets the same questions.`
+          : "First track staged. Checking audio on every device...")
     );
     setIsPreparingDuel(false);
   }
@@ -4506,7 +4717,11 @@ function ArenaPage({
               <h2>{activeRoom.albumName}</h2>
               <p>{activeRoom.artistName}</p>
               <span>
-                {activeRoom.status === "active" ? "Active" : "Waiting to start"}
+                {activeRoom.status === "starting"
+                  ? "Audio check"
+                  : activeRoom.status === "active"
+                    ? "Active"
+                    : "Waiting to start"}
               </span>
             </div>
           </div>
@@ -4516,10 +4731,20 @@ function ArenaPage({
           {usesLiveLeaderboard ? (
             <div className="duel-player-grid group-player-grid">
               {presentPlayers.map((player) => (
-                <div className="duel-player-card" key={player.id}>
+                <div
+                  className={`duel-player-card ${
+                    activeRoom.status === "starting" && player.isReady
+                      ? "audio-ready"
+                      : ""
+                  }`}
+                  key={player.id}
+                >
                   <span>{player.userId === activeRoom.hostUserId ? "Host" : "Player"}</span>
                   <strong>{player.displayName || "Arena Player"}</strong>
                   {player.username && <p>@{player.username}</p>}
+                  {activeRoom.status === "starting" && (
+                    <small>{player.isReady ? "Audio ready" : "Preparing audio..."}</small>
+                  )}
                 </div>
               ))}
               {presentPlayers.length < activeRoom.maxPlayers && (
@@ -4532,20 +4757,57 @@ function ArenaPage({
             </div>
           ) : (
             <div className="duel-player-grid">
-              <div className="duel-player-card">
+              <div className={`duel-player-card ${
+                activeRoom.status === "starting" && hostPlayer?.isReady
+                  ? "audio-ready"
+                  : ""
+              }`}>
                 <span>Host</span>
                 <strong>{hostPlayer?.displayName || "Arena host"}</strong>
                 {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
+                {activeRoom.status === "starting" && (
+                  <small>{hostPlayer?.isReady ? "Audio ready" : "Preparing audio..."}</small>
+                )}
               </div>
-              <div className="duel-player-card">
+              <div className={`duel-player-card ${
+                activeRoom.status === "starting" && guestPlayer?.isReady
+                  ? "audio-ready"
+                  : ""
+              }`}>
                 <span>Joined Player</span>
                 <strong>{guestPlayer?.displayName || "Waiting for rival"}</strong>
                 {guestPlayer?.username && <p>@{guestPlayer.username}</p>}
+                {activeRoom.status === "starting" && guestPlayer && (
+                  <small>{guestPlayer.isReady ? "Audio ready" : "Preparing audio..."}</small>
+                )}
               </div>
             </div>
           )}
 
-          {isHost ? (
+          {activeRoom.status === "starting" ? (
+            <div className="arena-audio-check" aria-live="polite">
+              <div>
+                <p className="eyebrow">Audio Check</p>
+                <strong>
+                  {presentPlayers.filter((player) => player.isReady).length}/
+                  {presentPlayers.length} players ready
+                </strong>
+                <p>
+                  {lobbyAudioMessage ||
+                    "Loading the first track before the shared countdown."}
+                </p>
+              </div>
+              {!currentArenaPlayer?.isReady && (
+                <button
+                  type="button"
+                  className="duel-start-button"
+                  onClick={() => void confirmCompetitiveLobbyAudio(true)}
+                >
+                  {isArenaAudioUnlocked ? "Retry audio check" : "Enable game audio"}
+                </button>
+              )}
+            </div>
+          ) : isHost ? (
             <button
               type="button"
               className="duel-start-button"
@@ -4768,6 +5030,21 @@ function ArenaPage({
         preload="auto"
         aria-hidden="true"
       />
+      {isArenaDebugEnabled() && activeRoom && (
+        <aside className="arena-audio-debug" aria-label="Arena audio diagnostics">
+          <strong>Audio debug</strong>
+          <span>Unlocked: {isArenaAudioUnlocked ? "yes" : "no"}</span>
+          <span>Round: {gameQuestionIndex + 1}</span>
+          <span>Server: {isPartyMode ? activeRoom.partyQuestionPhase : activeRoom.competitiveRoundPhase}</span>
+          <span>Event: {audioDebugSnapshot?.event || "waiting"}</span>
+          <span>Source: {audioDebugSnapshot?.sourceReceived ? "received" : "missing"}</span>
+          <span>Metadata: {(audioDebugSnapshot?.readyState || 0) >= 1 ? "yes" : "no"}</span>
+          <span>Can play: {(audioDebugSnapshot?.readyState || 0) >= 3 ? "yes" : "no"}</span>
+          <span>Network: {audioDebugSnapshot?.networkState ?? "-"}</span>
+          <span>Host: {audioDebugSnapshot?.previewHost || "-"}</span>
+          <span>Error: {audioDebugSnapshot?.errorMessage || "none"}</span>
+        </aside>
+      )}
       <div className="arena-hero">
         <p className="eyebrow">StanZer</p>
         <h1>Multiplayer</h1>

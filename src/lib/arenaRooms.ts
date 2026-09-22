@@ -803,12 +803,73 @@ export async function activateDuelRoom(
     return fetchArenaRoom(roomId);
   }
 
-  const { error } = await supabase.rpc("start_competitive_arena_room", {
+  const { error } = await supabase.rpc("prepare_competitive_arena_room", {
     target_room_id: roomId,
     target_questions: questions,
   });
 
   if (error) {
+    return { room: null, error: getFriendlyArenaError(error.message) };
+  }
+
+  return fetchArenaRoom(roomId);
+}
+
+export async function acknowledgeCompetitiveLobbyAudioReady({
+  roomId,
+  roundId,
+  previewUrl,
+}: {
+  roomId: string;
+  roundId: string;
+  previewUrl: string;
+}) {
+  if (!supabase) {
+    return { result: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc(
+    "acknowledge_competitive_lobby_audio_ready",
+    {
+      target_room_id: roomId,
+      target_round_id: roundId,
+      target_preview_url: previewUrl,
+    }
+  );
+
+  if (error) {
+    logArenaDiagnostic("RPC_ERROR", {
+      rpc: "acknowledge_competitive_lobby_audio_ready",
+      roomId,
+      roundId,
+      code: error.code,
+      message: error.message,
+    });
+  }
+
+  return {
+    result: error ? null : (data as Record<string, unknown>),
+    error: getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function startPreparedCompetitiveArenaRoom(roomId: string) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc(
+    "start_prepared_competitive_arena_room",
+    { target_room_id: roomId }
+  );
+
+  if (error) {
+    logArenaDiagnostic("RPC_ERROR", {
+      rpc: "start_prepared_competitive_arena_room",
+      roomId,
+      code: error.code,
+      message: error.message,
+    });
     return { room: null, error: getFriendlyArenaError(error.message) };
   }
 

@@ -54,11 +54,32 @@ export type ArenaAudioFailure = {
   errorMessage?: string;
 };
 
+export type ArenaAudioDiagnosticSnapshot = {
+  event: string;
+  mediaUnlocked: boolean;
+  roomId: string | null;
+  roundIndex: number | null;
+  phase: ArenaAudioPhase | null;
+  previewHost: string | null;
+  sourceReceived: boolean;
+  readyState: number | null;
+  networkState: number | null;
+  currentTime: number | null;
+  duration: number | null;
+  paused: boolean | null;
+  elapsedMs: number | null;
+  visibilityState: DocumentVisibilityState;
+  errorCode: number | null;
+  errorMessage: string | null;
+  [key: string]: unknown;
+};
+
 type ArenaAudioCallbacks = {
   onPlaybackChange?: (isPlaying: boolean) => void;
   onPlaybackConfirmed?: (roundKey: string) => void;
   onPlaybackStopped?: (roundKey: string, reason: string) => void;
   onPlaybackFailure?: (failure: ArenaAudioFailure) => void;
+  onDiagnostic?: (snapshot: ArenaAudioDiagnosticSnapshot) => void;
 };
 
 type ActivePlayback = {
@@ -107,7 +128,13 @@ type DiagnosticEvent =
   | "MEDIA_WAITING"
   | "MEDIA_STALLED"
   | "MEDIA_ERROR"
-  | "MEDIA_ENDED";
+  | "MEDIA_ENDED"
+  | "MEDIA_ABORTED"
+  | "MEDIA_EMPTIED"
+  | "READY_ACK_ATTEMPTED"
+  | "READY_ACK_SUCCESS"
+  | "READY_ACK_FAILURE"
+  | "SERVER_PHASE_SEEN";
 
 const MEDIA_READY_TIMEOUT_MS = 4000;
 const COMPETITIVE_READY_TIMEOUT_MS = 10500;
@@ -185,6 +212,7 @@ export class ArenaAudioController {
   private clientId = getArenaClientId();
   private debugEnabled = isArenaDebugEnabled();
   private mediaUnlocked = false;
+  private questionReceivedAt = 0;
 
   setCallbacks(callbacks: ArenaAudioCallbacks) {
     this.callbacks = callbacks;
@@ -211,6 +239,8 @@ export class ArenaAudioController {
     audio.addEventListener("ended", this.handleEnded);
     audio.addEventListener("pause", this.handlePause);
     audio.addEventListener("suspend", this.handleSuspend);
+    audio.addEventListener("abort", this.handleAbort);
+    audio.addEventListener("emptied", this.handleEmptied);
 
     if (this.activeRound) {
       this.loadActiveRoundSource("ROUND_RECEIVED");
@@ -237,6 +267,8 @@ export class ArenaAudioController {
     audio.removeEventListener("ended", this.handleEnded);
     audio.removeEventListener("pause", this.handlePause);
     audio.removeEventListener("suspend", this.handleSuspend);
+    audio.removeEventListener("abort", this.handleAbort);
+    audio.removeEventListener("emptied", this.handleEmptied);
     this.audio = null;
   }
 
@@ -271,6 +303,7 @@ export class ArenaAudioController {
       this.pauseCurrentAudio("round-changed");
       this.activePlayback = null;
       this.stallRecoveryRoundKey = "";
+      this.questionReceivedAt = Date.now();
     }
 
     this.activeRound = round;
@@ -307,11 +340,17 @@ export class ArenaAudioController {
 
   unlockFromUserGesture() {
     const audio = this.audio;
-    if (!audio || this.mediaUnlocked || this.activeRound) {
+    if (!audio || this.mediaUnlocked) {
       return Promise.resolve(this.mediaUnlocked);
     }
 
+    const roundToRestore = this.activeRound;
+    const previousMuted = audio.muted;
+    const previousVolume = audio.volume;
     const unlockUrl = createSilentWavDataUrl();
+    this.operationId += 1;
+    this.stopTimers();
+    audio.pause();
     audio.src = unlockUrl;
     audio.muted = false;
     audio.volume = 1;
@@ -319,22 +358,47 @@ export class ArenaAudioController {
     this.log("MEDIA_UNLOCK_REQUESTED");
 
     const playPromise = audio.play();
+    const restorePreparedRound = () => {
+      audio.pause();
+      audio.muted = previousMuted;
+      audio.volume = previousVolume;
+      if (
+        roundToRestore &&
+        this.activeRound?.roundKey === roundToRestore.roundKey
+      ) {
+        audio.src = roundToRestore.previewUrl;
+        audio.load();
+        this.log("AUDIO_LOAD_REQUESTED", { reason: "restore-after-unlock" });
+      } else if (!this.activeRound && sameMediaUrl(audio.src, unlockUrl)) {
+        audio.removeAttribute("src");
+        audio.load();
+      }
+    };
+
     return playPromise
       .then(() => {
         this.mediaUnlocked = true;
         this.log("MEDIA_UNLOCKED");
-        audio.pause();
-        if (!this.activeRound && sameMediaUrl(audio.src, unlockUrl)) {
-          audio.removeAttribute("src");
-          audio.load();
-        }
+        restorePreparedRound();
         return true;
       })
       .catch((error) => {
         const details = getErrorDetails(error);
         this.log("MEDIA_UNLOCK_FAILED", details);
+        restorePreparedRound();
         return false;
       });
+  }
+
+  isMediaUnlocked() {
+    return this.mediaUnlocked;
+  }
+
+  noteDiagnostic(
+    event: "READY_ACK_ATTEMPTED" | "READY_ACK_SUCCESS" | "READY_ACK_FAILURE" | "SERVER_PHASE_SEEN",
+    details: Record<string, unknown> = {}
+  ) {
+    this.log(event, details);
   }
 
   async waitUntilRoundReady(
@@ -579,6 +643,8 @@ export class ArenaAudioController {
       audio.pause();
       audio.currentTime = previousTime;
       audio.muted = previousMuted;
+      this.mediaUnlocked = true;
+      this.log("MEDIA_UNLOCKED", { reason: "user-audio-prime" });
       this.log("PLAY_RESOLVED", { reason: "user-audio-prime" });
       return true;
     } catch (error) {
@@ -1162,7 +1228,15 @@ export class ArenaAudioController {
 
     const audio = this.audio;
     const round = this.activeRound;
-    const snapshot = {
+    const mediaError = audio?.error;
+    const previewHost = (() => {
+      try {
+        return round?.previewUrl ? new URL(round.previewUrl).hostname : null;
+      } catch {
+        return null;
+      }
+    })();
+    const snapshot: ArenaAudioDiagnosticSnapshot = {
       event,
       clientId: this.clientId,
       roomId: round?.roomId || null,
@@ -1173,8 +1247,9 @@ export class ArenaAudioController {
       roundIndex: round?.roundIndex ?? null,
       roundKey: round?.roundKey || null,
       phase: round?.phase || null,
-      previewUrl: round?.previewUrl || null,
-      currentSrc: audio?.currentSrc || audio?.src || null,
+      previewHost,
+      sourceReceived: Boolean(round?.previewUrl),
+      mediaUnlocked: this.mediaUnlocked,
       readyState: audio?.readyState ?? null,
       networkState: audio?.networkState ?? null,
       paused: audio?.paused ?? null,
@@ -1190,9 +1265,17 @@ export class ArenaAudioController {
       generation: this.operationId,
       timestamp: new Date().toISOString(),
       serverTimestamp: round?.serverTimestamp || null,
+      elapsedMs: this.questionReceivedAt
+        ? Math.max(0, Date.now() - this.questionReceivedAt)
+        : null,
+      visibilityState: document.visibilityState,
+      userAgent: navigator.userAgent,
+      errorCode: mediaError?.code ?? null,
+      errorMessage: mediaError?.message || null,
       ...details,
     };
     console.info(`[STANZER_AUDIO] ${JSON.stringify(snapshot)}`);
+    this.callbacks.onDiagnostic?.(snapshot);
   }
 
   private readTimeRanges(ranges: TimeRanges) {
@@ -1251,4 +1334,6 @@ export class ArenaAudioController {
   };
   private handlePause = () => this.log("PAUSE");
   private handleSuspend = () => this.log("SUSPEND");
+  private handleAbort = () => this.log("MEDIA_ABORTED");
+  private handleEmptied = () => this.log("MEDIA_EMPTIED");
 }
