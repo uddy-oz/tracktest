@@ -803,10 +803,19 @@ export async function activateDuelRoom(
     return fetchArenaRoom(roomId);
   }
 
-  const { error } = await supabase.rpc("prepare_competitive_arena_room", {
+  let { error } = await supabase.rpc("prepare_competitive_arena_room", {
     target_room_id: roomId,
     target_questions: questions,
   });
+
+  // Keep deployments playable while the additive lobby-gate migration is
+  // being applied. PostgREST reports an unknown RPC as PGRST202.
+  if (error?.code === "PGRST202") {
+    ({ error } = await supabase.rpc("start_competitive_arena_room", {
+      target_room_id: roomId,
+      target_questions: questions,
+    }));
+  }
 
   if (error) {
     return { room: null, error: getFriendlyArenaError(error.message) };
