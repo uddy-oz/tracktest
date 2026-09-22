@@ -1,21 +1,33 @@
 :root {
-  --arena-bg: #0b0b10;
-  --arena-bg-deep: #07070b;
-  --arena-surface: #1a1a22;
-  --arena-surface-elevated: #222230;
-  --arena-surface-hover: #20202d;
-  --arena-border: #333348;
-  --arena-border-strong: #4b4770;
-  --arena-ink: #f7f4ee;
-  --arena-muted: #aaa6b8;
-  --arena-accent: #7c5cff;
-  --arena-accent-bright: #a78bfa;
-  --arena-accent-cyan: #4fd1ff;
-  --arena-accent-soft: rgba(124, 92, 255, 0.16);
-  --arena-accent-glow: rgba(124, 92, 255, 0.42);
-  --arena-success: #43e58c;
-  --arena-warning: #f3bd5b;
-  --arena-danger: #ff647c;
+  --bg-0: #070a12;
+  --bg-1: #101625;
+  --surface-1: #171d2d;
+  --surface-2: #20283b;
+  --cyan: #24d5e8;
+  --lime: #8dff4f;
+  --pink: #ff3d9a;
+  --gold: #ffd447;
+  --coral: #ff7043;
+  --purple: #7657ff;
+  --text: #eaf4f8;
+  --muted: #95a2b3;
+  --arena-bg: var(--bg-0);
+  --arena-bg-deep: #03050a;
+  --arena-surface: var(--surface-1);
+  --arena-surface-elevated: var(--surface-2);
+  --arena-surface-hover: #252f45;
+  --arena-border: #303a50;
+  --arena-border-strong: #4c5b75;
+  --arena-ink: var(--text);
+  --arena-muted: var(--muted);
+  --arena-accent: var(--purple);
+  --arena-accent-bright: #a997ff;
+  --arena-accent-cyan: var(--cyan);
+  --arena-accent-soft: rgba(118, 87, 255, 0.14);
+  --arena-accent-glow: rgba(118, 87, 255, 0.3);
+  --arena-success: var(--lime);
+  --arena-warning: var(--gold);
+  --arena-danger: var(--coral);
   --arena-bronze: #c98252;
   --arena-silver: #b9c3d4;
   --arena-gold: #f4ce57;
@@ -30,14 +42,15 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-12: 48px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 7px;
+  --radius-xl: 10px;
   --shadow-card: 0 22px 64px rgba(0, 0, 0, 0.28);
   --shadow-focus: 0 0 0 3px rgba(167, 139, 250, 0.22);
   --arena-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --font-display: "Space Grotesk", Arial, sans-serif;
+  --font-display: "Rajdhani", "Space Grotesk", Arial, sans-serif;
+  --font-ui: "Space Grotesk", Arial, sans-serif;
   --font-serif: "Instrument Serif", Georgia, serif;
 }
 
@@ -54,9 +67,9 @@ body {
 }
 
 body {
-  font-family: var(--font-display);
-  background: #111111;
-  color: white;
+  font-family: var(--font-ui);
+  background: var(--bg-0);
+  color: var(--text);
 }
 
 main {
@@ -6333,4 +6346,480 @@ button:active:not(:disabled) {
   background: #070a12;
   color: #eaf4f8;
   padding: 10px 12px;
+}
+
+/* StanZer competitive console system */
+
+body {
+  background-color: var(--bg-0);
+  background-image:
+    linear-gradient(rgba(36, 213, 232, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 213, 232, 0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+h1,
+h2,
+h3,
+.logo,
+.logo-button,
+.score-hero,
+.timer-ring span,
+.start-countdown,
+.rank-number {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3 {
+  text-transform: none;
+}
+
+button {
+  min-height: 44px;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+}
+
+button:focus-visible,
+input:focus-visible,
+[role="button"]:focus-visible {
+  outline-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(36, 213, 232, 0.18);
+}
+
+.navbar {
+  border-bottom: 1px solid rgba(36, 213, 232, 0.14);
+  background: rgba(7, 10, 18, 0.94);
+}
+
+.logo,
+.logo-button {
+  position: relative;
+  color: var(--text);
+  font-size: 27px;
+  letter-spacing: 0;
+}
+
+.logo::after,
+.logo-button::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -7px;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--cyan), var(--purple));
+}
+
+.nav-link-button,
+.nav-login-button {
+  border-radius: 2px;
+}
+
+.nav-link-button.active {
+  color: var(--cyan);
+}
+
+.eyebrow {
+  color: var(--cyan);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.home-dashboard,
+.single-player-page,
+.leaderboard-page,
+.profile-page,
+.arena-page,
+.auth-page,
+.account-settings-page {
+  color: var(--text);
+}
+
+.home-hero-panel > div,
+.home-player-card,
+.home-mode-card,
+.home-panel,
+.single-player-hero > div,
+.single-player-card,
+.single-player-search-panel,
+.single-player-side-panel,
+.player-identity-panel,
+.daily-goals-panel,
+.badge-section,
+.profile-hero,
+.leaderboard-panel,
+.leaderboard-stat,
+.duel-builder,
+.duel-open-rooms,
+.duel-room-screen,
+.arena-status,
+.arena-code-entry,
+.auth-panel,
+.auth-brand-panel,
+.settings-section {
+  border-color: rgba(149, 162, 179, 0.24);
+  border-radius: 7px;
+  background: var(--surface-1);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.25);
+}
+
+.home-hero-panel > div,
+.single-player-hero > div {
+  border-top: 3px solid var(--cyan);
+  background:
+    linear-gradient(115deg, rgba(36, 213, 232, 0.09), transparent 46%),
+    var(--surface-1);
+}
+
+.home-hero-panel h1,
+.single-player-hero h1,
+.arena-hero h1,
+.leaderboard-header h1,
+.profile-hero h1 {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 0.9;
+}
+
+.home-player-card,
+.single-player-card {
+  border-top: 3px solid var(--gold);
+  background:
+    linear-gradient(145deg, rgba(255, 212, 71, 0.07), transparent 40%),
+    var(--surface-1);
+}
+
+.home-player-topline strong {
+  color: var(--gold);
+}
+
+.home-player-stats span,
+.home-list-row,
+.home-badge-pill {
+  border-radius: 4px;
+  border-color: rgba(149, 162, 179, 0.18);
+  background: rgba(7, 10, 18, 0.72);
+}
+
+.home-player-stats strong,
+.home-list-row b {
+  font-family: var(--font-display);
+  font-size: 23px;
+}
+
+.home-mode-card,
+.arena-mode-card {
+  isolation: isolate;
+  border-radius: 5px;
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%);
+}
+
+.home-mode-card::before,
+.arena-mode-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--mode-accent, var(--cyan));
+}
+
+.home-mode-solo {
+  --mode-accent: var(--cyan);
+  border-color: rgba(36, 213, 232, 0.42);
+  background:
+    linear-gradient(120deg, rgba(36, 213, 232, 0.12), transparent 50%),
+    var(--surface-1);
+}
+
+.home-mode-arena {
+  --mode-accent: var(--pink);
+  border-color: rgba(255, 61, 154, 0.42);
+  background:
+    linear-gradient(120deg, rgba(255, 61, 154, 0.12), transparent 50%),
+    var(--surface-1);
+}
+
+.home-mode-card span,
+.arena-mode-label,
+.arena-mode-card strong,
+.arena-status > span,
+.arena-active-room-meta span,
+.arena-accept-meta span,
+.player-identity-badge,
+.badge-section-header > span {
+  border-radius: 3px;
+}
+
+.home-mode-card button,
+.arena-mode-card strong {
+  border-left: 3px solid var(--mode-accent, var(--cyan));
+}
+
+.single-player-search-panel {
+  border-top: 3px solid var(--cyan);
+}
+
+.single-player-side-panel {
+  border-top: 3px solid var(--purple);
+}
+
+.album-card,
+.duel-album-card,
+.duel-room-card,
+.start-bar,
+.arena-start-bar,
+.arena-active-room-card {
+  border-radius: 5px;
+}
+
+.album-card:hover,
+.album-card.selected,
+.duel-album-card:hover,
+.duel-album-card.selected {
+  transform: translateY(-2px);
+  border-color: var(--cyan);
+  box-shadow: 0 10px 30px rgba(36, 213, 232, 0.12);
+}
+
+.arena-page {
+  --arena-mode-accent: var(--pink);
+  --arena-mode-accent-soft: rgba(255, 61, 154, 0.13);
+  --arena-mode-accent-glow: rgba(255, 61, 154, 0.22);
+}
+
+.arena-theme-group_lobby {
+  --arena-mode-accent: var(--cyan);
+  --arena-mode-accent-soft: rgba(36, 213, 232, 0.12);
+  --arena-mode-accent-glow: rgba(36, 213, 232, 0.2);
+}
+
+.arena-theme-party,
+.arena-theme-party_mode {
+  --arena-mode-accent: var(--lime);
+  --arena-mode-accent-soft: rgba(141, 255, 79, 0.12);
+  --arena-mode-accent-glow: rgba(141, 255, 79, 0.2);
+}
+
+.arena-theme-championship {
+  --arena-mode-accent: var(--gold);
+  --arena-mode-accent-soft: rgba(255, 212, 71, 0.12);
+  --arena-mode-accent-glow: rgba(255, 212, 71, 0.2);
+}
+
+.arena-mode-card {
+  background:
+    linear-gradient(150deg, var(--mode-accent-soft), transparent 52%),
+    var(--surface-1);
+}
+
+.arena-mode-card::before {
+  background: linear-gradient(120deg, transparent 55%, var(--mode-accent-soft));
+}
+
+.arena-mode-duel {
+  --mode-accent: var(--pink);
+  --mode-accent-soft: rgba(255, 61, 154, 0.14);
+  --mode-accent-glow: rgba(255, 61, 154, 0.22);
+}
+
+.arena-mode-group {
+  --mode-accent: var(--cyan);
+  --mode-accent-soft: rgba(36, 213, 232, 0.13);
+  --mode-accent-glow: rgba(36, 213, 232, 0.2);
+}
+
+.arena-mode-party {
+  --mode-accent: var(--lime);
+  --mode-accent-soft: rgba(141, 255, 79, 0.13);
+  --mode-accent-glow: rgba(141, 255, 79, 0.2);
+}
+
+.arena-mode-championship {
+  --mode-accent: var(--gold);
+  --mode-accent-soft: rgba(255, 212, 71, 0.13);
+  --mode-accent-glow: rgba(255, 212, 71, 0.2);
+}
+
+.arena-mode-card:hover:not(:disabled),
+.arena-mode-card.active {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 46px var(--mode-accent-glow);
+}
+
+.arena-game-modal .duel-room-screen.duel-game-screen {
+  border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 58%);
+  border-radius: 5px;
+  background: var(--bg-0);
+}
+
+.arena-game-modal .duel-room-hero,
+.arena-game-modal .duel-head-to-head,
+.arena-game-modal .group-live-board,
+.arena-game-modal .game-state {
+  border-radius: 4px;
+  background: var(--surface-1);
+}
+
+.arena-game-modal .timer-ring {
+  filter: drop-shadow(0 0 12px var(--arena-mode-accent-glow));
+}
+
+.arena-game-modal .song-button {
+  border-radius: 4px;
+  background:
+    linear-gradient(115deg, var(--arena-mode-accent-soft), transparent 55%),
+    var(--surface-2);
+}
+
+.arena-game-modal .song-button::before {
+  background: var(--arena-mode-accent);
+}
+
+.arena-game-modal .song-button.selected-song {
+  border-color: var(--arena-mode-accent);
+  box-shadow: 0 0 0 2px var(--arena-mode-accent-soft);
+}
+
+.group-live-row.current {
+  border-left: 4px solid var(--lime);
+  background: rgba(141, 255, 79, 0.12);
+  color: var(--text);
+}
+
+.leaderboard-header {
+  padding-top: 18px;
+  border-top: 3px solid var(--gold);
+}
+
+.leaderboard-tabs {
+  border-radius: 4px;
+  background: var(--surface-1);
+}
+
+.leaderboard-tabs button {
+  border-radius: 2px;
+}
+
+.leaderboard-tabs button.active {
+  border-color: rgba(36, 213, 232, 0.5);
+  color: var(--cyan);
+  background: rgba(36, 213, 232, 0.1);
+}
+
+.global-leaderboard-sections .leaderboard-panel {
+  border-radius: 6px;
+  background: var(--surface-1);
+}
+
+.global-leaderboard-sections .leaderboard-list-row {
+  border-radius: 3px;
+  background: rgba(7, 10, 18, 0.7);
+}
+
+.global-leaderboard-sections .rank-first {
+  border-color: rgba(255, 212, 71, 0.7);
+  background: linear-gradient(100deg, rgba(255, 212, 71, 0.16), rgba(7, 10, 18, 0.72));
+}
+
+.global-leaderboard-sections .rank-second {
+  border-color: rgba(185, 195, 212, 0.62);
+  background: linear-gradient(100deg, rgba(185, 195, 212, 0.13), rgba(7, 10, 18, 0.72));
+}
+
+.global-leaderboard-sections .rank-third {
+  border-color: rgba(201, 130, 82, 0.66);
+  background: linear-gradient(100deg, rgba(201, 130, 82, 0.14), rgba(7, 10, 18, 0.72));
+}
+
+.global-leaderboard-sections .leaderboard-current-user {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.badge-card {
+  border-radius: 5px;
+  background:
+    linear-gradient(155deg, var(--badge-accent-soft), transparent 48%),
+    var(--surface-1);
+}
+
+.badge-card::before {
+  background: linear-gradient(120deg, transparent 55%, var(--badge-accent-soft));
+}
+
+.badge-icon {
+  border-radius: 7px;
+}
+
+.badge-tier-bronze {
+  border-color: rgba(201, 130, 82, 0.64);
+}
+
+.badge-tier-silver {
+  border-color: rgba(185, 195, 212, 0.7);
+}
+
+.badge-tier-gold {
+  border-color: rgba(255, 212, 71, 0.72);
+  box-shadow: 0 14px 42px rgba(255, 212, 71, 0.1);
+}
+
+.badge-tier-platinum {
+  border-color: rgba(36, 213, 232, 0.76);
+  box-shadow: 0 14px 42px rgba(36, 213, 232, 0.12);
+}
+
+.badge-tier-legendary {
+  border-color: rgba(255, 61, 154, 0.82);
+  box-shadow: 0 14px 48px rgba(255, 61, 154, 0.16);
+}
+
+.badge-locked {
+  filter: saturate(0.12) brightness(0.64);
+}
+
+.badge-progress > div {
+  border-radius: 2px;
+  background: rgba(149, 162, 179, 0.18);
+}
+
+.badge-progress > div span {
+  background: var(--badge-accent);
+}
+
+.auth-brand-panel {
+  border-top: 3px solid var(--purple);
+}
+
+.auth-panel,
+.settings-section {
+  border-top: 3px solid rgba(36, 213, 232, 0.42);
+}
+
+@media (max-width: 768px) {
+  body {
+    background-size: 32px 32px;
+  }
+
+  .home-hero-panel > div,
+  .home-player-card,
+  .home-mode-card,
+  .home-panel,
+  .single-player-hero > div,
+  .single-player-card,
+  .single-player-search-panel,
+  .single-player-side-panel {
+    border-radius: 5px;
+  }
+
+  .home-mode-card,
+  .arena-mode-card {
+    clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 0 100%);
+  }
 }

@@ -11,7 +11,8 @@ StanZer is a competitive album quiz game. Players identify songs from five secon
 - Smart artist and album search backed by the iTunes Search and Lookup APIs
 - Dynamic solo quizzes with a three-second start countdown and ten-second answers
 - Speed scoring, streak feedback, perfect runs, achievement badges, and player tiers
-- Local guest stats plus Supabase-backed accounts, profiles, progression, and featured badges
+- Local signed-out Solo stats plus Supabase-backed accounts, profiles, progression, and featured badges
+- Temporary `guest_######` multiplayer identities powered by Supabase Anonymous Sign-Ins
 - Public profiles and Global Arena leaderboards
 - Complete email/password account flows with username setup, recovery, and account settings
 - Synchronized Duel, Group Lobby, and host-audio-only Party Mode
@@ -35,7 +36,8 @@ StanZer is a React 19 and TypeScript application built with Vite.
 - `src/lib` contains iTunes access, Supabase clients, Arena room operations, local/cloud stats, profile helpers, badge rules, sounds, and player identity calculations.
 - `api` contains the Vercel serverless proxies used for production iTunes requests.
 - `supabase` contains the base schema and additive SQL migrations for profiles, stats, leaderboards, Arena rooms, RLS, room lifecycle, multiplayer progression, and Party Mode.
-- `localStorage` remains the guest fallback; authenticated progression uses Supabase as the cross-device source of truth.
+- `localStorage` remains the signed-out Solo fallback; authenticated progression uses Supabase as the cross-device source of truth.
+- Anonymous multiplayer auth is held in `sessionStorage`, so a guest can reload in the same tab but does not become a permanent browser identity.
 
 No service-role key is used by the browser. Supabase Row Level Security and security-definer RPCs constrain room membership, host actions, answers, and progression writes.
 
@@ -43,7 +45,7 @@ No service-role key is used by the browser. Supabase Row Level Security and secu
 
 The host generates one quiz question set when a room starts. That set, including answer choices, correct answers, clip offsets, and room start data, is stored with the Arena room so every client renders the same game.
 
-Duel and Group Lobby use shared timestamps plus persisted per-player progress. Clients refresh room state and subscribe to relevant Supabase changes; final placement is resolved from score, accuracy, and average answer time.
+Duel and Group Lobby use server-authoritative competitive rounds. The first correct answer wins one round point; the database accepts one answer per player, chooses the winner from server timestamps, and publishes a shared reveal boundary. Audio readiness is acknowledged by every active participant before the answer clock begins. A failed client or readiness deadline produces one global skipped round instead of divergent local games. Match placement uses round points and the persisted competitive result data.
 
 Party Mode uses a server-authoritative question state machine implemented by Supabase RPCs:
 
@@ -122,6 +124,24 @@ competitive client has buffered and seeked the authoritative preview. If any
 client fails or the readiness deadline expires, Supabase skips that question
 for the whole room so scores and progression remain synchronized.
 
+Guest multiplayer and secure progress reset additionally require:
+
+- `supabase/20260921_guest_multiplayer_and_progress_reset.sql`
+
+Enable **Authentication > Sign In / Providers > Allow anonymous sign-ins** in
+Supabase. Anonymous users retain the `authenticated` database role, so the
+migration explicitly blocks them from permanent quiz, artist, and album
+progression while existing room-membership RPCs continue to secure gameplay.
+Enable CAPTCHA or Cloudflare Turnstile under Supabase Auth Attack Protection
+before a high-traffic launch. The migration also includes the service-role-only
+`cleanup_stale_stanzer_guests(interval)` function for a trusted scheduled cleanup
+job; it only removes stale anonymous users who are not in an active room.
+
+Settings includes an owner-only **Reset StanZer Progress** action. Its
+`reset_my_stanzer_progress()` security-definer RPC is scoped to `auth.uid()`,
+refuses anonymous or active-room sessions, and clears gameplay data without
+deleting the login, email, username, display name, or password identity.
+
 All migrations are additive and should be reviewed against the target Supabase project before execution.
 
 ### Development
@@ -150,6 +170,12 @@ There is currently no automated end-to-end multiplayer suite, so release verific
 8. Open a Party room with one host and multiple players; confirm audio plays only on the host, all answer clocks match, duplicate answers are rejected, blocked host audio skips for everyone, and a backgrounded tab rejoins the current server phase.
 9. Confirm cloud totals, ranks, badges, profiles, and Global Arena data refresh after completed games.
 10. Repeat the active-game checks at 375, 430, 768, 1024, 1440, and 1920 pixel widths.
+11. Start a guest session, verify the `GUEST` label survives a same-tab reload,
+    host/join each Arena mode, and confirm the guest never appears in permanent
+    stats, badges, profiles, or leaderboards.
+12. From Settings, open Danger Zone, verify `RESET` is required, confirm an
+    active room blocks reset, and test the destructive action only with a
+    disposable account.
 
 ## UI and Auth References
 
@@ -158,6 +184,10 @@ StanZer keeps its React/Vite/CSS stack and does not copy a third-party interface
 - [Supabase Auth UI](https://github.com/supabase-community/auth-ui) (MIT, archived): useful separation of auth views and provider-neutral form states; the package itself is not installed because it is archived.
 - [Supabase JavaScript](https://github.com/supabase/supabase-js) (MIT): source of truth for browser sessions, password recovery, and user updates.
 - [shadcn/ui](https://github.com/shadcn-ui/ui) (MIT): inspiration for source-owned accessible controls, semantic tokens, visible labels, and focus treatment without adopting Tailwind or Next.js.
+- [Origin UI](https://github.com/shadcn/originui) (MIT): compact control composition and clear application-state patterns; no component source was copied.
+- [React Bits](https://github.com/DavidHDev/react-bits) (MIT + Commons Clause): short transform/opacity interaction cues informed motion timing; no package or source was imported.
+- [Magic UI](https://github.com/magicuidesign/magicui) (MIT): selective emphasis and reveal principles informed winner/badge polish; no effects library was installed.
+- [Shadcn Dashboard](https://github.com/shadcndashboard/shadcndashboard) (MIT with project attribution request): scan-friendly information hierarchy was reviewed, but no template code or screen was copied.
 - [Navidrome](https://github.com/navidrome/navidrome) (GPL-3.0): information hierarchy inspiration for artwork-led music discovery; no GPL code or media-server architecture is used.
 - [Lichess](https://github.com/lichess-org/lila) (AGPL-3.0): inspiration for low-distraction competitive timers, lobby clarity, and strong game-state hierarchy; no AGPL code is used.
 
@@ -166,6 +196,7 @@ StanZer keeps its React/Vite/CSS stack and does not copy a third-party interface
 - iTunes preview availability varies by album, track, and storefront region.
 - Browser autoplay policies can still reject host playback; Party Mode provides one retry and then advances the authoritative timeline with a safe skipped question.
 - Multiplayer depends on network access to Supabase. Server timestamps reduce drift, but UI updates are not frame-perfect on high-latency connections.
+- Guest multiplayer requires Supabase Anonymous Sign-Ins. CAPTCHA/Turnstile and a trusted scheduled stale-guest cleanup should be configured before broad public promotion.
 - Championship tournament gameplay is not implemented.
 - The repository does not yet include automated browser or multi-client integration tests.
 - There is no automated unit or browser test suite yet. The current ESLint configuration also reports pre-existing effect/dependency findings in timing-sensitive Solo and multiplayer code; those should be resolved alongside regression tests rather than by changing hook dependencies blindly.
