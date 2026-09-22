@@ -41,6 +41,7 @@ import {
 } from "../lib/arenaAudioController";
 import {
   getSpotifyAlbumTracks,
+  prefetchSpotifyAlbumTracks,
   searchSpotifyAlbums,
   type SpotifyAlbum,
   type SpotifyTrack,
@@ -111,6 +112,7 @@ const CLIP_LENGTH_SECONDS = 5;
 const DUEL_ROOM_REFRESH_MS = 1000;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
 const AUDIO_BLOCKED_SKIP_DELAY_MS = 3500;
+const ALBUM_SEARCH_DEBOUNCE_MS = 450;
 const ARENA_STATUS_ORDER: Record<string, number> = {
   waiting: 0,
   starting: 1,
@@ -337,6 +339,8 @@ function ArenaPage({
   const activeRoomRefreshRequestRef = useRef(0);
   const activeQuestionRunKeyRef = useRef("");
   const arenaAudioControllerRef = useRef<ArenaAudioController | null>(null);
+  const albumSearchRequestRef = useRef<AbortController | null>(null);
+  const albumSearchSequenceRef = useRef(0);
 
   if (!arenaAudioControllerRef.current) {
     arenaAudioControllerRef.current = new ArenaAudioController();
@@ -451,6 +455,24 @@ function ArenaPage({
 
     void loadOpenRooms(false);
   }, [activeArenaMode, session?.user?.id, inviteCode]);
+
+  useEffect(() => {
+    const query = searchTerm.trim();
+    if (!activeArenaMode || activeRoom || query.length < 2) return;
+
+    const debounceId = window.setTimeout(() => {
+      void runArenaAlbumSearch(query);
+    }, ALBUM_SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(debounceId);
+  }, [activeArenaMode, activeRoom?.id, searchTerm]);
+
+  useEffect(
+    () => () => {
+      albumSearchRequestRef.current?.abort();
+    },
+    []
+  );
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -2250,27 +2272,42 @@ function ArenaPage({
     setIsLoadingRooms(false);
   }
 
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!searchTerm.trim() || isSearching) {
+  async function runArenaAlbumSearch(rawQuery: string) {
+    const query = rawQuery.trim();
+    if (query.length < 2) {
       return;
     }
 
+    albumSearchRequestRef.current?.abort();
+    const controller = new AbortController();
+    const sequence = ++albumSearchSequenceRef.current;
+    albumSearchRequestRef.current = controller;
     setIsSearching(true);
     setMessage("");
-    setSelectedAlbum(null);
     setVisibleAlbumCount(ALBUMS_PER_PAGE);
 
     try {
-      const results = await searchSpotifyAlbums(searchTerm);
-      setAlbums(results);
+      const results = await searchSpotifyAlbums(query, {
+        signal: controller.signal,
+      });
+      if (sequence === albumSearchSequenceRef.current) setAlbums(results);
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       console.error(error);
       setMessage("Could not search albums. Try another album or artist.");
     } finally {
-      setIsSearching(false);
+      if (sequence === albumSearchSequenceRef.current) setIsSearching(false);
     }
+  }
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void runArenaAlbumSearch(searchTerm);
+  }
+
+  function handleSelectArenaAlbum(album: SpotifyAlbum) {
+    setSelectedAlbum(album);
+    prefetchSpotifyAlbumTracks(album.id);
   }
 
   function handleViewMoreAlbums() {
@@ -3372,6 +3409,17 @@ function ArenaPage({
           </button>
         </form>
 
+        {isSearching && albums.length === 0 && (
+          <div className="duel-album-grid" aria-label="Loading albums">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div className="duel-album-card duel-album-skeleton" key={index} aria-hidden>
+                <span className="skeleton-cover" />
+                <span className="skeleton-line skeleton-line-title" />
+              </div>
+            ))}
+          </div>
+        )}
+
         {albums.length > 0 && (
           <>
             <p className="album-result-count duel-result-count">
@@ -3385,11 +3433,15 @@ function ArenaPage({
                   className={`duel-album-card ${
                     selectedAlbum?.id === album.id ? "selected" : ""
                   }`}
-                  onClick={() => setSelectedAlbum(album)}
+                  onClick={() => handleSelectArenaAlbum(album)}
                   key={album.id}
                 >
                   {album.imageUrl && (
-                    <img src={album.imageUrl} alt={`${album.title} cover`} />
+                    <img
+                      src={album.imageUrl}
+                      alt={`${album.title} cover`}
+                      loading="lazy"
+                    />
                   )}
                   <span>
                     <strong>{album.title}</strong>
@@ -4351,6 +4403,17 @@ function ArenaPage({
             </button>
           </form>
 
+          {isSearching && albums.length === 0 && (
+            <div className="duel-album-grid" aria-label="Loading albums">
+              {Array.from({ length: 4 }, (_, index) => (
+                <div className="duel-album-card duel-album-skeleton" key={index} aria-hidden>
+                  <span className="skeleton-cover" />
+                  <span className="skeleton-line skeleton-line-title" />
+                </div>
+              ))}
+            </div>
+          )}
+
           {albums.length > 0 && (
             <>
               <p className="album-result-count duel-result-count">
@@ -4364,11 +4427,15 @@ function ArenaPage({
                     className={`duel-album-card ${
                       selectedAlbum?.id === album.id ? "selected" : ""
                     }`}
-                    onClick={() => setSelectedAlbum(album)}
+                    onClick={() => handleSelectArenaAlbum(album)}
                     key={album.id}
                   >
                     {album.imageUrl && (
-                      <img src={album.imageUrl} alt={`${album.title} cover`} />
+                      <img
+                        src={album.imageUrl}
+                        alt={`${album.title} cover`}
+                        loading="lazy"
+                      />
                     )}
                     <span>
                       <strong>{album.title}</strong>

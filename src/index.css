@@ -589,6 +589,45 @@ button:hover {
   transition: transform 0.45s var(--arena-ease);
 }
 
+.album-card-skeleton {
+  cursor: default;
+  pointer-events: none;
+  min-height: 320px;
+  animation: none;
+}
+
+.skeleton-cover,
+.skeleton-line {
+  display: block;
+  background: linear-gradient(90deg, #202231 25%, #2d3043 50%, #202231 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shift 1.2s ease-in-out infinite;
+}
+
+.skeleton-cover {
+  aspect-ratio: 1;
+  border-radius: 14px;
+  margin-bottom: 16px;
+}
+
+.skeleton-line {
+  width: 62%;
+  height: 12px;
+  border-radius: 4px;
+  margin-top: 10px;
+}
+
+.skeleton-line-title {
+  width: 84%;
+  height: 18px;
+}
+
+@keyframes skeleton-shift {
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .album-card:hover .album-cover {
   transform: scale(1.06);
 }
@@ -2775,6 +2814,17 @@ button:hover {
 .duel-album-card small {
   display: block;
   overflow-wrap: anywhere;
+}
+
+.duel-album-skeleton {
+  pointer-events: none;
+  min-height: 94px;
+}
+
+.duel-album-skeleton .skeleton-cover {
+  width: 64px;
+  min-width: 64px;
+  margin: 0;
 }
 
 .duel-album-card small {

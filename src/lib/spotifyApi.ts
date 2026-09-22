@@ -60,6 +60,49 @@ type ITunesLookupResponse = {
   results: Array<ITunesTrack | ITunesAlbum | ITunesArtist>;
 };
 
+type CachedValue<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+type RequestOptions = {
+  signal?: AbortSignal;
+};
+
+const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const ALBUM_TRACK_CACHE_TTL_MS = 30 * 60 * 1000;
+const albumSearchCache = new Map<string, CachedValue<SpotifyAlbum[]>>();
+const albumSearchRequests = new Map<string, Promise<SpotifyAlbum[]>>();
+const albumTrackCache = new Map<string, CachedValue<SpotifyTrack[]>>();
+const albumTrackRequests = new Map<string, Promise<SpotifyTrack[]>>();
+
+function normalizeCacheKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getCachedValue<T>(cache: Map<string, CachedValue<T>>, key: string) {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+
+  return new Promise((resolve, reject) => {
+    const handleAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", handleAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", handleAbort);
+    });
+  });
+}
+
 function getITunesBaseUrl(path: "search" | "lookup") {
   if (!import.meta.env.PROD) {
     return `https://itunes.apple.com/${path}`;
@@ -326,7 +369,7 @@ async function searchDirectAlbums(
     term: query,
     media: "music",
     entity: "album",
-    limit: "100",
+    limit: "50",
     country,
   });
 
@@ -354,7 +397,7 @@ async function searchBestArtist(query: string, country: string) {
     term: query,
     media: "music",
     entity: "musicArtist",
-    limit: "10",
+    limit: "5",
     country,
   });
   const searchUrl = `${getITunesBaseUrl("search")}?${params.toString()}`;
@@ -417,19 +460,21 @@ async function lookupArtistAlbums(
     }));
 }
 
-export async function searchSpotifyAlbums(query: string): Promise<SpotifyAlbum[]> {
+async function searchAlbumsUncached(query: string): Promise<SpotifyAlbum[]> {
   const countries = ["US", "NG", "GB", "CA", "ZA"];
-  const rankedAlbums: RankedAlbum[] = [];
-
-  for (const country of countries) {
-    rankedAlbums.push(...(await searchDirectAlbums(query, country)));
-
-    const bestArtist = await searchBestArtist(query, country);
-
-    if (bestArtist) {
-      rankedAlbums.push(...(await lookupArtistAlbums(query, country, bestArtist)));
-    }
-  }
+  const countryResults = await Promise.all(
+    countries.map(async (country) => {
+      const [directAlbums, bestArtist] = await Promise.all([
+        searchDirectAlbums(query, country),
+        searchBestArtist(query, country),
+      ]);
+      const artistAlbums = bestArtist
+        ? await lookupArtistAlbums(query, country, bestArtist)
+        : [];
+      return [...directAlbums, ...artistAlbums];
+    })
+  );
+  const rankedAlbums = countryResults.flat();
 
   const sortedAlbums = rankedAlbums
     .sort((a, b) => b.score - a.score)
@@ -438,9 +483,66 @@ export async function searchSpotifyAlbums(query: string): Promise<SpotifyAlbum[]
   return removeDuplicateAlbums(sortedAlbums).slice(0, 50);
 }
 
+export async function searchSpotifyAlbums(
+  query: string,
+  options: RequestOptions = {}
+): Promise<SpotifyAlbum[]> {
+  const normalizedQuery = normalizeCacheKey(query);
+  if (normalizedQuery.length < 2) return [];
+
+  const cached = getCachedValue(albumSearchCache, normalizedQuery);
+  if (cached) return withAbort(Promise.resolve(cached), options.signal);
+
+  let request = albumSearchRequests.get(normalizedQuery);
+  if (!request) {
+    const startedAt = performance.now();
+    request = searchAlbumsUncached(normalizedQuery)
+      .then((albums) => {
+        albumSearchCache.set(normalizedQuery, {
+          value: albums,
+          expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+        });
+        console.info(
+          `[STANZER_PERF] album search "${normalizedQuery}" ${Math.round(performance.now() - startedAt)}ms`
+        );
+        return albums;
+      })
+      .finally(() => albumSearchRequests.delete(normalizedQuery));
+    albumSearchRequests.set(normalizedQuery, request);
+  }
+
+  return withAbort(request, options.signal);
+}
+
 export async function getSpotifyAlbumTracks(
-  albumId: string
+  albumId: string,
+  options: RequestOptions = {}
 ): Promise<SpotifyTrack[]> {
+  const cacheKey = normalizeCacheKey(albumId);
+  const cached = getCachedValue(albumTrackCache, cacheKey);
+  if (cached) return withAbort(Promise.resolve(cached), options.signal);
+
+  let request = albumTrackRequests.get(cacheKey);
+  if (request) return withAbort(request, options.signal);
+
+  const startedAt = performance.now();
+  request = loadSpotifyAlbumTracks(albumId)
+    .then((tracks) => {
+      albumTrackCache.set(cacheKey, {
+        value: tracks,
+        expiresAt: Date.now() + ALBUM_TRACK_CACHE_TTL_MS,
+      });
+      console.info(
+        `[STANZER_PERF] album lookup ${albumId} ${Math.round(performance.now() - startedAt)}ms`
+      );
+      return tracks;
+    })
+    .finally(() => albumTrackRequests.delete(cacheKey));
+  albumTrackRequests.set(cacheKey, request);
+  return withAbort(request, options.signal);
+}
+
+async function loadSpotifyAlbumTracks(albumId: string): Promise<SpotifyTrack[]> {
   const { country, collectionId } = parseAlbumId(albumId);
 
   const params = new URLSearchParams({
@@ -468,4 +570,10 @@ export async function getSpotifyAlbumTracks(
       name: track.trackName as string,
       previewUrl: track.previewUrl as string,
     }));
+}
+
+export function prefetchSpotifyAlbumTracks(albumId: string) {
+  void getSpotifyAlbumTracks(albumId).catch(() => {
+    // Selection prefetch is opportunistic; Start/Create surfaces real failures.
+  });
 }

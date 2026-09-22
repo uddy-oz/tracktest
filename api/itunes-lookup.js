@@ -12,12 +12,25 @@ export default async function handler(req, res) {
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400");
+    if (response.ok) {
+      res.setHeader("Cache-Control", "public, max-age=1800");
+      res.setHeader(
+        "Vercel-CDN-Cache-Control",
+        "public, s-maxage=86400, stale-while-revalidate=604800"
+      );
+      res.setHeader(
+        "CDN-Cache-Control",
+        "public, s-maxage=86400, stale-while-revalidate=604800"
+      );
+    } else {
+      res.setHeader("Cache-Control", "no-store");
+    }
 
     return res.status(response.status).send(text);
   } catch (error) {
     console.error("iTunes lookup API error:", error);
 
+    res.setHeader("Cache-Control", "no-store");
     return res.status(500).json({
       error: "Could not load iTunes album tracks.",
     });

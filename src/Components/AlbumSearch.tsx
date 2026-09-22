@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { SpotifyAlbum } from "../lib/spotifyApi";
-import { searchSpotifyAlbums } from "../lib/spotifyApi";
+import {
+  prefetchSpotifyAlbumTracks,
+  searchSpotifyAlbums,
+} from "../lib/spotifyApi";
 
 type AlbumSearchProps = {
   onStartQuiz: (album: SpotifyAlbum) => void;
@@ -10,6 +13,7 @@ type AlbumSearchProps = {
 
 const ALBUMS_PER_PAGE = 12;
 const MAX_VISIBLE_ALBUMS = 48;
+const SEARCH_DEBOUNCE_MS = 450;
 
 function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -19,37 +23,68 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const [visibleAlbumCount, setVisibleAlbumCount] = useState(ALBUMS_PER_PAGE);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const searchRequestRef = useRef<AbortController | null>(null);
+  const searchSequenceRef = useRef(0);
 
   const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
   const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
   const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
 
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (searchTerm.trim() === "" || isLoading) {
+  async function runSearch(rawQuery: string) {
+    const query = rawQuery.trim();
+    if (query.length < 2) {
       return;
     }
 
+    searchRequestRef.current?.abort();
+    const controller = new AbortController();
+    const sequence = ++searchSequenceRef.current;
+    searchRequestRef.current = controller;
     try {
       setIsLoading(true);
       setError("");
-      setSubmittedSearch(searchTerm);
-      setSelectedAlbum(null);
+      setSubmittedSearch(query);
       setVisibleAlbumCount(ALBUMS_PER_PAGE);
 
-      const results = await searchSpotifyAlbums(searchTerm);
-      setAlbums(results);
+      const results = await searchSpotifyAlbums(query, {
+        signal: controller.signal,
+      });
+      if (sequence === searchSequenceRef.current) setAlbums(results);
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       console.error(error);
       setError("Could not search albums. Try again or search another album.");
     } finally {
-      setIsLoading(false);
+      if (sequence === searchSequenceRef.current) setIsLoading(false);
     }
+  }
+
+  useEffect(() => {
+    const query = searchTerm.trim();
+    if (query.length < 2) return;
+
+    const debounceId = window.setTimeout(() => {
+      void runSearch(query);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(debounceId);
+  }, [searchTerm]);
+
+  useEffect(
+    () => () => {
+      searchRequestRef.current?.abort();
+    },
+    []
+  );
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void runSearch(searchTerm);
   }
 
   function handleSelectAlbum(album: SpotifyAlbum) {
     setSelectedAlbum(album.id === selectedAlbum?.id ? null : album);
+    prefetchSpotifyAlbumTracks(album.id);
   }
 
   function handleViewMoreAlbums() {
@@ -85,6 +120,18 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       </form>
 
       {error && <p className="search-result">{error}</p>}
+
+      {isLoading && albums.length === 0 && (
+        <div className="album-grid album-grid-loading" aria-label="Loading albums">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div className="album-card album-card-skeleton" key={index} aria-hidden>
+              <span className="skeleton-cover" />
+              <span className="skeleton-line skeleton-line-title" />
+              <span className="skeleton-line" />
+            </div>
+          ))}
+        </div>
+      )}
 
       {submittedSearch && !error && !isLoading && albums.length === 0 && (
         <p className="search-result">
