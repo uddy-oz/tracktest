@@ -34,9 +34,14 @@ export type ArenaAudioPlayResult =
   | { status: "stale" };
 
 export type ArenaAudioReadyResult =
-  | { status: "ready" }
-  | { status: "failed"; message: string }
+  | { status: "ready"; attempts: number; prefetched: boolean }
+  | { status: "failed"; message: string; attempts: number }
   | { status: "stale" };
+
+export type ArenaAudioReadyOptions = {
+  deadlineMs?: number;
+  maxAttempts?: number;
+};
 
 export type ArenaAudioFailure = {
   roundKey: string;
@@ -101,7 +106,9 @@ type DiagnosticEvent =
   | "MEDIA_ENDED";
 
 const MEDIA_READY_TIMEOUT_MS = 4000;
-const COMPETITIVE_READY_TIMEOUT_MS = 9000;
+const COMPETITIVE_READY_TIMEOUT_MS = 10500;
+const COMPETITIVE_READY_ATTEMPTS = 3;
+const MINIMUM_READY_ATTEMPT_MS = 900;
 const PLAY_PROMISE_TIMEOUT_MS = 3000;
 const PLAYBACK_PROGRESS_TIMEOUT_MS = 1800;
 const PLAYBACK_STALL_GRACE_MS = 1400;
@@ -196,6 +203,8 @@ function createSilentWavDataUrl() {
 export class ArenaAudioController {
   private audio: HTMLAudioElement | null = null;
   private preloader: HTMLAudioElement | null = null;
+  private preloaderCleanup: (() => void) | null = null;
+  private prefetchedUrls = new Set<string>();
   private callbacks: ArenaAudioCallbacks = {};
   private activeRound: ArenaAudioRound | null = null;
   private activePlayback: ActivePlayback | null = null;
@@ -268,6 +277,8 @@ export class ArenaAudioController {
     this.detach();
 
     if (this.preloader) {
+      this.preloaderCleanup?.();
+      this.preloaderCleanup = null;
       this.preloader.pause();
       this.preloader.removeAttribute("src");
       this.preloader.load();
@@ -277,6 +288,7 @@ export class ArenaAudioController {
     this.activeRound = null;
     this.activePlayback = null;
     this.mediaUnlocked = false;
+    this.prefetchedUrls.clear();
   }
 
   prepareRound(round: ArenaAudioRound, nextPreviewUrl = "") {
@@ -314,8 +326,13 @@ export class ArenaAudioController {
     this.loadActiveRoundSource(isNewRound ? "PREVIEW_CHANGED" : "ROUND_RECEIVED");
 
     if (nextPreviewUrl && nextPreviewUrl !== round.previewUrl) {
-      this.preloadNext(nextPreviewUrl, round);
+      this.warmPreview(nextPreviewUrl, round.roundIndex + 1);
     }
+  }
+
+  warmPreview(previewUrl: string, roundIndex = 0) {
+    if (!previewUrl) return;
+    this.preloadPreview(previewUrl, roundIndex);
   }
 
   unlockFromUserGesture() {
@@ -352,7 +369,8 @@ export class ArenaAudioController {
 
   async waitUntilRoundReady(
     roundKey: string,
-    clipLengthSeconds: number
+    clipLengthSeconds: number,
+    options: ArenaAudioReadyOptions = {}
   ): Promise<ArenaAudioReadyResult> {
     const round = this.activeRound;
     const audio = this.audio;
@@ -362,52 +380,118 @@ export class ArenaAudioController {
     }
 
     if (!round.previewUrl) {
-      return { status: "failed", message: "This preview URL is missing." };
+      return {
+        status: "failed",
+        message: "This preview URL is missing.",
+        attempts: 0,
+      };
     }
 
     const operationId = ++this.operationId;
+    const maxAttempts = Math.max(
+      1,
+      Math.min(options.maxAttempts || COMPETITIVE_READY_ATTEMPTS, 3)
+    );
+    const deadlineMs = Number.isFinite(options.deadlineMs)
+      ? Number(options.deadlineMs)
+      : Date.now() + COMPETITIVE_READY_TIMEOUT_MS;
+    const wasPrefetched = this.prefetchedUrls.has(round.previewUrl);
     this.stopTimers();
     this.activePlayback = null;
-    this.log("READINESS_CHECK_STARTED");
+    this.log("READINESS_CHECK_STARTED", {
+      deadlineMs,
+      maxAttempts,
+      prefetched: wasPrefetched,
+    });
 
-    try {
-      const hasMetadata = await this.waitForMetadata(
-        operationId,
-        round,
-        COMPETITIVE_READY_TIMEOUT_MS
-      );
-      if (!hasMetadata) {
-        return this.isCurrent(operationId, roundKey, round.previewUrl)
-          ? { status: "failed", message: "Preview metadata did not load in time." }
-          : { status: "stale" };
+    let lastMessage = "Preview data was not playable in time.";
+    let attemptsUsed = 0;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (!this.isCurrent(operationId, roundKey, round.previewUrl)) {
+        return { status: "stale" };
       }
 
-      const targetTime = this.getSafeClipStart(
-        audio,
-        round.clipStartSeconds,
-        clipLengthSeconds
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs < MINIMUM_READY_ATTEMPT_MS) break;
+      attemptsUsed = attempt;
+
+      const attemptsLeft = maxAttempts - attempt + 1;
+      const attemptBudgetMs = Math.max(
+        MINIMUM_READY_ATTEMPT_MS,
+        Math.floor(remainingMs / attemptsLeft)
       );
-      const isSeekable = await this.seekAndWait(
-        operationId,
-        round,
-        targetTime,
-        COMPETITIVE_READY_TIMEOUT_MS
-      );
-      if (!isSeekable) {
-        return this.isCurrent(operationId, roundKey, round.previewUrl)
-          ? { status: "failed", message: "Preview data was not playable in time." }
-          : { status: "stale" };
+
+      if (attempt > 1) {
+        this.log("PLAYBACK_RETRY", {
+          reason: "readiness",
+          attempt,
+          remainingMs,
+        });
+        this.reloadActiveSource(round, `readiness-retry-${attempt}`);
       }
 
-      this.log("READINESS_CONFIRMED", { targetTime });
-      return { status: "ready" };
-    } catch (error) {
-      const details = getErrorDetails(error);
-      this.log("READINESS_FAILED", details);
-      return this.isCurrent(operationId, roundKey, round.previewUrl)
-        ? { status: "failed", message: `${details.name}: ${details.message}` }
-        : { status: "stale" };
+      try {
+        const metadataBudgetMs = Math.max(
+          500,
+          Math.floor(attemptBudgetMs * 0.4)
+        );
+        const hasMetadata = await this.waitForMetadata(
+          operationId,
+          round,
+          metadataBudgetMs
+        );
+
+        if (!hasMetadata) {
+          lastMessage = "Preview metadata did not load in time.";
+          continue;
+        }
+
+        if (deadlineMs - Date.now() < 250) {
+          lastMessage = "The audio readiness deadline elapsed after loading metadata.";
+          break;
+        }
+
+        const targetTime = this.getSafeClipStart(
+          audio,
+          round.clipStartSeconds,
+          clipLengthSeconds
+        );
+        const seekBudgetMs = Math.max(
+          250,
+          Math.min(
+            attemptBudgetMs - metadataBudgetMs,
+            deadlineMs - Date.now()
+          )
+        );
+        const isSeekable = await this.seekAndWait(
+          operationId,
+          round,
+          targetTime,
+          seekBudgetMs
+        );
+
+        if (!isSeekable) {
+          lastMessage = "Preview data was not playable in time.";
+          continue;
+        }
+
+        this.log("READINESS_CONFIRMED", {
+          targetTime,
+          attempt,
+          prefetched: wasPrefetched,
+        });
+        return { status: "ready", attempts: attempt, prefetched: wasPrefetched };
+      } catch (error) {
+        const details = getErrorDetails(error);
+        lastMessage = `${details.name}: ${details.message}`;
+        this.log("READINESS_FAILED", { ...details, attempt });
+      }
     }
+
+    return this.isCurrent(operationId, roundKey, round.previewUrl)
+      ? { status: "failed", message: lastMessage, attempts: attemptsUsed }
+      : { status: "stale" };
   }
 
   updateRoundPhase(
@@ -746,20 +830,36 @@ export class ArenaAudioController {
     }
   }
 
-  private preloadNext(previewUrl: string, round: ArenaAudioRound) {
+  private reloadActiveSource(round: ArenaAudioRound, reason: string) {
+    const audio = this.audio;
+    if (!audio || this.activeRound?.roundKey !== round.roundKey) return;
+
+    this.pauseCurrentAudio(reason);
+    audio.src = round.previewUrl;
+    audio.load();
+    this.log("AUDIO_LOAD_REQUESTED", { reason });
+  }
+
+  private preloadPreview(previewUrl: string, roundIndex: number) {
     if (!this.preloader) {
       this.preloader = document.createElement("audio");
       this.preloader.preload = "auto";
     }
 
     const preloader = this.preloader;
-    if (sameMediaUrl(preloader.src, previewUrl)) return;
+    if (
+      sameMediaUrl(preloader.src, previewUrl) &&
+      this.prefetchedUrls.has(previewUrl)
+    ) {
+      return;
+    }
 
+    this.preloaderCleanup?.();
+    this.preloaderCleanup = null;
     preloader.pause();
     preloader.src = previewUrl;
-    preloader.load();
     this.log("PRELOAD_NEXT_REQUESTED", {
-      nextRoundIndex: round.roundIndex + 1,
+      nextRoundIndex: roundIndex,
       nextPreviewUrl: previewUrl,
     });
 
@@ -768,15 +868,27 @@ export class ArenaAudioController {
         return;
       }
 
+      this.prefetchedUrls.add(previewUrl);
       this.log("PRELOAD_NEXT_READY", {
-        nextRoundIndex: round.roundIndex + 1,
+        nextRoundIndex: roundIndex,
         nextPreviewUrl: previewUrl,
         preloadReadyState: preloader.readyState,
         preloadNetworkState: preloader.networkState,
       });
+      cleanup();
     };
 
-    preloader.addEventListener("canplay", handleReady, { once: true });
+    const handleError = () => cleanup();
+    const cleanup = () => {
+      preloader.removeEventListener("canplay", handleReady);
+      preloader.removeEventListener("error", handleError);
+      if (this.preloaderCleanup === cleanup) this.preloaderCleanup = null;
+    };
+
+    preloader.addEventListener("canplay", handleReady);
+    preloader.addEventListener("error", handleError);
+    this.preloaderCleanup = cleanup;
+    preloader.load();
   }
 
   private async waitForMetadata(

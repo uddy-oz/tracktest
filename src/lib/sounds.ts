@@ -71,6 +71,17 @@ export const sounds = {
     return muted;
   },
 
+  prime() {
+    if (muted) return;
+
+    try {
+      const context = getAudioContext();
+      void context.resume();
+    } catch {
+      // AudioContext support is optional; gameplay audio uses its own element.
+    }
+  },
+
   tick() {
     tone(660, 0, 0.07, "square", 0.045);
   },
@@ -95,6 +106,16 @@ export const sounds = {
   wrong() {
     tone(233.08, 0, 0.13, "sawtooth", 0.045);
     tone(196, 0.11, 0.16, "sawtooth", 0.04);
+  },
+
+  beaten() {
+    tone(392, 0, 0.09, "square", 0.045);
+    tone(293.66, 0.08, 0.14, "sawtooth", 0.04);
+  },
+
+  timeout() {
+    tone(261.63, 0, 0.1, "square", 0.035);
+    tone(196, 0.12, 0.22, "square", 0.03);
   },
 
   complete() {

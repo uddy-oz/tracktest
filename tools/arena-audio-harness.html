@@ -175,6 +175,8 @@
               track: preview.name,
               status: result.status,
               readiness: readiness.status,
+              readinessAttempts: readiness.attempts,
+              prefetched: readiness.prefetched,
               actualPlaybackObserved: observedProgress > 0.05,
               readyState: audio.readyState,
               networkState: audio.networkState,
@@ -229,9 +231,39 @@
             currentResult.status === "playing" &&
             audio.currentTime > currentStartTime + 0.05;
 
-          document.title = `${passed}/${TEST_ROUNDS} passed - Arena audio harness`;
+          const failureRoundKey = "harness:failure:bounded";
+          controller.prepareRound({
+            roomId: "harness",
+            mode: "duel",
+            roundKey: failureRoundKey,
+            roundId: "failure-bounded",
+            roundIndex: TEST_ROUNDS + 2,
+            phase: "preparing_audio",
+            previewUrl: "data:audio/mpeg;base64,AAAA",
+            clipStartSeconds: 0,
+          });
+          const failureStartedAt = performance.now();
+          const boundedFailure = await controller.waitUntilRoundReady(
+            failureRoundKey,
+            TEST_CLIP_SECONDS,
+            { deadlineMs: Date.now() + 2200, maxAttempts: 3 }
+          );
+          const failureElapsedMs = performance.now() - failureStartedAt;
+          const boundedFailurePassed =
+            boundedFailure.status === "failed" &&
+            boundedFailure.attempts >= 1 &&
+            failureElapsedMs < 3000;
+
+          const allGuardsPassed = staleGuardPassed && boundedFailurePassed;
+          document.title = `${passed}/${TEST_ROUNDS} passed${
+            allGuardsPassed ? "" : " with guard failure"
+          } - Arena audio harness`;
           output.textContent = `${passed}/${TEST_ROUNDS} rounds initiated playback.\nStale-round guard: ${
             staleGuardPassed ? "passed" : "FAILED"
+          }.\nBounded readiness failure: ${
+            boundedFailurePassed
+              ? `passed (${Math.round(failureElapsedMs)}ms, ${boundedFailure.attempts} attempts)`
+              : "FAILED"
           }.\n\n${JSON.stringify(results, null, 2)}`;
         } catch (error) {
           console.error(error);

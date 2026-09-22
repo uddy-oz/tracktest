@@ -100,6 +100,7 @@ type DuelResult = {
   points: number;
   correctAnswer: string;
   wasAudioSkipped?: boolean;
+  outcome?: "winner" | "wrong" | "opponent" | "timeout" | "skipped";
 };
 
 const ALBUMS_PER_PAGE = 8;
@@ -310,12 +311,13 @@ function ArenaPage({
   const [duelPhase, setDuelPhase] = useState<DuelPhase>("idle");
   const [duelAudioFallbackMessage, setDuelAudioFallbackMessage] = useState("");
   const [duelAudioRetryUsed, setDuelAudioRetryUsed] = useState(false);
-  const [isDuelAudioPrimed, setIsDuelAudioPrimed] = useState(false);
   const [isDuelClipPlaying, setIsDuelClipPlaying] = useState(false);
   const [isDuelFinished, setIsDuelFinished] = useState(false);
   const [duelRevealMessage, setDuelRevealMessage] = useState("");
   const [duelLastResult, setDuelLastResult] = useState<DuelResult | null>(null);
-  const [duelFlash, setDuelFlash] = useState<"good" | "bad" | null>(null);
+  const [duelFlash, setDuelFlash] = useState<
+    "good" | "bad" | "opponent" | "timeout" | null
+  >(null);
   const [isDuelMuted, setIsDuelMuted] = useState(sounds.isMuted());
   const [competitiveClockOffsetMs, setCompetitiveClockOffsetMs] = useState(0);
   const [partyClockOffsetMs, setPartyClockOffsetMs] = useState(0);
@@ -332,6 +334,7 @@ function ArenaPage({
   const competitiveAudioReadyKeyRef = useRef<string>("");
   const competitiveAudioFailureKeyRef = useRef<string>("");
   const competitiveRevealSoundKeyRef = useRef<string>("");
+  const competitiveCountdownSoundKeyRef = useRef<string>("");
   const partyQuestionKeyRef = useRef<string>("");
   const partyAudioStartKeyRef = useRef<string>("");
   const leavingRoomIdRef = useRef<string | null>(null);
@@ -351,9 +354,6 @@ function ArenaPage({
   const arenaAudioController = arenaAudioControllerRef.current;
   arenaAudioController.setCallbacks({
     onPlaybackChange: setIsDuelClipPlaying,
-    onPlaybackConfirmed: () => {
-      setIsDuelAudioPrimed(true);
-    },
     onPlaybackStopped: (roundKey, reason) => {
       if (
         roundKey === activeQuestionRunKeyRef.current &&
@@ -593,7 +593,7 @@ function ArenaPage({
     if (
       !client ||
       !activeRoom ||
-      activeRoom.status !== "active"
+      !["waiting", "starting", "active"].includes(activeRoom.status)
     ) {
       return;
     }
@@ -615,7 +615,7 @@ function ArenaPage({
       .on(
         "postgres_changes",
         {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "arena_room_players",
           filter: `room_id=eq.${activeRoom.id}`,
@@ -816,21 +816,46 @@ function ArenaPage({
     let cancelled = false;
 
     const prepareAndAcknowledge = async () => {
+      const readinessDeadline = Date.parse(
+        activeRoom.competitiveAudioReadyDeadlineAt || ""
+      );
       const readyResult = await arenaAudioController.waitUntilRoundReady(
         roundKey,
-        CLIP_LENGTH_SECONDS
+        CLIP_LENGTH_SECONDS,
+        {
+          // Convert the server deadline into this browser's clock and leave a
+          // small window for the readiness RPC itself.
+          deadlineMs: Number.isFinite(readinessDeadline)
+            ? readinessDeadline - competitiveClockOffsetMs - 450
+            : undefined,
+          maxAttempts: 3,
+        }
       );
 
       if (cancelled || readyResult.status === "stale") return;
 
       if (readyResult.status === "failed") {
+        if (import.meta.env.DEV) {
+          console.info("[STANZER_ROUND]", {
+            room: activeRoom.id,
+            round: activeRoom.competitiveQuestionIndex + 1,
+            phase: activeRoom.competitiveRoundPhase,
+            expectedPlayers: activeRoom.competitiveRequiredReadyCount,
+            readyPlayers: activeRoom.competitiveReadyCount,
+            missingReadyPlayerIds: [session?.user.id].filter(Boolean),
+            previewDomain: previewUrl ? new URL(previewUrl).hostname : null,
+            audioReadyState: "failed",
+            retryNumber: readyResult.attempts,
+            serverPhaseTimestamp: activeRoom.competitiveAudioReadyDeadlineAt,
+            localEstimatedServerOffset: competitiveClockOffsetMs,
+            playbackStartResult: "not-started",
+            skipReason: readyResult.message,
+          });
+        }
         await failCompetitiveQuestionAudio(readyResult.message, roundKey);
         return;
       }
 
-      const readinessDeadline = Date.parse(
-        activeRoom.competitiveAudioReadyDeadlineAt || ""
-      );
       let lastError = "";
 
       while (
@@ -851,6 +876,37 @@ function ArenaPage({
         });
 
         if (!error) {
+          if (import.meta.env.DEV) {
+            console.info("[STANZER_ROUND]", {
+              room: activeRoom.id,
+              round: activeRoom.competitiveQuestionIndex + 1,
+              phase: activeRoom.competitiveRoundPhase,
+              expectedPlayers: activeRoom.competitiveRequiredReadyCount,
+              readyPlayers: Math.min(
+                activeRoom.competitiveRequiredReadyCount,
+                activeRoom.competitiveReadyCount + 1
+              ),
+              missingReadyPlayerIds:
+                activeRoom.competitiveReadyCount + 1 >=
+                activeRoom.competitiveRequiredReadyCount
+                  ? []
+                  : null,
+              missingReadyCount: Math.max(
+                0,
+                activeRoom.competitiveRequiredReadyCount -
+                  activeRoom.competitiveReadyCount -
+                  1
+              ),
+              previewDomain: previewUrl ? new URL(previewUrl).hostname : null,
+              audioReadyState: "ready",
+              retryNumber: readyResult.attempts,
+              prefetched: readyResult.prefetched,
+              serverPhaseTimestamp: activeRoom.competitiveAudioReadyDeadlineAt,
+              localEstimatedServerOffset: competitiveClockOffsetMs,
+              playbackStartResult: "scheduled",
+              skipReason: null,
+            });
+          }
           const refreshed = await fetchArenaRoom(activeRoom.id);
           if (!cancelled && refreshed.room) updateActiveRoom(refreshed.room);
           return;
@@ -883,6 +939,17 @@ function ArenaPage({
     competitiveClockOffsetMs,
     isCompetitiveMode,
   ]);
+
+  useEffect(() => {
+    if (duelPhase !== "countdown" || !activeQuestionRunKey) return;
+
+    const soundKey = `${activeQuestionRunKey}:${duelStartCountdown}`;
+    if (competitiveCountdownSoundKeyRef.current === soundKey) return;
+
+    competitiveCountdownSoundKeyRef.current = soundKey;
+    if (duelStartCountdown > 0) sounds.tick();
+    else sounds.go();
+  }, [activeQuestionRunKey, duelPhase, duelStartCountdown]);
 
   useEffect(() => {
     if (
@@ -1030,6 +1097,18 @@ function ArenaPage({
         const didCurrentPlayerWin = Boolean(
           winner && winner.userId === session?.user.id
         );
+        const didCurrentPlayerAnswerWrong = Boolean(
+          playerAnsweredThisRound && player?.competitiveAnswerWasCorrect === false
+        );
+        const outcome: DuelResult["outcome"] = activeRoom.competitiveAudioFailed
+          ? "skipped"
+          : didCurrentPlayerWin
+            ? "winner"
+            : winner
+              ? "opponent"
+              : didCurrentPlayerAnswerWrong
+                ? "wrong"
+                : "timeout";
         const revealSoundKey = `${questionKey}:reveal`;
 
         setDuelRevealCountdown(
@@ -1042,15 +1121,22 @@ function ArenaPage({
           points: didCurrentPlayerWin ? 1 : 0,
           correctAnswer: currentDuelQuestion?.correctAnswer || "",
           wasAudioSkipped: activeRoom.competitiveAudioFailed,
+          outcome,
         });
         setDuelRevealMessage(
           activeRoom.competitiveAudioFailed
             ? "Audio unavailable on a player device. Question skipped for everyone."
-            : winner
-            ? `${winner.displayName} got it first in ${formatResponseTime(
-                activeRoom.competitiveWinningResponseTime
-              )}`
-            : "No correct answer this round."
+            : didCurrentPlayerWin
+              ? `YOU GOT IT FIRST · ${formatResponseTime(
+                  activeRoom.competitiveWinningResponseTime
+                )}`
+              : winner
+                ? `BEATEN TO IT · ${winner.displayName} got it in ${formatResponseTime(
+                    activeRoom.competitiveWinningResponseTime
+                  )}`
+                : didCurrentPlayerAnswerWrong
+                  ? "ROUND MISSED · No correct answer this round."
+                  : "TIME · No correct answer this round."
         );
 
         if (competitiveRevealSoundKeyRef.current !== revealSoundKey) {
@@ -1058,6 +1144,12 @@ function ArenaPage({
           if (didCurrentPlayerWin) {
             sounds.correct();
             setDuelFlash("good");
+          } else if (winner) {
+            sounds.beaten();
+            setDuelFlash("opponent");
+          } else if (!activeRoom.competitiveAudioFailed) {
+            sounds.timeout();
+            setDuelFlash("timeout");
           }
         }
 
@@ -1707,25 +1799,6 @@ function ArenaPage({
     });
   }
 
-  async function primeCurrentDuelAudio() {
-    const roundKey = activeQuestionRunKeyRef.current;
-    const previewUrl = currentDuelQuestion?.correctTrack.previewUrl || "";
-
-    if (!previewUrl || !roundKey) {
-      setDuelAudioFallbackMessage("This question does not have a playable preview.");
-      return;
-    }
-
-    const didPrime = await arenaAudioController.primeRound(roundKey);
-
-    if (activeQuestionRunKeyRef.current !== roundKey) return;
-
-    setIsDuelAudioPrimed(didPrime);
-    setDuelAudioFallbackMessage(
-      didPrime ? "Game audio enabled." : "Audio will retry when the question starts."
-    );
-  }
-
   async function failCompetitiveQuestionAudio(
     reason: string,
     expectedRoundKey = activeQuestionRunKeyRef.current
@@ -2236,6 +2309,13 @@ function ArenaPage({
       points: result.roundWon ? 1 : 0,
       correctAnswer: submittedCorrectAnswer,
       wasAudioSkipped: reason === "audioUnavailable",
+      outcome: reason === "audioUnavailable"
+        ? "skipped"
+        : isCorrect && result.roundWon
+          ? "winner"
+          : reason === "timeout"
+            ? "timeout"
+            : "wrong",
     });
 
     if (reason === "audioUnavailable") {
@@ -2326,6 +2406,33 @@ function ArenaPage({
     const currentRoom = activeRoomSnapshotRef.current;
     if (room && currentRoom && isOlderArenaRoomSnapshot(room, currentRoom)) {
       return;
+    }
+
+    if (room && currentRoom?.id === room.id && session?.user.id) {
+      const previousPlayers = getPresentPlayers(currentRoom);
+      const nextPlayerIds = new Set(
+        getPresentPlayers(room).map((player) => player.userId)
+      );
+      const departedPlayer = previousPlayers.find(
+        (player) =>
+          player.userId !== session.user.id && !nextPlayerIds.has(player.userId)
+      );
+
+      if (departedPlayer) {
+        const nextHost = room.players.find(
+          (player) => player.userId === room.hostUserId
+        );
+        const hostChanged = currentRoom.hostUserId !== room.hostUserId;
+        const minimumPlayers = ARENA_MODE_SETTINGS[room.mode].minPlayersToStart;
+        const needsPlayers = getPresentPlayers(room).length < minimumPlayers;
+        const hostNote = hostChanged && nextHost
+          ? ` — ${nextHost.displayName} is now host`
+          : "";
+        const playerNote = needsPlayers && room.hostUserId === session.user.id
+          ? ` Waiting for ${minimumPlayers} players to start.`
+          : "";
+        setMessage(`${departedPlayer.displayName} left the lobby${hostNote}.${playerNote}`);
+      }
     }
 
     // Any direct room update invalidates slower polling responses that were
@@ -2497,6 +2604,7 @@ function ArenaPage({
 
     // play() is invoked synchronously from the Join gesture so desktop browsers
     // authorize the persistent Arena media element before asynchronous room work.
+    sounds.prime();
     void arenaAudioController.unlockFromUserGesture();
 
     const isAlreadyInRoom = room.players.some(
@@ -2539,6 +2647,7 @@ function ArenaPage({
       return;
     }
 
+    sounds.prime();
     void arenaAudioController.unlockFromUserGesture();
 
     if (!session?.user) {
@@ -2767,7 +2876,8 @@ function ArenaPage({
       return;
     }
 
-    void arenaAudioController.unlockFromUserGesture();
+    sounds.prime();
+    const mediaUnlock = arenaAudioController.unlockFromUserGesture();
 
     setIsPreparingDuel(true);
     setMessage("");
@@ -2819,6 +2929,11 @@ function ArenaPage({
       }
     }
 
+    arenaAudioController.warmPreview(
+      questions[0]?.correctTrack.previewUrl || "",
+      0
+    );
+    await mediaUnlock;
     const activatedRoom = await activateDuelRoom(
       freshRoom.id,
       questions,
@@ -3490,17 +3605,6 @@ function ArenaPage({
           <p className="game-state-detail">
             Players start from the same room clock.
           </p>
-          {(!isPartyMode || isPartyHost) &&
-            !isDuelAudioPrimed &&
-            currentDuelQuestion?.correctTrack.previewUrl && (
-            <button
-              type="button"
-              className="clip-button audio-prime-button"
-              onClick={() => void primeCurrentDuelAudio()}
-            >
-              Enable game audio
-            </button>
-            )}
         </>
       );
     }
@@ -3513,17 +3617,6 @@ function ArenaPage({
             {duelStartCountdown === 0 ? "GO" : duelStartCountdown}
           </p>
           <p className="game-state-detail">Clip starts on go.</p>
-          {(!isPartyMode || isPartyHost) &&
-            !isDuelAudioPrimed &&
-            currentDuelQuestion?.correctTrack.previewUrl && (
-            <button
-              type="button"
-              className="clip-button audio-prime-button"
-              onClick={() => void primeCurrentDuelAudio()}
-            >
-              Enable game audio
-            </button>
-            )}
         </>
       );
     }
@@ -3747,9 +3840,15 @@ function ArenaPage({
             (isPartyMode && activeRoom?.partyAudioStatus === "skipped")
               ? "Audio skipped"
               : isCompetitiveMode
-                ? activeRoom?.competitiveRoundWinnerUserId
-                  ? "Round won"
-                  : "Round over"
+                ? duelLastResult?.outcome === "winner"
+                  ? "You got it first"
+                  : duelLastResult?.outcome === "opponent"
+                    ? "Beaten to it"
+                  : duelLastResult?.outcome === "timeout"
+                      ? "Time"
+                      : duelLastResult?.outcome === "wrong"
+                        ? "Round missed"
+                      : "Round over"
               : "Reveal"}
           </p>
           {duelLastResult?.isCorrect ? (
@@ -3782,6 +3881,8 @@ function ArenaPage({
                   ? ""
                   : duelLastResult?.isCorrect
                     ? "hype-good"
+                    : duelLastResult?.outcome === "opponent"
+                      ? "hype-opponent"
                     : "hype-bad"
               }`}
             >
