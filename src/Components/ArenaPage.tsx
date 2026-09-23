@@ -688,7 +688,9 @@ function ArenaPage({
       return;
     }
 
-    const previousRoomId = activeRoundKeyRef.current.split(":")[0];
+    const previousRoomParts = activeRoundKeyRef.current.split(":");
+    const previousRoomId = previousRoomParts[0];
+    const previousMatchGeneration = Number(previousRoomParts[1]);
     activeRoundKeyRef.current = roundKey;
 
     if (previousRoomId !== activeRoom.id) {
@@ -697,6 +699,9 @@ function ArenaPage({
     }
 
     if (activeRoom.status === "waiting") {
+      if (previousMatchGeneration !== activeRoom.roundNumber) {
+        arenaAudioController.resetMatch("remote-rematch-generation");
+      }
       resetDuelLocalState();
       return;
     }
@@ -2332,6 +2337,7 @@ function ArenaPage({
   }
 
   function resetDuelLocalState(nextPhase: DuelPhase = "idle") {
+    clearDuelAudioFallbackTimer();
     arenaAudioController.stopAll("reset-local-state");
     competitiveQuestionKeyRef.current = "";
     competitiveAudioStartKeyRef.current = "";
@@ -3286,6 +3292,7 @@ function ArenaPage({
       return;
     }
 
+    arenaAudioController.resetMatch("host-rematch-generation");
     updateActiveRoom(room);
     setSelectedAlbum(null);
     setIsChoosingRematchAlbum(false);

@@ -134,7 +134,8 @@ type DiagnosticEvent =
   | "READY_ACK_ATTEMPTED"
   | "READY_ACK_SUCCESS"
   | "READY_ACK_FAILURE"
-  | "SERVER_PHASE_SEEN";
+  | "SERVER_PHASE_SEEN"
+  | "MATCH_RESET";
 
 const MEDIA_READY_TIMEOUT_MS = 4000;
 const COMPETITIVE_READY_TIMEOUT_MS = 10500;
@@ -291,6 +292,37 @@ export class ArenaAudioController {
     this.activePlayback = null;
     this.mediaUnlocked = false;
     this.prefetchedUrls.clear();
+  }
+
+  resetMatch(reason: string) {
+    this.log("MATCH_RESET", {
+      reason,
+      previousRoundKey: this.activeRound?.roundKey || null,
+      preservedMediaUnlock: this.mediaUnlocked,
+    });
+    this.operationId += 1;
+    this.stopTimers();
+    this.audio?.pause();
+    this.activeRound = null;
+    this.activePlayback = null;
+    this.stallRecoveryRoundKey = "";
+    this.questionReceivedAt = 0;
+
+    if (this.audio) {
+      this.audio.removeAttribute("src");
+      this.audio.load();
+    }
+
+    if (this.preloader) {
+      this.preloaderCleanup?.();
+      this.preloaderCleanup = null;
+      this.preloader.pause();
+      this.preloader.removeAttribute("src");
+      this.preloader.load();
+    }
+
+    this.prefetchedUrls.clear();
+    this.callbacks.onPlaybackChange?.(false);
   }
 
   prepareRound(round: ArenaAudioRound, nextPreviewUrl = "") {

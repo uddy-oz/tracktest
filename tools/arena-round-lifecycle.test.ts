@@ -61,6 +61,14 @@ assert.equal(
   "a client may retry preparation three times for the same immutable round"
 );
 assert.equal(
+  canReportCompetitiveAudioFailure(
+    { ...base, matchGeneration: 3, roundId: "rematch-round-1" },
+    expected
+  ),
+  false,
+  "a rematch generation can never acknowledge or fail the previous match"
+);
+assert.equal(
   isOlderCompetitiveSnapshot(base, base),
   false,
   "reconnecting during preparation can reconcile the current snapshot"
@@ -124,4 +132,4 @@ assert.equal(
   "duplicate Realtime events are idempotent"
 );
 
-console.log("Arena round lifecycle race tests passed (17 assertions). ");
+console.log("Arena round lifecycle race tests passed (18 assertions). ");

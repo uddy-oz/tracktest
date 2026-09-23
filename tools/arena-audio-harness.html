@@ -189,6 +189,37 @@
               result.status === "playing" && result.actualPlaybackObserved
           ).length;
 
+          controller.resetMatch("harness-rematch-generation");
+          const rematchRoundKey = "harness:2:round-1";
+          controller.prepareRound({
+            roomId: "harness",
+            matchGeneration: 2,
+            mode: "duel",
+            roundKey: rematchRoundKey,
+            roundId: "rematch-round-1",
+            roundIndex: 0,
+            phase: "preparing_audio",
+            previewUrl: previews[0].url,
+            clipStartSeconds: 9,
+          }, previews[1].url);
+          const rematchReadiness = await controller.waitUntilRoundReady(
+            rematchRoundKey,
+            TEST_CLIP_SECONDS
+          );
+          const rematchStartTime = audio.currentTime;
+          const rematchResult = await controller.startRound({
+            roundKey: rematchRoundKey,
+            timelineStartsAtMs: Date.now(),
+            clockOffsetMs: 0,
+            clipLengthSeconds: TEST_CLIP_SECONDS,
+          });
+          await sleep(700);
+          const rematchGenerationPassed =
+            rematchReadiness.status === "ready" &&
+            rematchResult.status === "playing" &&
+            audio.currentTime > rematchStartTime + 0.05;
+          controller.stopRound(rematchRoundKey, { reason: "harness-rematch-complete" });
+
           const staleRoundKey = "harness:stale:old";
           const currentRoundKey = "harness:stale:current";
           controller.prepareRound({
@@ -210,7 +241,7 @@
           });
           controller.prepareRound({
             roomId: "harness",
-            matchGeneration: 1,
+            matchGeneration: 2,
             mode: "duel",
             roundKey: currentRoundKey,
             roundId: "stale-current",
@@ -257,12 +288,15 @@
             boundedFailure.attempts >= 1 &&
             failureElapsedMs < 3000;
 
-          const allGuardsPassed = staleGuardPassed && boundedFailurePassed;
+          const allGuardsPassed =
+            rematchGenerationPassed && staleGuardPassed && boundedFailurePassed;
           document.title = `${passed}/${TEST_ROUNDS} passed${
             allGuardsPassed ? "" : " with guard failure"
           } - Arena audio harness`;
           output.textContent = `${passed}/${TEST_ROUNDS} rounds initiated playback.\nStale-round guard: ${
             staleGuardPassed ? "passed" : "FAILED"
+          }.\nPersistent-controller rematch: ${
+            rematchGenerationPassed ? "passed" : "FAILED"
           }.\nBounded readiness failure: ${
             boundedFailurePassed
               ? `passed (${Math.round(failureElapsedMs)}ms, ${boundedFailure.attempts} attempts)`
