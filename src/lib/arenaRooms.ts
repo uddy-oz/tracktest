@@ -516,6 +516,34 @@ export async function createDuelRoom({
 
   const room = mapRoomRow(roomData as ArenaRoomRow);
   const { displayName, username } = getPlayerDisplay(profile);
+  if (room.isPrivate && room.inviteCode) {
+    // Direct membership inserts only allow public rooms. The invite RPC already
+    // validates private membership, including the host, under its row lock.
+    const { error } = await supabase.rpc("join_arena_room_by_invite", {
+      target_invite_code: room.inviteCode,
+      player_display_name: displayName,
+      player_username: username,
+    });
+    const result = await fetchArenaRoom(room.id);
+    const hostJoined = result.room?.players.some(
+      (player) => player.userId === user.id && !player.leftAt
+    );
+    if (error || !hostJoined) {
+      await supabase
+        .from("arena_rooms")
+        .update({ status: "cancelled", finished_at: new Date().toISOString() })
+        .eq("id", room.id)
+        .eq("host_user_id", user.id);
+      return {
+        room: null,
+        error:
+          getFriendlyArenaError(error?.message) ||
+          result.error ||
+          "Room created, but host membership could not be confirmed.",
+      };
+    }
+    return { room: result.room, error: null };
+  }
   const { data: playerData, error: playerError } = await supabase
     .from("arena_room_players")
     .insert({
@@ -784,16 +812,21 @@ export async function fetchArenaRoom(roomId: string) {
 export async function activateDuelRoom(
   roomId: string,
   questions: DuelQuizQuestion[],
-  mode: ArenaRoomMode = "duel"
+  mode: ArenaRoomMode = "duel",
+  diagnosticContext: Record<string, unknown> = {}
 ) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
   if (mode === "party_mode") {
-    const { error } = await supabase.rpc("start_party_room", {
+    const { data, error } = await supabase.rpc("start_party_room", {
       target_room_id: roomId,
       target_questions: questions,
+    });
+    logArenaDiagnostic("LOBBY_START_RPC", {
+      ...diagnosticContext, roomId, mode, rpc: "start_party_room", response: data,
+      error: error ? { code: error.code, message: error.message } : null,
     });
 
     if (error) {
@@ -803,7 +836,8 @@ export async function activateDuelRoom(
     return fetchArenaRoom(roomId);
   }
 
-  let { error } = await supabase.rpc("prepare_competitive_arena_room", {
+  let rpc = "prepare_competitive_arena_room";
+  let { data, error } = await supabase.rpc(rpc, {
     target_room_id: roomId,
     target_questions: questions,
   });
@@ -811,11 +845,20 @@ export async function activateDuelRoom(
   // Keep deployments playable while the additive lobby-gate migration is
   // being applied. PostgREST reports an unknown RPC as PGRST202.
   if (error?.code === "PGRST202") {
-    ({ error } = await supabase.rpc("start_competitive_arena_room", {
+    logArenaDiagnostic("LOBBY_START_RPC", {
+      ...diagnosticContext, roomId, mode, rpc, response: data,
+      error: { code: error.code, message: error.message },
+    });
+    rpc = "start_competitive_arena_room";
+    ({ data, error } = await supabase.rpc(rpc, {
       target_room_id: roomId,
       target_questions: questions,
     }));
   }
+  logArenaDiagnostic("LOBBY_START_RPC", {
+    ...diagnosticContext, roomId, mode, rpc, response: data,
+    error: error ? { code: error.code, message: error.message } : null,
+  });
 
   if (error) {
     return { room: null, error: getFriendlyArenaError(error.message) };
@@ -864,13 +907,17 @@ export async function acknowledgeCompetitiveLobbyAudioReady({
 
 export async function startPreparedCompetitiveArenaRoom(roomId: string) {
   if (!supabase) {
-    return { room: null, error: "Supabase is not configured yet." };
+    return { room: null, started: false, error: "Supabase is not configured yet." };
   }
 
-  const { error } = await supabase.rpc(
+  const { data, error } = await supabase.rpc(
     "start_prepared_competitive_arena_room",
     { target_room_id: roomId }
   );
+  logArenaDiagnostic("LOBBY_START_RPC", {
+    roomId, rpc: "start_prepared_competitive_arena_room", response: data,
+    error: error ? { code: error.code, message: error.message } : null,
+  });
 
   if (error) {
     logArenaDiagnostic("RPC_ERROR", {
@@ -879,10 +926,10 @@ export async function startPreparedCompetitiveArenaRoom(roomId: string) {
       code: error.code,
       message: error.message,
     });
-    return { room: null, error: getFriendlyArenaError(error.message) };
+    return { room: null, started: false, error: getFriendlyArenaError(error.message) };
   }
 
-  return fetchArenaRoom(roomId);
+  return { ...await fetchArenaRoom(roomId), started: data?.started === true };
 }
 
 export async function fetchCompetitiveClockOffset(roomId: string) {

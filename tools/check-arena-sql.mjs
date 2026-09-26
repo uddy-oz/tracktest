@@ -13,6 +13,10 @@ const lobbyAudioGate = readFileSync(
   new URL("../supabase/20260923_competitive_lobby_audio_gate.sql", import.meta.url),
   "utf8"
 );
+const lobbyStartReliability = readFileSync(
+  new URL("../supabase/20260926_arena_lobby_start_reliability.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -25,6 +29,18 @@ assert.doesNotMatch(
   migration,
   /competitive_round_phase not in\s*\(\s*'preparing_audio',\s*'countdown',\s*'answering'/,
   "countdown and answering must never be skippable by readiness"
+);
+assert.match(lobbyStartReliability, /^begin;/i, "lobby reliability migration must begin transactionally");
+assert.match(lobbyStartReliability, /commit;\s*$/i, "lobby reliability migration must commit transactionally");
+assert.doesNotMatch(
+  lobbyStartReliability,
+  /if target_room\.host_user_id = auth\.uid\(\) then\s+return target_room\.id/,
+  "private-room hosts must reach the authoritative membership upsert"
+);
+assert.match(
+  lobbyStartReliability,
+  /user_id = auth\.uid\(\)/,
+  "invite membership must remain bound to the authenticated user"
 );
 assert.match(
   migration,
@@ -69,4 +85,4 @@ assert.doesNotMatch(
   "Party Mode must remain on its host-only audio timeline"
 );
 
-console.log("Arena SQL lifecycle guards passed (14 assertions).");
+console.log("Arena SQL lifecycle guards passed (18 assertions).");

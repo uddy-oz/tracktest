@@ -56,6 +56,12 @@ import {
   getCompetitiveRoundKey,
 } from "../lib/arenaRoundLifecycle";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
+import {
+  getArenaAlbumError,
+  getArenaStartMembers,
+  MIN_ARENA_TRACKS as MIN_QUESTIONS,
+  prepareArenaLobbyStart,
+} from "../lib/arenaLobbyStart";
 
 const arenaModes = [
   {
@@ -226,7 +232,6 @@ const ARENA_MODE_SETTINGS: Record<
     minPlayersToStart: 2,
   },
 };
-const MIN_QUESTIONS = 5;
 const MAX_QUESTIONS = 12;
 const RING_RADIUS = 54;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -302,6 +307,8 @@ function ArenaPage({
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isPreparingDuel, setIsPreparingDuel] = useState(false);
+  const [startError, setStartError] = useState("");
+  const startRequestInFlightRef = useRef(false);
 
   const [duelScore, setDuelScore] = useState(0);
   const [duelCorrectAnswers, setDuelCorrectAnswers] = useState(0);
@@ -914,7 +921,7 @@ function ArenaPage({
       return;
     }
 
-    const presentPlayers = getPresentPlayers(activeRoom);
+    const presentPlayers = getArenaStartMembers(activeRoom);
     if (
       presentPlayers.length === 0 ||
       presentPlayers.some((player) => !player.isReady)
@@ -929,11 +936,12 @@ function ArenaPage({
     const startPreparedRoom = async () => {
       setLobbyAudioMessage("Audio ready on every device. Starting match...");
       const result = await startPreparedCompetitiveArenaRoom(activeRoom.id);
-      if (result.room) {
+      if (result.room && result.started) {
         updateActiveRoom(result.room);
         resetDuelLocalState("syncing");
-      } else if (result.error) {
-        setLobbyAudioMessage(result.error);
+      } else {
+        if (result.room) updateActiveRoom(result.room);
+        setLobbyAudioMessage(result.error || "Waiting for every active player to be ready...");
         competitiveLobbyStartKeyRef.current = "";
       }
     };
@@ -2337,6 +2345,7 @@ function ArenaPage({
   }
 
   function resetDuelLocalState(nextPhase: DuelPhase = "idle") {
+    setStartError("");
     clearDuelAudioFallbackTimer();
     arenaAudioController.stopAll("reset-local-state");
     competitiveQuestionKeyRef.current = "";
@@ -2793,29 +2802,43 @@ function ArenaPage({
     setIsCreatingRoom(true);
     setMessage("");
 
-    const { room, error } = await createDuelRoom({
-      album: selectedAlbum,
-      user: session.user,
-      profile,
-      mode: activeArenaMode,
-      maxPlayers: modeSettings.maxPlayers,
-      isPrivate: isPrivateRoom,
-    });
+    try {
+      const tracks = await getSpotifyAlbumTracks(selectedAlbum.id);
+      const albumError = getArenaAlbumError(
+        tracks.filter((track) => Boolean(track.previewUrl)).length
+      );
+      if (albumError) {
+        setMessage(albumError);
+        return;
+      }
+      const { room, error } = await createDuelRoom({
+        album: selectedAlbum,
+        user: session.user,
+        profile,
+        mode: activeArenaMode,
+        maxPlayers: modeSettings.maxPlayers,
+        isPrivate: isPrivateRoom,
+      });
 
-    if (room) {
-      allowRoomActivation(room);
-      resetDuelLocalState();
-      setSelectedAlbum(null);
-      await loadOpenRooms(false);
+      if (room && !error) {
+        allowRoomActivation(room);
+        resetDuelLocalState();
+        setSelectedAlbum(null);
+        await loadOpenRooms(false);
+      }
+
+      setMessage(
+        error ||
+          (room
+            ? `${isPrivateRoom ? "Private" : "Public"} ${modeSettings.title} room created.`
+            : "Failed to create room.")
+      );
+    } catch (error) {
+      logArenaDiagnostic("LOBBY_CREATE_FAILED", { message: error instanceof Error ? error.message : String(error) });
+      setMessage("Could not check this album or create the room. Try again.");
+    } finally {
+      setIsCreatingRoom(false);
     }
-
-    setMessage(
-      error ||
-        (room
-          ? `${isPrivateRoom ? "Private" : "Public"} ${modeSettings.title} room created.`
-          : "Failed to create room.")
-    );
-    setIsCreatingRoom(false);
   }
 
   function handleOpenRoomRequest(room: ArenaRoom) {
@@ -3165,12 +3188,12 @@ function ArenaPage({
       previewUrl: question.correctTrack.previewUrl,
     });
 
-    if (acknowledgement.error) {
+    if (acknowledgement.error || acknowledgement.result?.accepted !== true) {
       arenaAudioController.noteDiagnostic("READY_ACK_FAILURE", {
         gate: "competitive-lobby",
-        message: acknowledgement.error,
+        message: acknowledgement.error || "Readiness was not accepted for this round.",
       });
-      setLobbyAudioMessage(`Could not confirm audio readiness: ${acknowledgement.error}`);
+      setLobbyAudioMessage(`Could not confirm audio readiness: ${acknowledgement.error || "Refresh the room and retry the audio check."}`);
       return false;
     }
 
@@ -3185,88 +3208,60 @@ function ArenaPage({
   }
 
   async function startArenaRoom(roomToStart: ArenaRoom) {
+    if (startRequestInFlightRef.current) return;
     if (!session?.user) {
+      setStartError("Sign in and refresh the room before starting.");
       return;
     }
 
-    sounds.prime();
-    const mediaUnlock = arenaAudioController.unlockFromUserGesture();
-
+    startRequestInFlightRef.current = true;
+    setStartError("");
     setIsPreparingDuel(true);
     setMessage("");
-
-    const { room: freshRoom, error } = await fetchArenaRoom(roomToStart.id);
-
-    if (!freshRoom) {
-      setMessage(error || "Could not refresh room.");
-      setIsPreparingDuel(false);
-      return;
-    }
-
-    if (freshRoom.hostUserId !== session.user.id) {
-      setMessage("Only the host can start this Arena room.");
-      setIsPreparingDuel(false);
-      return;
-    }
-
-    const freshModeSettings =
-      ARENA_MODE_SETTINGS[freshRoom.mode] || ARENA_MODE_SETTINGS.duel;
-
-    if (getPresentPlayers(freshRoom).length < freshModeSettings.minPlayersToStart) {
-      setMessage(
-        `Waiting for ${freshModeSettings.minPlayersToStart} players to start.`
-      );
-      setIsPreparingDuel(false);
-      return;
-    }
-
-    let questions = freshRoom.quizQuestions;
-
-    if (questions.length === 0) {
-      try {
-        const tracks = await getSpotifyAlbumTracks(freshRoom.albumId);
-        const playableTracks = tracks.filter((track) => Boolean(track.previewUrl));
-
-        if (playableTracks.length < MIN_QUESTIONS) {
-          setMessage("Not enough playable tracks for a Duel.");
-          setIsPreparingDuel(false);
-          return;
-        }
-
-        questions = buildDuelQuestions(playableTracks);
-      } catch (loadError) {
-        console.error(loadError);
-        setMessage("Could not prepare Duel questions.");
-        setIsPreparingDuel(false);
+    try {
+      sounds.prime();
+      const mediaUnlock = arenaAudioController.unlockFromUserGesture();
+      const result = await prepareArenaLobbyStart(roomToStart.id, session.user, {
+        fetchRoom: fetchArenaRoom,
+        loadTracks: getSpotifyAlbumTracks,
+        buildQuestions: buildDuelQuestions,
+        beforeActivate: async (questions) => {
+          arenaAudioController.warmPreview(
+            questions[0]?.correctTrack.previewUrl || "",
+            0
+          );
+          setIsArenaAudioUnlocked(await mediaUnlock);
+        },
+        activateRoom: activateDuelRoom,
+        log: logArenaDiagnostic,
+      });
+      if (
+        activeRoomIdRef.current !== roomToStart.id ||
+        activeRoomSnapshotRef.current?.roundNumber !== roomToStart.roundNumber
+      ) {
         return;
       }
+      if (result.error || !result.room) {
+        setStartError(
+          result.error || "Could not start match. Refresh the room and try again."
+        );
+        return;
+      }
+      updateActiveRoom(result.room);
+      resetDuelLocalState("syncing");
+      setMessage("First track staged. Checking audio on every device...");
+    } catch (error) {
+      logArenaDiagnostic("LOBBY_START_FAILED", { roomId: roomToStart.id, message: String(error) });
+      setStartError("Could not start match. Refresh the room and try again.");
+    } finally {
+      startRequestInFlightRef.current = false;
+      setIsPreparingDuel(false);
     }
-
-    arenaAudioController.warmPreview(
-      questions[0]?.correctTrack.previewUrl || "",
-      0
-    );
-    const didUnlockAudio = await mediaUnlock;
-    setIsArenaAudioUnlocked(didUnlockAudio);
-    const activatedRoom = await activateDuelRoom(
-      freshRoom.id,
-      questions,
-      freshRoom.mode
-    );
-
-    updateActiveRoom(activatedRoom.room || { ...freshRoom, quizQuestions: questions });
-    resetDuelLocalState("syncing");
-    setMessage(
-      activatedRoom.error ||
-        (freshRoom.mode === "party_mode"
-          ? `${freshModeSettings.title} starting. Everyone gets the same questions.`
-          : "First track staged. Checking audio on every device...")
-    );
-    setIsPreparingDuel(false);
   }
 
   async function handleStartDuel() {
     if (!activeRoom) {
+      setStartError("Could not start match. Refresh the room and try again.");
       return;
     }
 
@@ -4825,12 +4820,17 @@ function ArenaPage({
               onClick={() => void handleStartDuel()}
             >
               {isPreparingDuel
-                ? "Preparing..."
+                ? "Starting match..."
                 : `Start Synced ${activeModeSettings.title}`}
             </button>
           ) : (
             <p className="arena-note">
               Waiting for the host to start.
+            </p>
+          )}
+          {startError && (
+            <p className="arena-message" role="alert">
+              {startError}
             </p>
           )}
           <p className="arena-note">
@@ -5167,7 +5167,11 @@ function ArenaPage({
         </button>
       </form>
 
-      {message && <p className="arena-message">{message}</p>}
+      {message && !activeRoom && !activeArenaMode && (
+        <p className="arena-message" role="status">
+          {message}
+        </p>
+      )}
       {(activeRoom ||
         activeArenaMode ||
         pendingInvite ||
@@ -5218,6 +5222,7 @@ function ArenaPage({
               </button>
             )}
             {renderDuelLobby()}
+            {message && <p className="arena-message" role="status">{message}</p>}
           </div>
         </div>
       )}
