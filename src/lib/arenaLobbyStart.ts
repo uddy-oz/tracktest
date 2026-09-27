@@ -18,12 +18,22 @@ export function getArenaStartMembers(room: ArenaRoom) {
 }
 
 type RoomResult = { room: ArenaRoom | null; error: string | null };
+type QuestionSet = {
+  questions: DuelQuizQuestion[];
+  targetQuestionCount: number;
+};
 type StartDependencies = {
   fetchRoom: (roomId: string) => Promise<RoomResult>;
   loadTracks: (albumId: string) => Promise<SpotifyTrack[]>;
-  buildQuestions: (tracks: SpotifyTrack[]) => DuelQuizQuestion[];
+  buildQuestions: (tracks: SpotifyTrack[], mode: ArenaRoomMode) => QuestionSet;
   beforeActivate: (questions: DuelQuizQuestion[]) => Promise<void>;
-  activateRoom: (roomId: string, questions: DuelQuizQuestion[], mode: ArenaRoomMode, context: Record<string, unknown>) => Promise<RoomResult>;
+  activateRoom: (
+    roomId: string,
+    questions: DuelQuizQuestion[],
+    mode: ArenaRoomMode,
+    context: Record<string, unknown>,
+    targetQuestionCount: number
+  ) => Promise<RoomResult>;
   log: (event: string, details: Record<string, unknown>) => void;
 };
 
@@ -63,17 +73,27 @@ export async function prepareArenaLobbyStart(
 
     stage = "load-album";
     let questions = room.quizQuestions;
+    let targetQuestionCount =
+      room.competitiveTargetQuestionCount || room.quizQuestions.length;
     if (!questions.length) {
       const tracks = (await dependencies.loadTracks(room.albumId)).filter((track) => Boolean(track.previewUrl));
       dependencies.log("LOBBY_START_ALBUM", { ...context, playableTrackCount: tracks.length });
       const albumError = getArenaAlbumError(tracks.length);
       if (albumError) throw new Error(albumError);
-      questions = dependencies.buildQuestions(tracks);
+      const questionSet = dependencies.buildQuestions(tracks, room.mode);
+      questions = questionSet.questions;
+      targetQuestionCount = questionSet.targetQuestionCount;
     }
     stage = "unlock-audio";
     await dependencies.beforeActivate(questions);
     stage = "prepare-rpc";
-    const result = await dependencies.activateRoom(room.id, questions, room.mode, context);
+    const result = await dependencies.activateRoom(
+      room.id,
+      questions,
+      room.mode,
+      context,
+      targetQuestionCount
+    );
     if (result.error || !result.room) throw new Error(result.error || "Could not prepare the room.");
     if (!["starting", "active"].includes(result.room.status)) {
       throw new Error("The room did not start. Refresh the room and try again.");

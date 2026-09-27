@@ -26,6 +26,11 @@ const expected = {
 
 assert.equal(canReportCompetitiveAudioFailure(base, expected), true);
 assert.equal(
+  canReportCompetitiveAudioFailure({ ...base, status: "starting" }, expected),
+  true,
+  "the pre-game gate may replace an unusable staged candidate"
+);
+assert.equal(
   canReportCompetitiveAudioFailure({ ...base, phase: "countdown" }, expected),
   false,
   "a stale failure cannot skip a countdown"
@@ -132,4 +137,4 @@ assert.equal(
   "duplicate Realtime events are idempotent"
 );
 
-console.log("Arena round lifecycle race tests passed (18 assertions). ");
+console.log("Arena round lifecycle race tests passed (19 assertions). ");

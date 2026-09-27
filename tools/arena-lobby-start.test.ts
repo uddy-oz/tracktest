@@ -21,7 +21,7 @@ function fixture(snapshot = room(), trackCount = 6) {
   const deps = {
     fetchRoom: async () => ({ room: snapshot, error: null }),
     loadTracks: async (albumId: string) => { calls.push(`album:${albumId}`); return tracks.slice(0, trackCount); },
-    buildQuestions: () => questions,
+    buildQuestions: () => ({ questions, targetQuestionCount: questions.length }),
     beforeActivate: async () => { calls.push("unlock"); },
     activateRoom: async (_id: string, shared: DuelQuizQuestion[], mode: string) => {
       calls.push(`rpc:${mode}`);

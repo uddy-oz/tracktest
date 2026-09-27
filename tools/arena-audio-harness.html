@@ -49,10 +49,10 @@
     <main>
       <h1>StanZer Arena audio lifecycle harness</h1>
       <p>
-        Runs the production Arena audio controller through 12 consecutive,
-        distinct iTunes previews. Open the console for structured lifecycle logs.
+        Runs the production Arena audio controller through 50 consecutive,
+        sequential iTunes preview preparations. Open the console for structured lifecycle logs.
       </p>
-      <button id="run" type="button">Run 12 preview rounds</button>
+      <button id="run" type="button">Run 50 preview preparations</button>
       <pre id="results">Ready.</pre>
       <audio id="arena-audio" preload="auto"></audio>
     </main>
@@ -62,8 +62,8 @@
 
       const harnessParams = new URLSearchParams(window.location.search);
       const TEST_ALBUM_ID = harnessParams.get("album") || "1584449196";
-      const TEST_ROUNDS = 12;
-      const TEST_CLIP_SECONDS = 2;
+      const TEST_ROUNDS = Math.max(1, Number(harnessParams.get("rounds")) || 50);
+      const TEST_CLIP_SECONDS = 0.5;
       const repeatOnePreview = harnessParams.has("repeat");
       const output = document.querySelector("#results");
       const runButton = document.querySelector("#run");
@@ -89,12 +89,15 @@
               item.kind === "song" &&
               item.previewUrl
           )
-          .map((item) => ({ name: item.trackName, url: item.previewUrl }))
-          .slice(0, TEST_ROUNDS);
+          .map((item) => ({ name: item.trackName, url: item.previewUrl }));
 
-        return repeatOnePreview
+        const source = repeatOnePreview
           ? Array.from({ length: TEST_ROUNDS }, () => previews[0])
-          : previews;
+          : Array.from(
+              { length: TEST_ROUNDS },
+              (_, index) => previews[index % previews.length]
+            );
+        return source;
       }
 
       runButton.addEventListener("click", async () => {
@@ -102,23 +105,29 @@
         output.textContent = "Loading previews...";
         const controller = new ArenaAudioController();
         const results = [];
+        const confirmedRoundKeys = new Set();
 
         controller.attach(audio);
         controller.setCallbacks({
+          onPlaybackConfirmed: (roundKey) => confirmedRoundKeys.add(roundKey),
           onPlaybackFailure: (failure) => {
             console.error("Harness playback failure", failure);
           },
         });
 
         try {
+          const unlockPromise = controller.unlockFromUserGesture();
           const previews = await getPreviewUrls();
-          if (previews.length < TEST_ROUNDS) {
-            throw new Error(`Only ${previews.length} playable previews were returned.`);
+          if (!previews[0]) {
+            throw new Error("No playable previews were returned.");
+          }
+          if (!(await unlockPromise)) {
+            throw new Error("The browser did not unlock the audio device.");
           }
 
           for (let index = 0; index < previews.length; index += 1) {
             const preview = previews[index];
-            const nextPreview = previews[index + 1];
+            const nextPreviews = previews.slice(index + 1, index + 4);
             const roundKey = `harness:1:${index}`;
             let observedProgress = 0;
             let previousPlaybackTime = null;
@@ -147,7 +156,11 @@
                 clipStartSeconds: 6 + (index % 12),
                 serverTimestamp: new Date().toISOString(),
               },
-              nextPreview?.url || ""
+              nextPreviews.map((nextPreview, offset) => ({
+                previewUrl: nextPreview.url,
+                clipStartSeconds: 6 + ((index + offset + 1) % 12),
+                roundIndex: index + offset + 1,
+              }))
             );
             audio.addEventListener("timeupdate", observeProgress);
             const readiness = await controller.waitUntilRoundReady(
@@ -156,9 +169,18 @@
             );
 
             if (readiness.status !== "ready") {
-              throw new Error(
-                `Round ${index + 1} readiness failed: ${readiness.message || readiness.status}`
-              );
+              results.push({
+                round: index + 1,
+                track: preview.name,
+                status: "readiness-failed",
+                readiness: readiness.status,
+                readinessReason:
+                  readiness.status === "failed" ? readiness.reason : "STALE_ROUND",
+                readinessMessage:
+                  readiness.status === "failed" ? readiness.message : readiness.status,
+              });
+              output.textContent = JSON.stringify(results, null, 2);
+              continue;
             }
 
             const result = await controller.startRound({
@@ -167,7 +189,7 @@
               clockOffsetMs: 0,
               clipLengthSeconds: TEST_CLIP_SECONDS,
             });
-            await sleep(TEST_CLIP_SECONDS * 1000 + 250);
+            await sleep(TEST_CLIP_SECONDS * 1000 + 120);
             audio.removeEventListener("timeupdate", observeProgress);
 
             results.push({
@@ -177,7 +199,8 @@
               readiness: readiness.status,
               readinessAttempts: readiness.attempts,
               prefetched: readiness.prefetched,
-              actualPlaybackObserved: observedProgress > 0.05,
+              actualPlaybackObserved:
+                confirmedRoundKeys.has(roundKey) || observedProgress > 0.05,
               readyState: audio.readyState,
               networkState: audio.networkState,
             });
@@ -188,6 +211,7 @@
             (result) =>
               result.status === "playing" && result.actualPlaybackObserved
           ).length;
+          const sequenceMetrics = controller.getReliabilityMetrics();
 
           controller.resetMatch("harness-rematch-generation");
           const rematchRoundKey = "harness:2:round-1";
@@ -217,7 +241,8 @@
           const rematchGenerationPassed =
             rematchReadiness.status === "ready" &&
             rematchResult.status === "playing" &&
-            audio.currentTime > rematchStartTime + 0.05;
+            (confirmedRoundKeys.has(rematchRoundKey) ||
+              audio.currentTime > rematchStartTime + 0.05);
           controller.stopRound(rematchRoundKey, { reason: "harness-rematch-complete" });
 
           const staleRoundKey = "harness:stale:old";
@@ -262,7 +287,8 @@
           const staleGuardPassed =
             staleResult.status === "stale" &&
             currentResult.status === "playing" &&
-            audio.currentTime > currentStartTime + 0.05;
+            (confirmedRoundKeys.has(currentRoundKey) ||
+              audio.currentTime > currentStartTime + 0.05);
 
           const failureRoundKey = "harness:failure:bounded";
           controller.prepareRound({
@@ -301,7 +327,9 @@
             boundedFailurePassed
               ? `passed (${Math.round(failureElapsedMs)}ms, ${boundedFailure.attempts} attempts)`
               : "FAILED"
-          }.\n\n${JSON.stringify(results, null, 2)}`;
+          }.\nReliability metrics: ${JSON.stringify(
+            sequenceMetrics
+          )}.\n\n${JSON.stringify(results, null, 2)}`;
         } catch (error) {
           console.error(error);
           output.textContent = error instanceof Error ? error.message : String(error);

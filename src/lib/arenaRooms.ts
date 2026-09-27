@@ -98,6 +98,9 @@ export type ArenaRoom = {
   competitiveReadyCount: number;
   competitiveAudioFailed: boolean;
   competitiveAudioFailureReason: string | null;
+  competitiveTargetQuestionCount: number;
+  competitiveReserveQuestions: DuelQuizQuestion[];
+  competitiveReserveReplacements: number;
   partyAudioQuestionIndex: number | null;
   partyAudioStatus: PartyAudioStatus;
   partyQuestionIndex: number;
@@ -162,6 +165,9 @@ type ArenaRoomRow = {
   competitive_ready_count?: number | null;
   competitive_audio_failed?: boolean | null;
   competitive_audio_failure_reason?: string | null;
+  competitive_target_question_count?: number | null;
+  competitive_reserve_questions?: unknown;
+  competitive_reserve_replacements?: number | null;
   party_audio_question_index?: number | null;
   party_audio_status?: string | null;
   party_question_index?: number | null;
@@ -813,7 +819,8 @@ export async function activateDuelRoom(
   roomId: string,
   questions: DuelQuizQuestion[],
   mode: ArenaRoomMode = "duel",
-  diagnosticContext: Record<string, unknown> = {}
+  diagnosticContext: Record<string, unknown> = {},
+  targetQuestionCount = questions.length
 ) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
@@ -836,14 +843,30 @@ export async function activateDuelRoom(
     return fetchArenaRoom(roomId);
   }
 
-  let rpc = "prepare_competitive_arena_room";
+  let rpc = "prepare_competitive_arena_room_v2";
   let { data, error } = await supabase.rpc(rpc, {
     target_room_id: roomId,
     target_questions: questions,
+    target_question_count: targetQuestionCount,
   });
 
-  // Keep deployments playable while the additive lobby-gate migration is
-  // being applied. PostgREST reports an unknown RPC as PGRST202.
+  // Keep deployments playable while the reserve-round migration is being
+  // applied. The legacy RPC receives only primary questions so an older
+  // database can never turn reserve candidates into extra scored rounds.
+  if (error?.code === "PGRST202") {
+    logArenaDiagnostic("LOBBY_START_RPC", {
+      ...diagnosticContext, roomId, mode, rpc, response: data,
+      error: { code: error.code, message: error.message },
+    });
+    rpc = "prepare_competitive_arena_room";
+    ({ data, error } = await supabase.rpc(rpc, {
+      target_room_id: roomId,
+      target_questions: questions.slice(0, targetQuestionCount),
+    }));
+  }
+
+  // This second fallback supports deployments that predate the lobby audio
+  // gate while preserving the same primary-only behavior.
   if (error?.code === "PGRST202") {
     logArenaDiagnostic("LOBBY_START_RPC", {
       ...diagnosticContext, roomId, mode, rpc, response: data,
@@ -852,7 +875,7 @@ export async function activateDuelRoom(
     rpc = "start_competitive_arena_room";
     ({ data, error } = await supabase.rpc(rpc, {
       target_room_id: roomId,
-      target_questions: questions,
+      target_questions: questions.slice(0, targetQuestionCount),
     }));
   }
   logArenaDiagnostic("LOBBY_START_RPC", {
@@ -1504,6 +1527,14 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     competitiveAudioFailed: Boolean(row.competitive_audio_failed),
     competitiveAudioFailureReason:
       row.competitive_audio_failure_reason || null,
+    competitiveTargetQuestionCount:
+      row.competitive_target_question_count ||
+      normalizeDuelQuestions(row.quiz_questions).length,
+    competitiveReserveQuestions: normalizeDuelQuestions(
+      row.competitive_reserve_questions
+    ),
+    competitiveReserveReplacements:
+      row.competitive_reserve_replacements || 0,
     partyAudioQuestionIndex:
       typeof row.party_audio_question_index === "number"
         ? row.party_audio_question_index

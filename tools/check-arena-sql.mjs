@@ -17,6 +17,10 @@ const lobbyStartReliability = readFileSync(
   new URL("../supabase/20260926_arena_lobby_start_reliability.sql", import.meta.url),
   "utf8"
 );
+const audioReservePipeline = readFileSync(
+  new URL("../supabase/20260926_competitive_audio_reserve_pipeline.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -24,6 +28,38 @@ assert.match(
   migration,
   /competitive_round_phase <> 'preparing_audio'/,
   "global skips must close when preparation ends"
+);
+assert.match(audioReservePipeline, /^begin;/i, "reserve pipeline must begin transactionally");
+assert.match(audioReservePipeline, /commit;\s*$/i, "reserve pipeline must commit transactionally");
+assert.match(
+  audioReservePipeline,
+  /competitive_reserve_questions jsonb not null default '\[\]'::jsonb/,
+  "reserve questions must be persisted separately from scored questions"
+);
+assert.match(
+  audioReservePipeline,
+  /quiz_questions = jsonb_set/,
+  "candidate recovery must atomically promote a reserve"
+);
+assert.match(
+  audioReservePipeline,
+  /competitive_round_id = replacement_round_id/,
+  "replacement candidates need a fresh immutable round token"
+);
+assert.match(
+  audioReservePipeline,
+  /competitive_round_phase <> 'preparing_audio'/,
+  "replacement must close once countdown starts"
+);
+assert.match(
+  audioReservePipeline,
+  /if target_room\.status = 'starting' then\s+return false;/,
+  "pre-game exhaustion must not create a scored skip"
+);
+assert.doesNotMatch(
+  audioReservePipeline,
+  /party_mode/,
+  "Party Mode must remain on its host-only audio path"
 );
 assert.doesNotMatch(
   migration,
@@ -85,4 +121,4 @@ assert.doesNotMatch(
   "Party Mode must remain on its host-only audio timeline"
 );
 
-console.log("Arena SQL lifecycle guards passed (18 assertions).");
+console.log("Arena SQL lifecycle guards passed (26 assertions).");

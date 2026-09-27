@@ -128,6 +128,7 @@ const DUEL_ROOM_REFRESH_MS = 1000;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
 const AUDIO_BLOCKED_SKIP_DELAY_MS = 3500;
 const ALBUM_SEARCH_DEBOUNCE_MS = 450;
+const COMPETITIVE_RESERVE_QUESTIONS = 4;
 const ARENA_STATUS_ORDER: Record<string, number> = {
   waiting: 0,
   starting: 1,
@@ -159,6 +160,12 @@ const LEGACY_ARENA_ROOM_STORAGE_KEYS = [
   "tracktestArenaRoomId",
   "tracktest_arena_room_id",
 ];
+
+function getArenaQuestionTotal(room: ArenaRoom) {
+  return room.mode === "party_mode"
+    ? room.quizQuestions.length
+    : room.competitiveTargetQuestionCount || room.quizQuestions.length;
+}
 
 function isOlderArenaRoomSnapshot(next: ArenaRoom, current: ArenaRoom) {
   if (next.id !== current.id) return false;
@@ -348,6 +355,7 @@ function ArenaPage({
   const duelSelectedAnswerRef = useRef("");
   const activeRoundKeyRef = useRef<string>("");
   const progressionSyncedRoundRef = useRef<string>("");
+  const audioMetricsLoggedRoundRef = useRef<string>("");
   const competitiveQuestionKeyRef = useRef<string>("");
   const competitiveAudioStartKeyRef = useRef<string>("");
   const competitiveAudioReadyKeyRef = useRef<string>("");
@@ -383,9 +391,16 @@ function ArenaPage({
         duelClipCompletedRef.current = true;
       }
     },
-    onPlaybackFailure: ({ roundKey, message: audioMessage, errorName, errorMessage }) => {
+    onPlaybackFailure: ({
+      roundKey,
+      reason,
+      message: audioMessage,
+      errorName,
+      errorMessage,
+    }) => {
       console.error("Arena audio playback failed:", {
         roundKey,
+        reason,
         message: audioMessage,
         errorName,
         errorMessage,
@@ -396,7 +411,7 @@ function ArenaPage({
         room?.status === "active" &&
         room.competitiveRoundPhase === "preparing_audio"
       ) {
-        void failCompetitiveQuestionAudio(audioMessage, roundKey);
+        void failCompetitiveQuestionAudio(`${reason}: ${audioMessage}`, roundKey);
       } else if (room?.mode !== "party_mode" && room?.status === "active") {
         logArenaDiagnostic("STALE_AUDIO_FAILURE_IGNORED", {
           roomId: room.id,
@@ -406,6 +421,7 @@ function ArenaPage({
           serverPhase: room.competitiveRoundPhase,
           clientPhase: duelPhaseRef.current,
           roundKey,
+          reason,
           audioMessage,
           errorName,
           errorMessage,
@@ -431,6 +447,9 @@ function ArenaPage({
     ? activeRoom?.partyQuestionIndex || 0
     : activeRoom?.competitiveQuestionIndex || 0;
   const currentDuelQuestion = activeRoom?.quizQuestions[gameQuestionIndex];
+  const arenaQuestionTotal = activeRoom
+    ? getArenaQuestionTotal(activeRoom)
+    : 0;
   const activeQuestionRunKey = activeRoom
     ? activeRoom.mode === "party_mode"
       ? `${activeRoom.id}:${activeRoom.roundNumber}:party:${gameQuestionIndex}`
@@ -830,7 +849,29 @@ function ArenaPage({
       return;
     }
 
-    const nextQuestion = activeRoom.quizQuestions[gameQuestionIndex + 1];
+    const prefetchIndexes = isPartyMode
+      ? [gameQuestionIndex + 1, gameQuestionIndex + 2]
+      : [gameQuestionIndex + 1, gameQuestionIndex + 2];
+    const prefetchTargets = Array.from(new Set(prefetchIndexes))
+      .filter((index) => index > gameQuestionIndex)
+      .map((index) => ({
+        roundIndex: index,
+        previewUrl:
+          activeRoom.quizQuestions[index]?.correctTrack.previewUrl || "",
+        clipStartSeconds:
+          activeRoom.quizQuestions[index]?.clipStartSeconds || 0,
+      }))
+      .filter((target) => Boolean(target.previewUrl));
+    if (!isPartyMode) {
+      const reserve = activeRoom.competitiveReserveQuestions[0];
+      if (reserve?.correctTrack.previewUrl) {
+        prefetchTargets.push({
+          roundIndex: arenaQuestionTotal,
+          previewUrl: reserve.correctTrack.previewUrl,
+          clipStartSeconds: reserve.clipStartSeconds,
+        });
+      }
+    }
     const phase: ArenaAudioPhase = isPartyMode
       ? activeRoom.partyQuestionPhase === "awaiting_audio"
         ? "party_waiting_audio"
@@ -847,6 +888,7 @@ function ArenaPage({
         roomId: activeRoom.id,
         matchGeneration: activeRoom.roundNumber,
         userId: session?.user.id,
+        authType: session?.user.is_anonymous ? "anonymous" : "permanent",
         mode: activeRoom.mode,
         roundKey,
         roundId:
@@ -858,16 +900,18 @@ function ArenaPage({
         clipStartSeconds: currentDuelQuestion.clipStartSeconds,
         serverTimestamp,
       },
-      nextQuestion?.correctTrack.previewUrl || ""
+      prefetchTargets
     );
   }, [
     activeQuestionRunKey,
     activeRoom,
+    arenaQuestionTotal,
     arenaAudioController,
     currentDuelQuestion,
     gameQuestionIndex,
     isPartyHost,
     isPartyMode,
+    session?.user.is_anonymous,
     session?.user.id,
     isCompetitiveMode,
   ]);
@@ -1013,7 +1057,10 @@ function ArenaPage({
             skipReason: readyResult.message,
           });
         }
-        await failCompetitiveQuestionAudio(readyResult.message, roundKey);
+        await failCompetitiveQuestionAudio(
+          `${readyResult.reason}: ${readyResult.message}`,
+          roundKey
+        );
         return;
       }
 
@@ -1865,6 +1912,20 @@ function ArenaPage({
     return () => window.clearTimeout(refreshId);
   }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, onProgressionUpdated]);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV || !activeRoom || activeRoom.status !== "finished") {
+      return;
+    }
+    const metricsKey = `${activeRoom.id}:${activeRoom.roundNumber}`;
+    if (audioMetricsLoggedRoundRef.current === metricsKey) return;
+    audioMetricsLoggedRoundRef.current = metricsKey;
+    console.info("[STANZER_AUDIO_RELIABILITY]", {
+      roomId: activeRoom.id,
+      matchGeneration: activeRoom.roundNumber,
+      ...arenaAudioController.getReliabilityMetrics(),
+    });
+  }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, arenaAudioController]);
+
   function shuffleArray<T>(array: T[]) {
     return [...array].sort(() => Math.random() - 0.5);
   }
@@ -1896,12 +1957,25 @@ function ArenaPage({
     return 0;
   }
 
-  function buildDuelQuestions(tracks: SpotifyTrack[]): DuelQuizQuestion[] {
+  function buildDuelQuestions(
+    tracks: SpotifyTrack[],
+    mode: ArenaRoomMode
+  ): { questions: DuelQuizQuestion[]; targetQuestionCount: number } {
     const playableTracks = tracks.filter((track) => Boolean(track.previewUrl));
-    const questionCount = getQuestionCount(playableTracks.length);
-    const quizTracks = shuffleArray(playableTracks).slice(0, questionCount);
+    const targetQuestionCount = getQuestionCount(playableTracks.length);
+    const reserveCount =
+      mode === "party_mode"
+        ? 0
+        : Math.min(
+            COMPETITIVE_RESERVE_QUESTIONS,
+            playableTracks.length - targetQuestionCount
+          );
+    const quizTracks = shuffleArray(playableTracks).slice(
+      0,
+      targetQuestionCount + reserveCount
+    );
 
-    return quizTracks.map((correctTrack) => {
+    const questions = quizTracks.map((correctTrack) => {
       const wrongOptions = shuffleArray(
         playableTracks.filter((track) => track.id !== correctTrack.id)
       ).slice(0, 3);
@@ -1913,6 +1987,8 @@ function ArenaPage({
         clipStartSeconds: getRandomClipStart(30),
       };
     });
+
+    return { questions, targetQuestionCount };
   }
 
   function getStreakRewardLabel(currentStreak: number) {
@@ -2036,13 +2112,28 @@ function ArenaPage({
       result?.accepted === true
     ) {
       stopDuelClip(false, expectedRoundKey, "competitive-audio-failed");
-      duelPhaseRef.current = "audioSkipped";
-      setDuelPhase("audioSkipped");
-      setDuelAudioFallbackMessage(
-        "Audio unavailable on a player device. Question skipped for everyone."
-      );
+      if (result.replacementStaged === true) {
+        arenaAudioController.noteReserveReplacement();
+        duelPhaseRef.current = "syncing";
+        setDuelPhase("syncing");
+        setDuelAudioFallbackMessage("");
+        setMessage("Replacing an unavailable preview...");
+      } else {
+        arenaAudioController.noteVisibleSkip();
+        duelPhaseRef.current = "audioSkipped";
+        setDuelPhase("audioSkipped");
+        setDuelAudioFallbackMessage(
+          "Audio unavailable on a player device. Question skipped for everyone."
+        );
+      }
     } else {
       competitiveAudioFailureKeyRef.current = "";
+      if (result?.noReserve === true) {
+        const noReserveMessage =
+          "This preview could not be prepared and no reserve track is available. Choose another album or retry audio.";
+        setDuelAudioFallbackMessage(noReserveMessage);
+        setLobbyAudioMessage(noReserveMessage);
+      }
       logArenaDiagnostic("AUDIO_FAILURE_REJECTED_BY_SERVER", {
         roomId: room.id,
         matchGeneration: room.roundNumber,
@@ -3167,15 +3258,20 @@ function ArenaPage({
     const readyResult = await arenaAudioController.waitUntilRoundReady(
       roundKey,
       CLIP_LENGTH_SECONDS,
-      { deadlineMs: Date.now() + 20000, maxAttempts: 3 }
+      { deadlineMs: Date.now() + 3800, maxAttempts: 2 }
     );
 
     if (readyResult.status !== "ready") {
       const failure =
         readyResult.status === "failed"
-          ? readyResult.message
+          ? `${readyResult.reason}: ${readyResult.message}`
           : "The staged audio changed before it became ready.";
-      setLobbyAudioMessage(`${failure} Tap to retry audio.`);
+      if (readyResult.status === "failed") {
+        setLobbyAudioMessage("That preview is unavailable. Preparing a replacement...");
+        await failCompetitiveQuestionAudio(failure, roundKey);
+      } else {
+        setLobbyAudioMessage(`${failure} Tap to retry audio.`);
+      }
       return false;
     }
 
@@ -3483,11 +3579,11 @@ function ArenaPage({
               </span>
               <small>
                 {room.mode === "party_mode"
-                  ? `${player.currentCorrectAnswers}/${room.quizQuestions.length} correct`
+                  ? `${player.currentCorrectAnswers}/${getArenaQuestionTotal(room)} correct`
                   : `Avg win ${formatResponseTime(player.averageWinningResponseTime)}`}
               </small>
               <small>
-                Progress {player.currentQuestionIndex}/{room.quizQuestions.length}
+                Progress {player.currentQuestionIndex}/{getArenaQuestionTotal(room)}
               </small>
               <small>Streak {player.currentStreak}</small>
             </div>
@@ -4480,7 +4576,7 @@ function ArenaPage({
                 <p>
                   {isActivePartyMode ? "Question" : "Round"}{" "}
                   {gameQuestionIndex + 1} of{" "}
-                  {activeRoom.quizQuestions.length}
+                  {arenaQuestionTotal}
                 </p>
                 <span>
                   {duelPhase === "syncing"
@@ -4520,7 +4616,7 @@ function ArenaPage({
                   <strong>{currentPlayer?.displayName || "Arena Player"}</strong>
                   <p>{duelScore.toLocaleString()} round points</p>
                   <small>
-                    {duelCorrectAnswers}/{activeRoom.quizQuestions.length} rounds won
+                    {duelCorrectAnswers}/{arenaQuestionTotal} rounds won
                   </small>
                   <small>Streak {duelStreak}</small>
                 </div>
@@ -4533,7 +4629,7 @@ function ArenaPage({
                   </p>
                   <small>
                     {opponentPlayer?.currentCorrectAnswers || 0}/
-                    {activeRoom.quizQuestions.length} rounds won
+                    {arenaQuestionTotal} rounds won
                   </small>
                   <small>
                     Avg win {formatResponseTime(
@@ -4565,7 +4661,7 @@ function ArenaPage({
                   </span>
                   <span>
                     {isActivePartyMode ? "Correct" : "Rounds won"}:{" "}
-                    {duelCorrectAnswers} / {activeRoom.quizQuestions.length}
+                    {duelCorrectAnswers} / {arenaQuestionTotal}
                   </span>
                   <span>Accuracy: {duelLiveAccuracy}%</span>
                   <span className={duelStreak >= 3 ? "streak-reward" : "streak-chip"}>

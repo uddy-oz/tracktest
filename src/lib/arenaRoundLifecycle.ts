@@ -49,7 +49,7 @@ export function canReportCompetitiveAudioFailure(
   expected: CompetitiveRoundIdentity
 ) {
   return (
-    current.status === "active" &&
+    ["starting", "active"].includes(current.status) &&
     current.mode !== "party_mode" &&
     current.phase === "preparing_audio" &&
     isSameCompetitiveRound(current, expected)
