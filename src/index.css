@@ -3163,6 +3163,106 @@ button:hover {
   font-weight: 800;
 }
 
+.duel-player-card.lobby-ready {
+  border-color: rgba(46, 230, 107, 0.58);
+  background:
+    linear-gradient(135deg, rgba(46, 230, 107, 0.09), transparent 58%),
+    rgba(16, 16, 24, 0.88);
+  box-shadow: inset 3px 0 0 #2ee66b, 0 0 24px rgba(46, 230, 107, 0.1);
+}
+
+.duel-player-card.lobby-reconnecting {
+  border-color: rgba(255, 215, 106, 0.5);
+  box-shadow: inset 3px 0 0 #ffd76a;
+}
+
+.duel-player-card.lobby-left {
+  opacity: 0.58;
+  filter: saturate(0.35);
+}
+
+.lobby-player-status {
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.lobby-ready .lobby-player-status {
+  border-color: rgba(46, 230, 107, 0.5);
+  color: #8dffb5;
+  background: rgba(46, 230, 107, 0.09);
+}
+
+.lobby-reconnecting .lobby-player-status {
+  border-color: rgba(255, 215, 106, 0.46);
+  color: #fff1a8;
+  background: rgba(255, 215, 106, 0.08);
+}
+
+.arena-ready-controls {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.duel-ready-button {
+  min-width: min(100%, 260px);
+  border: 1px solid rgba(124, 92, 255, 0.7);
+  background: linear-gradient(135deg, #7c5cff, #a855f7);
+  box-shadow: 0 0 28px rgba(124, 92, 255, 0.24);
+}
+
+.duel-ready-button.is-ready {
+  border-color: rgba(46, 230, 107, 0.62);
+  color: #dfffea;
+  background: linear-gradient(135deg, #13793a, #20a959);
+  box-shadow: 0 0 28px rgba(46, 230, 107, 0.18);
+}
+
+.arena-host-choosing {
+  color: #fff1a8;
+  font-weight: 800;
+}
+
+.arena-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 3, 10, 0.78);
+  backdrop-filter: blur(12px);
+}
+
+.arena-confirm-dialog {
+  width: min(100%, 480px);
+  padding: clamp(24px, 5vw, 38px);
+  border: 1px solid rgba(124, 92, 255, 0.5);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(124, 92, 255, 0.2), transparent 42%),
+    #12121c;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.56);
+  text-align: left;
+}
+
+.arena-confirm-dialog h2 {
+  margin: 0 0 12px;
+  color: white;
+  font-size: clamp(24px, 5vw, 34px);
+}
+
+.arena-confirm-dialog > p:not(.eyebrow) {
+  margin: 0 0 24px;
+  color: var(--arena-muted);
+  line-height: 1.6;
+}
+
 .arena-audio-check {
   display: flex;
   align-items: center;

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getArenaAlbumError, prepareArenaLobbyStart } from "../src/lib/arenaLobbyStart.ts";
+import {
+  getArenaAlbumError,
+  getArenaLobbyStartEligibility,
+  prepareArenaLobbyStart,
+} from "../src/lib/arenaLobbyStart.ts";
 import type { ArenaRoom, ArenaRoomPlayer, DuelQuizQuestion } from "../src/lib/arenaRooms.ts";
 
 const player = (userId: string) => ({
-  userId, leftAt: null, finishedAt: null, forfeitedAt: null, resultStatus: "active",
+  userId, leftAt: null, finishedAt: null, forfeitedAt: null,
+  resultStatus: "active", lobbyReady: true,
 }) as ArenaRoomPlayer;
 const room = (changes: Partial<ArenaRoom> = {}) => ({
   id: "room", hostUserId: "host", mode: "duel", status: "waiting", albumId: "album",
@@ -55,6 +60,41 @@ for (const guestOpponent of [false, true]) {
 test("guest joining just before start is included by the fresh server snapshot", async () => {
   const f = fixture(room({ players: [player("host"), player("just-joined")] }));
   assert.equal((await prepareArenaLobbyStart("room", host, f.deps)).error, null);
+});
+
+test("competitive start rejects a current player who has not readied up", async () => {
+  const f = fixture(room({
+    players: [player("host"), { ...player("opponent"), lobbyReady: false }],
+  }));
+  const result = await prepareArenaLobbyStart("room", host, f.deps);
+  assert.match(result.error!, /must ready up/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.events.at(-1)?.details.stage, "validate-membership");
+});
+
+test("lobby eligibility updates immediately when a ready player leaves", () => {
+  const readyRoom = room();
+  assert.equal(getArenaLobbyStartEligibility(readyRoom).canStart, true);
+
+  const afterLeave = room({
+    players: [player("host"), { ...player("opponent"), leftAt: "now", lobbyReady: true }],
+  });
+  const eligibility = getArenaLobbyStartEligibility(afterLeave);
+  assert.equal(eligibility.canStart, false);
+  assert.equal(eligibility.members.length, 1);
+  assert.match(eligibility.reason, /2 active players/);
+});
+
+test("Party Mode keeps its host-controlled start without competitive ready-up", () => {
+  const partyRoom = room({
+    mode: "party_mode",
+    maxPlayers: 30,
+    players: [
+      { ...player("host"), lobbyReady: false },
+      { ...player("guest"), lobbyReady: false },
+    ],
+  });
+  assert.equal(getArenaLobbyStartEligibility(partyRoom).canStart, true);
 });
 
 for (const change of [{ leftAt: "now" }, { finishedAt: "now" }, { resultStatus: "forfeit" }]) {

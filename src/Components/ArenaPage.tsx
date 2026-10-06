@@ -4,7 +4,6 @@ import {
   acknowledgeCompetitiveLobbyAudioReady,
   acknowledgeCompetitiveAudioReady,
   activateDuelRoom,
-  cancelDuelRoom,
   createDuelRoom,
   endArenaRoom,
   fetchArenaRoom,
@@ -14,6 +13,7 @@ import {
   fetchOpenDuelRooms,
   forfeitDuelRoom,
   getFriendlyArenaError,
+  heartbeatArenaRoomPresence,
   isArenaRoomRecoverableForUser,
   joinArenaRoomByInvite,
   joinDuelRoom,
@@ -21,9 +21,12 @@ import {
   normalizeArenaInviteCode,
   requestArenaRematch,
   reportCompetitiveAudioFailure,
+  reconcileArenaRoomPresence,
   resetArenaRoomForRematch,
   type ArenaInvite,
   setPartyAudioState,
+  setArenaHostAlbumSelection,
+  setArenaLobbyReady,
   skipPartyQuestion,
   submitCompetitiveArenaAnswer,
   submitPartyAnswer,
@@ -58,6 +61,7 @@ import {
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import {
   getArenaAlbumError,
+  getArenaLobbyStartEligibility,
   getArenaStartMembers,
   MIN_ARENA_TRACKS as MIN_QUESTIONS,
   prepareArenaLobbyStart,
@@ -126,6 +130,7 @@ const REVEAL_COUNTDOWN_SECONDS = Math.ceil(REVEAL_NEXT_QUESTION_DELAY_MS / 1000)
 const CLIP_LENGTH_SECONDS = 5;
 const DUEL_ROOM_REFRESH_MS = 1000;
 const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
+const ARENA_PRESENCE_HEARTBEAT_MS = 8000;
 const AUDIO_BLOCKED_SKIP_DELAY_MS = 3500;
 const ALBUM_SEARCH_DEBOUNCE_MS = 450;
 const COMPETITIVE_RESERVE_QUESTIONS = 4;
@@ -270,6 +275,7 @@ type ArenaPageProps = {
   onArenaRoomChange?: (room: ArenaRoom | null) => void;
   onInviteHandled?: () => void;
   onProgressionUpdated?: () => void;
+  navigationNotice?: string;
 };
 
 type ArenaTheme = ArenaRoomMode | "championship";
@@ -285,6 +291,7 @@ function ArenaPage({
   onArenaRoomChange,
   onInviteHandled,
   onProgressionUpdated,
+  navigationNotice,
 }: ArenaPageProps) {
   const [selectedArenaTheme, setSelectedArenaTheme] =
     useState<ArenaTheme | null>(null);
@@ -314,7 +321,14 @@ function ArenaPage({
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isPreparingDuel, setIsPreparingDuel] = useState(false);
+  const [isUpdatingLobbyReady, setIsUpdatingLobbyReady] = useState(false);
   const [startError, setStartError] = useState("");
+  const [albumPlaybackError, setAlbumPlaybackError] = useState(false);
+  const [isConfirmingEndLobby, setIsConfirmingEndLobby] = useState(false);
+  const [onlinePlayerIds, setOnlinePlayerIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [isPresenceSynced, setIsPresenceSynced] = useState(false);
   const startRequestInFlightRef = useRef(false);
 
   const [duelScore, setDuelScore] = useState(0);
@@ -375,6 +389,8 @@ function ArenaPage({
   const arenaAudioControllerRef = useRef<ArenaAudioController | null>(null);
   const albumSearchRequestRef = useRef<AbortController | null>(null);
   const albumSearchSequenceRef = useRef(0);
+  const gamePanelRef = useRef<HTMLElement | null>(null);
+  const gameEntryScrollKeyRef = useRef("");
 
   if (!arenaAudioControllerRef.current) {
     arenaAudioControllerRef.current = new ArenaAudioController();
@@ -505,6 +521,8 @@ function ArenaPage({
   const shouldShowAlbumDock = Boolean(
     selectedAlbum && (!activeRoom || isChoosingRematchAlbum)
   );
+  const visibleMessage =
+    message || (navigationNotice ? navigationNotice.split("|")[0] : "");
 
   const burstPieces = useMemo(
     () =>
@@ -526,14 +544,20 @@ function ArenaPage({
 
   useEffect(() => {
     const query = searchTerm.trim();
-    if (!activeArenaMode || activeRoom || query.length < 2) return;
+    if (
+      !activeArenaMode ||
+      (activeRoom && !isChoosingRematchAlbum) ||
+      query.length < 2
+    ) {
+      return;
+    }
 
     const debounceId = window.setTimeout(() => {
       void runArenaAlbumSearch(query);
     }, ALBUM_SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(debounceId);
-  }, [activeArenaMode, activeRoom?.id, searchTerm]);
+  }, [activeArenaMode, activeRoom?.id, isChoosingRematchAlbum, searchTerm]);
 
   useEffect(
     () => () => {
@@ -659,13 +683,29 @@ function ArenaPage({
     if (
       !client ||
       !activeRoom ||
+      !session?.user.id ||
       !["waiting", "starting", "active"].includes(activeRoom.status)
     ) {
       return;
     }
 
     const channel = client
-      .channel(`arena-game-${activeRoom.id}`)
+      .channel(`arena-game-${activeRoom.id}`, {
+        config: { presence: { key: session.user.id } },
+      })
+      .on("presence", { event: "sync" }, () => {
+        const presenceState = channel.presenceState<{
+          userId?: string;
+        }>();
+        const nextOnlinePlayerIds = new Set(
+          Object.values(presenceState)
+            .flat()
+            .map((presence) => presence.userId)
+            .filter((userId): userId is string => Boolean(userId))
+        );
+        setOnlinePlayerIds(nextOnlinePlayerIds);
+        setIsPresenceSynced(true);
+      })
       .on(
         "postgres_changes",
         {
@@ -690,12 +730,80 @@ function ArenaPage({
           void refreshActiveRoom(false, "realtime");
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          void channel.track({
+            userId: session.user.id,
+            connectedAt: new Date().toISOString(),
+          });
+        }
+      });
 
     return () => {
+      setIsPresenceSynced(false);
+      setOnlinePlayerIds(new Set());
+      void channel.untrack();
       void client.removeChannel(channel);
     };
-  }, [activeRoom?.id, activeRoom?.status]);
+  }, [activeRoom?.id, activeRoom?.status, session?.user.id]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      !session?.user.id ||
+      !["waiting", "starting", "active"].includes(activeRoom.status)
+    ) {
+      return;
+    }
+
+    const roomId = activeRoom.id;
+    let cancelled = false;
+
+    const pulsePresence = async () => {
+      if (cancelled || !navigator.onLine) return;
+
+      await heartbeatArenaRoomPresence(roomId);
+      const roomSnapshot = activeRoomSnapshotRef.current;
+      if (
+        !roomSnapshot ||
+        roomSnapshot.id !== roomId ||
+        !["waiting", "starting"].includes(roomSnapshot.status)
+      ) {
+        return;
+      }
+
+      const reconciliation = await reconcileArenaRoomPresence(roomId);
+      if (cancelled || reconciliation.error) return;
+
+      if (
+        reconciliation.result?.changed === true ||
+        reconciliation.result?.hostClosed === true
+      ) {
+        const refreshed = await fetchArenaRoom(roomId);
+        if (!cancelled && refreshed.room) {
+          updateActiveRoom(refreshed.room);
+        }
+      }
+    };
+
+    void pulsePresence();
+    const heartbeatId = window.setInterval(
+      () => void pulsePresence(),
+      ARENA_PRESENCE_HEARTBEAT_MS
+    );
+    const handleVisible = () => {
+      if (document.visibilityState === "visible") void pulsePresence();
+    };
+    window.addEventListener("focus", pulsePresence);
+    document.addEventListener("visibilitychange", handleVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(heartbeatId);
+      window.removeEventListener("focus", pulsePresence);
+      document.removeEventListener("visibilitychange", handleVisible);
+    };
+  }, [activeRoom?.id, activeRoom?.status, session?.user.id]);
 
   useEffect(() => {
     if (!activeRoom) {
@@ -745,6 +853,33 @@ function ArenaPage({
     activeRoom?.roundNumber,
     activeRoom?.status,
     activeRoom?.startedAt,
+    activeRoom?.quizQuestions.length,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.status !== "active" ||
+      activeRoom.quizQuestions.length === 0 ||
+      !window.matchMedia("(max-width: 760px)").matches
+    ) {
+      return;
+    }
+
+    const entryKey = `${activeRoom.id}:${activeRoom.roundNumber}`;
+    if (gameEntryScrollKeyRef.current === entryKey) return;
+    gameEntryScrollKeyRef.current = entryKey;
+
+    const frameId = window.requestAnimationFrame(() => {
+      gamePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      gamePanelRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.status,
     activeRoom?.quizQuestions.length,
   ]);
 
@@ -2901,6 +3036,13 @@ function ArenaPage({
         tracks.filter((track) => Boolean(track.previewUrl)).length
       );
       if (albumError) {
+        logArenaDiagnostic("LOBBY_ALBUM_UNPLAYABLE", {
+          albumId: selectedAlbum.id,
+          albumName: selectedAlbum.title,
+          playableTrackCount: tracks.filter((track) => Boolean(track.previewUrl)).length,
+          minimumTracks: MIN_QUESTIONS,
+        });
+        setAlbumPlaybackError(true);
         setMessage(albumError);
         return;
       }
@@ -3142,14 +3284,6 @@ function ArenaPage({
     }
   }
 
-  async function handleCloseDuelRoom() {
-    if (!activeRoom || activeRoom.hostUserId !== session?.user.id) {
-      return;
-    }
-
-    await handleCloseArenaRoom(activeRoom);
-  }
-
   async function handleCloseArenaRoom(room: ArenaRoom) {
     if (
       room.hostUserId !== session?.user.id ||
@@ -3162,7 +3296,7 @@ function ArenaPage({
     leavingRoomIdRef.current = room.id;
     ignoredRoomIdsRef.current.add(room.id);
     setIsClosingActiveRoom(true);
-    const { error } = await cancelDuelRoom(room.id);
+    const { error } = await endArenaRoom(room.id);
 
     if (error) {
       ignoredRoomIdsRef.current.delete(room.id);
@@ -3234,6 +3368,78 @@ function ArenaPage({
         !player.leftAt &&
         !["cancelled", "left"].includes(player.resultStatus)
     );
+  }
+
+  function getLobbyPlayerState(player: ArenaRoomPlayer) {
+    if (
+      player.leftAt ||
+      ["cancelled", "left", "forfeit"].includes(player.resultStatus) ||
+      player.presenceStatus === "left"
+    ) {
+      return "LEFT" as const;
+    }
+
+    if (
+      player.presenceStatus === "reconnecting" ||
+      (isPresenceSynced && !onlinePlayerIds.has(player.userId))
+    ) {
+      return "RECONNECTING" as const;
+    }
+
+    return player.lobbyReady ? ("READY" as const) : ("NOT READY" as const);
+  }
+
+  async function handleToggleLobbyReady() {
+    const room = activeRoomSnapshotRef.current;
+    const player = room?.players.find(
+      (candidate) => candidate.userId === session?.user.id && !candidate.leftAt
+    );
+
+    if (
+      !room ||
+      !player ||
+      room.status !== "waiting" ||
+      room.mode === "party_mode" ||
+      isUpdatingLobbyReady
+    ) {
+      return;
+    }
+
+    setIsUpdatingLobbyReady(true);
+    setStartError("");
+    setMessage("");
+
+    try {
+      if (!player.lobbyReady) {
+        sounds.prime();
+        const audioUnlocked = await arenaAudioController.unlockFromUserGesture();
+        setIsArenaAudioUnlocked(audioUnlocked);
+        if (!audioUnlocked) {
+          setMessage(
+            "Game audio is blocked. Check this browser's sound permission, then tap Ready Up again."
+          );
+          return;
+        }
+      }
+
+      const result = await setArenaLobbyReady(room.id, !player.lobbyReady);
+      if (result.error) {
+        setMessage(result.error);
+        return;
+      }
+
+      const refreshed = await fetchArenaRoom(room.id);
+      if (refreshed.room) updateActiveRoom(refreshed.room);
+      setMessage(player.lobbyReady ? "Ready cancelled." : "You are ready.");
+    } catch (error) {
+      logArenaDiagnostic("LOBBY_READY_FAILED", {
+        roomId: room.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      setMessage("Could not update readiness. Refresh the room and try again.");
+    } finally {
+      setIsUpdatingLobbyReady(false);
+    }
   }
 
   function getPartyCompetitors(room: ArenaRoom) {
@@ -3365,6 +3571,9 @@ function ArenaPage({
         return;
       }
       if (result.error || !result.room) {
+        if (/playable tracks|at least 5/i.test(result.error || "")) {
+          setAlbumPlaybackError(true);
+        }
         setStartError(
           result.error || "Could not start match. Refresh the room and try again."
         );
@@ -3399,6 +3608,38 @@ function ArenaPage({
     setIsPreparingDuel(true);
     setMessage(album ? "Preparing new album rematch..." : "Preparing rematch...");
 
+    if (album) {
+      try {
+        const tracks = await getSpotifyAlbumTracks(album.id);
+        const playableTrackCount = tracks.filter((track) =>
+          Boolean(track.previewUrl)
+        ).length;
+        const albumError = getArenaAlbumError(playableTrackCount);
+        if (albumError) {
+          logArenaDiagnostic("REMATCH_ALBUM_UNPLAYABLE", {
+            roomId: activeRoom.id,
+            albumId: album.id,
+            albumName: album.title,
+            playableTrackCount,
+            minimumTracks: MIN_QUESTIONS,
+          });
+          setAlbumPlaybackError(true);
+          setMessage(albumError);
+          setIsPreparingDuel(false);
+          return;
+        }
+      } catch (error) {
+        logArenaDiagnostic("REMATCH_ALBUM_CHECK_FAILED", {
+          roomId: activeRoom.id,
+          albumId: album.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        setMessage("Could not check this album. Try again.");
+        setIsPreparingDuel(false);
+        return;
+      }
+    }
+
     const { room, error } = await resetArenaRoomForRematch({
       roomId: activeRoom.id,
       album,
@@ -3415,7 +3656,34 @@ function ArenaPage({
     setSelectedAlbum(null);
     setIsChoosingRematchAlbum(false);
     resetDuelLocalState();
-    await startArenaRoom(room);
+    setMessage("Rematch lobby ready. Everyone must ready up again.");
+    setIsPreparingDuel(false);
+  }
+
+  async function handleBeginRematchAlbumSelection() {
+    if (!activeRoom || activeRoom.hostUserId !== session?.user.id) return;
+
+    setSelectedAlbum(null);
+    setAlbums([]);
+    setVisibleAlbumCount(ALBUMS_PER_PAGE);
+    setSearchTerm("");
+    setIsChoosingRematchAlbum(true);
+    const result = await setArenaHostAlbumSelection(activeRoom.id, true);
+    if (result.error) setMessage(result.error);
+    await refreshActiveRoom(false);
+  }
+
+  async function handleCancelRematchAlbumSelection() {
+    const roomId = activeRoom?.id;
+    setIsChoosingRematchAlbum(false);
+    setSelectedAlbum(null);
+    setAlbums([]);
+    setSearchTerm("");
+    if (!roomId) return;
+
+    const result = await setArenaHostAlbumSelection(roomId, false);
+    if (result.error) setMessage(result.error);
+    await refreshActiveRoom(false);
   }
 
   async function handleRequestRematch() {
@@ -3871,7 +4139,7 @@ function ArenaPage({
             disabled={isPreparingDuel}
             onClick={() => void handleHostRematch(selectedAlbum)}
           >
-            {isPreparingDuel ? "Preparing..." : "Start Rematch on Album"}
+            {isPreparingDuel ? "Preparing..." : "Use Album for Rematch"}
           </button>
         </div>
       );
@@ -4019,10 +4287,7 @@ function ArenaPage({
           <button
             type="button"
             className="secondary-button"
-            onClick={() => {
-              setIsChoosingRematchAlbum(false);
-              setSelectedAlbum(null);
-            }}
+            onClick={() => void handleCancelRematchAlbumSelection()}
           >
             Cancel
           </button>
@@ -4387,13 +4652,44 @@ function ArenaPage({
           resultPlayers.every((player) => player.finishedAt));
       const question = activeRoom.quizQuestions[gameQuestionIndex];
       const isHost = activeRoom.hostUserId === session?.user.id;
+      const lobbyEligibility = getArenaLobbyStartEligibility(activeRoom);
+      const lobbyMembers = lobbyEligibility.members;
+      const recentDepartedPlayer = [...activeRoom.players]
+        .filter(
+          (player) =>
+            !lobbyMembers.some((member) => member.userId === player.userId) &&
+            (Boolean(player.leftAt) ||
+              ["cancelled", "left", "forfeit"].includes(player.resultStatus))
+        )
+        .sort((a, b) =>
+          (b.leftAt || b.joinedAt).localeCompare(a.leftAt || a.joinedAt)
+        )[0];
+      const lobbyDisplayPlayers =
+        activeRoom.status === "waiting" &&
+        recentDepartedPlayer &&
+        lobbyMembers.length < activeRoom.maxPlayers
+          ? [...lobbyMembers, recentDepartedPlayer]
+          : lobbyMembers;
+      const hasReconnectingLobbyPlayer =
+        activeRoom.mode !== "party_mode" &&
+        lobbyMembers.some(
+          (player) => getLobbyPlayerState(player) === "RECONNECTING"
+        );
+      const canHostStartLobby =
+        lobbyEligibility.canStart && !hasReconnectingLobbyPlayer;
 
       if (activeRoom.status === "cancelled") {
+        const cancellationMessage =
+          activeRoom.closeReason === "host_disconnected"
+            ? "Host disconnected. This lobby has been closed."
+            : activeRoom.closeReason === "host_ended"
+              ? "Host ended the lobby."
+              : "This room was cancelled.";
         return (
           <section className="duel-room-screen">
             <div className="duel-results-card">
               <p className="eyebrow">{activeModeSettings.title} Closed</p>
-              <h2>This room was cancelled.</h2>
+              <h2>{cancellationMessage}</h2>
               <p className="arena-note">Create or join another waiting room.</p>
             </div>
             <button
@@ -4476,6 +4772,11 @@ function ArenaPage({
                   A player requested a rematch. Host controls the next start.
                 </p>
               )}
+              {!isHost && activeRoom.hostIsChoosingAlbum && (
+                <p className="arena-note arena-host-choosing" aria-live="polite">
+                  Host is choosing an album...
+                </p>
+              )}
               <div className="duel-room-actions rematch-actions">
                 {isHost ? (
                   <>
@@ -4484,24 +4785,19 @@ function ArenaPage({
                       disabled={isPreparingDuel}
                       onClick={() => void handleHostRematch()}
                     >
-                      {isPreparingDuel ? "Preparing..." : "Rematch"}
+                      {isPreparingDuel ? "Preparing..." : "Open Rematch Lobby"}
                     </button>
                     <button
                       type="button"
                       className="secondary-button"
-                      onClick={() => {
-                        setSelectedAlbum(null);
-                        setAlbums([]);
-                        setVisibleAlbumCount(ALBUMS_PER_PAGE);
-                        setIsChoosingRematchAlbum(true);
-                      }}
+                      onClick={() => void handleBeginRematchAlbumSelection()}
                     >
                       Choose Another Album
                     </button>
                     <button
                       type="button"
                       className="secondary-button danger-button"
-                      onClick={() => void handleEndArenaRoom()}
+                      onClick={() => setIsConfirmingEndLobby(true)}
                     >
                       {isActivePartyMode
                         ? "End Party"
@@ -4587,7 +4883,11 @@ function ArenaPage({
         }
 
         return (
-          <section className="duel-room-screen duel-game-screen quiz-live">
+          <section
+            ref={gamePanelRef}
+            className="duel-room-screen duel-game-screen quiz-live"
+            tabIndex={-1}
+          >
             {duelFlash && (
               <div className={`quiz-flash quiz-flash-${duelFlash}`} aria-hidden="true" />
             )}
@@ -4618,11 +4918,13 @@ function ArenaPage({
                 type="button"
                 className="secondary-button danger-button"
                 disabled={isLeavingRoom}
-                onClick={() =>
-                  void (isActivePartyMode && isHost
-                    ? handleEndArenaRoom()
-                    : handleForfeitDuelRoom())
-                }
+                onClick={() => {
+                  if (isActivePartyMode && isHost) {
+                    setIsConfirmingEndLobby(true);
+                  } else {
+                    void handleForfeitDuelRoom();
+                  }
+                }}
               >
                 {isLeavingRoom
                   ? isActivePartyMode && isHost
@@ -4798,30 +5100,23 @@ function ArenaPage({
             <button
               type="button"
               className="secondary-button"
-              onClick={() => {
-                updateActiveRoom(null);
-                resetDuelLocalState();
-              }}
-            >
-              Back to Lobby
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
               onClick={() => void refreshActiveRoom()}
             >
               Refresh Room
             </button>
-            {isHost && activeRoom.mode === "duel" && (
+            {isHost && (
               <button
                 type="button"
                 className="secondary-button danger-button"
-                onClick={() => void handleCloseDuelRoom()}
+                disabled={isLeavingRoom || isClosingActiveRoom}
+                onClick={() => setIsConfirmingEndLobby(true)}
               >
-                Close Lobby
+                {isLeavingRoom || isClosingActiveRoom
+                  ? "Ending..."
+                  : "End Lobby"}
               </button>
             )}
-            {(!isHost || activeRoom.mode !== "duel") && (
+            {!isHost && (
               <button
                 type="button"
                 className="secondary-button danger-button"
@@ -4855,28 +5150,40 @@ function ArenaPage({
 
           {usesLiveLeaderboard ? (
             <div className="duel-player-grid group-player-grid">
-              {presentPlayers.map((player) => (
-                <div
-                  className={`duel-player-card ${
-                    activeRoom.status === "starting" && player.isReady
-                      ? "audio-ready"
-                      : ""
-                  }`}
-                  key={player.id}
-                >
-                  <span>{player.userId === activeRoom.hostUserId ? "Host" : "Player"}</span>
-                  <strong>{player.displayName || "Arena Player"}</strong>
-                  {player.username && <p>@{player.username}</p>}
-                  {activeRoom.status === "starting" && (
-                    <small>{player.isReady ? "Audio ready" : "Preparing audio..."}</small>
-                  )}
-                </div>
-              ))}
-              {presentPlayers.length < activeRoom.maxPlayers && (
+              {(activeRoom.status === "waiting" ? lobbyDisplayPlayers : presentPlayers).map(
+                (player) => {
+                  const lobbyState = getLobbyPlayerState(player);
+                  return (
+                    <div
+                      className={`duel-player-card ${
+                        activeRoom.status === "starting" && player.isReady
+                          ? "audio-ready"
+                          : activeRoom.status === "waiting"
+                            ? `lobby-${lobbyState.toLowerCase().replace(" ", "-")}`
+                            : ""
+                      }`}
+                      key={player.id}
+                    >
+                      <span>
+                        {player.userId === activeRoom.hostUserId ? "Host" : "Player"}
+                      </span>
+                      <strong>{player.displayName || "Arena Player"}</strong>
+                      {player.username && <p>@{player.username}</p>}
+                      {activeRoom.status === "waiting" && activeRoom.mode !== "party_mode" && (
+                        <small className="lobby-player-status">{lobbyState}</small>
+                      )}
+                      {activeRoom.status === "starting" && (
+                        <small>{player.isReady ? "Audio ready" : "Preparing audio..."}</small>
+                      )}
+                    </div>
+                  );
+                }
+              )}
+              {lobbyMembers.length < activeRoom.maxPlayers && (
                 <div className="duel-player-card">
                   <span>Open Spot</span>
                   <strong>Waiting for players</strong>
-                  <p>{presentPlayers.length}/{activeRoom.maxPlayers}</p>
+                  <p>{lobbyMembers.length}/{activeRoom.maxPlayers}</p>
                 </div>
               )}
             </div>
@@ -4885,11 +5192,18 @@ function ArenaPage({
               <div className={`duel-player-card ${
                 activeRoom.status === "starting" && hostPlayer?.isReady
                   ? "audio-ready"
-                  : ""
+                  : activeRoom.status === "waiting" && hostPlayer
+                    ? `lobby-${getLobbyPlayerState(hostPlayer).toLowerCase().replace(" ", "-")}`
+                    : ""
               }`}>
                 <span>Host</span>
                 <strong>{hostPlayer?.displayName || "Arena host"}</strong>
                 {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
+                {activeRoom.status === "waiting" && hostPlayer && (
+                  <small className="lobby-player-status">
+                    {getLobbyPlayerState(hostPlayer)}
+                  </small>
+                )}
                 {activeRoom.status === "starting" && (
                   <small>{hostPlayer?.isReady ? "Audio ready" : "Preparing audio..."}</small>
                 )}
@@ -4897,11 +5211,22 @@ function ArenaPage({
               <div className={`duel-player-card ${
                 activeRoom.status === "starting" && guestPlayer?.isReady
                   ? "audio-ready"
-                  : ""
+                  : activeRoom.status === "waiting" && (guestPlayer || recentDepartedPlayer)
+                    ? `lobby-${getLobbyPlayerState(guestPlayer || recentDepartedPlayer!).toLowerCase().replace(" ", "-")}`
+                    : ""
               }`}>
                 <span>Joined Player</span>
-                <strong>{guestPlayer?.displayName || "Waiting for rival"}</strong>
-                {guestPlayer?.username && <p>@{guestPlayer.username}</p>}
+                <strong>
+                  {guestPlayer?.displayName || recentDepartedPlayer?.displayName || "Waiting for rival"}
+                </strong>
+                {(guestPlayer?.username || recentDepartedPlayer?.username) && (
+                  <p>@{guestPlayer?.username || recentDepartedPlayer?.username}</p>
+                )}
+                {activeRoom.status === "waiting" && (guestPlayer || recentDepartedPlayer) && (
+                  <small className="lobby-player-status">
+                    {getLobbyPlayerState(guestPlayer || recentDepartedPlayer!)}
+                  </small>
+                )}
                 {activeRoom.status === "starting" && guestPlayer && (
                   <small>{guestPlayer.isReady ? "Audio ready" : "Preparing audio..."}</small>
                 )}
@@ -4932,24 +5257,50 @@ function ArenaPage({
                 </button>
               )}
             </div>
-          ) : isHost ? (
-            <button
-              type="button"
-              className="duel-start-button"
-              disabled={
-                presentPlayers.length < activeModeSettings.minPlayersToStart ||
-                isPreparingDuel
-              }
-              onClick={() => void handleStartDuel()}
-            >
-              {isPreparingDuel
-                ? "Starting match..."
-                : `Start Synced ${activeModeSettings.title}`}
-            </button>
           ) : (
-            <p className="arena-note">
-              Waiting for the host to start.
-            </p>
+            <div className="arena-ready-controls">
+              {activeRoom.mode !== "party_mode" && currentPlayer && (
+                <button
+                  type="button"
+                  className={`duel-ready-button ${
+                    currentPlayer.lobbyReady ? "is-ready" : ""
+                  }`}
+                  disabled={isUpdatingLobbyReady}
+                  onClick={() => void handleToggleLobbyReady()}
+                >
+                  {isUpdatingLobbyReady
+                    ? "Updating..."
+                    : currentPlayer.lobbyReady
+                      ? "Ready - Cancel"
+                      : "Ready Up"}
+                </button>
+              )}
+
+              {isHost ? (
+                <button
+                  type="button"
+                  className="duel-start-button"
+                  disabled={!canHostStartLobby || isPreparingDuel}
+                  onClick={() => void handleStartDuel()}
+                >
+                  {isPreparingDuel
+                    ? "Starting match..."
+                    : `Start Synced ${activeModeSettings.title}`}
+                </button>
+              ) : (
+                <p className="arena-note">
+                  {activeRoom.mode !== "party_mode" && !currentPlayer?.lobbyReady
+                    ? "Ready up, then wait for the host to start."
+                    : "Waiting for the host to start."}
+                </p>
+              )}
+
+              {hasReconnectingLobbyPlayer && (
+                <p className="arena-note" role="status">
+                  A player is reconnecting. Start unlocks when everyone is back.
+                </p>
+              )}
+            </div>
           )}
           {startError && (
             <p className="arena-message" role="alert">
@@ -4957,9 +5308,10 @@ function ArenaPage({
             </p>
           )}
           <p className="arena-note">
-            The host starts once {activeModeSettings.minPlayersToStart} or more
-            players are in. A shared question set and future start clock keep
-            every device aligned.
+            {activeRoom.mode === "party_mode"
+              ? `The host starts once ${activeModeSettings.minPlayersToStart} or more players are in.`
+              : "Every player readies up before the host starts."} A shared
+            question set and future start clock keep every device aligned.
           </p>
         </section>
       );
@@ -5290,9 +5642,9 @@ function ArenaPage({
         </button>
       </form>
 
-      {message && !activeRoom && !activeArenaMode && (
+      {visibleMessage && !activeRoom && !activeArenaMode && (
         <p className="arena-message" role="status">
-          {message}
+          {visibleMessage}
         </p>
       )}
       {(activeRoom ||
@@ -5345,12 +5697,71 @@ function ArenaPage({
               </button>
             )}
             {renderDuelLobby()}
-            {message && <p className="arena-message" role="status">{message}</p>}
+            {visibleMessage && (
+              <p className="arena-message" role="status">{visibleMessage}</p>
+            )}
           </div>
         </div>
       )}
 
       {shouldShowAlbumDock && renderSelectedAlbumStartBar()}
+
+      {albumPlaybackError && (
+        <div className="arena-confirm-overlay" role="dialog" aria-modal="true">
+          <div className="arena-confirm-dialog">
+            <p className="eyebrow">Album unavailable</p>
+            <h2>This album can't be played</h2>
+            <p>
+              StanZer needs at least {MIN_QUESTIONS} playable previews for a
+              fair shared match. Choose another album and try again.
+            </p>
+            <button
+              type="button"
+              autoFocus
+              onClick={() => {
+                setAlbumPlaybackError(false);
+                setSelectedAlbum(null);
+              }}
+            >
+              Choose Another Album
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isConfirmingEndLobby && activeRoom && (
+        <div className="arena-confirm-overlay" role="dialog" aria-modal="true">
+          <div className="arena-confirm-dialog">
+            <p className="eyebrow">Host control</p>
+            <h2>End this lobby for everyone?</h2>
+            <p>
+              The room will close and every player will return to Multiplayer.
+              This cannot be undone.
+            </p>
+            <div className="duel-room-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                autoFocus
+                onClick={() => setIsConfirmingEndLobby(false)}
+              >
+                Keep Lobby Open
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={isLeavingRoom || isClosingActiveRoom}
+                onClick={() => {
+                  setIsConfirmingEndLobby(false);
+                  void handleEndArenaRoom();
+                }}
+              >
+                End Lobby
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <button type="button" onClick={onHome}>
         Back Home

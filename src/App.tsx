@@ -11,7 +11,7 @@ import Navbar from "./Components/Navbar";
 import HomePage from "./Components/HomePage";
 import type { AuthPageMode } from "./Components/AuthPage";
 import {
-  cancelDuelRoom,
+  endArenaRoom,
   fetchCurrentDuelRoom,
   isArenaRoomRecoverableForUser,
   type ArenaRoom,
@@ -152,6 +152,7 @@ function App() {
     CompactPlayerBadge[] | null
   >(null);
   const [activeArenaRoom, setActiveArenaRoom] = useState<ArenaRoom | null>(null);
+  const [arenaNavigationNotice, setArenaNavigationNotice] = useState("");
   const [progressionRevision, setProgressionRevision] = useState(0);
   const arenaRecoveryGenerationRef = useRef(0);
 
@@ -255,6 +256,19 @@ function App() {
 
   useEffect(() => {
     function handlePopState() {
+      if (
+        session?.user.id &&
+        activeArenaRoom?.hostUserId === session.user.id &&
+        ["waiting", "starting", "active"].includes(activeArenaRoom.status)
+      ) {
+        window.history.pushState({}, "", "/multiplayer");
+        setActiveView("multiplayer");
+        setArenaNavigationNotice(
+          `You are hosting an open room. Use End Lobby before leaving.|${Date.now()}`
+        );
+        return;
+      }
+
       const username = getProfileUsernameFromPath();
       const inviteCode = getArenaInviteCodeFromPath();
 
@@ -271,7 +285,12 @@ function App() {
     return () => {
       window.removeEventListener("popstate", handlePopState);
     };
-  }, []);
+  }, [
+    activeArenaRoom?.hostUserId,
+    activeArenaRoom?.id,
+    activeArenaRoom?.status,
+    session?.user.id,
+  ]);
 
   useEffect(() => {
     const pageLabel =
@@ -426,6 +445,7 @@ function App() {
   }, [refreshIdentityBadges]);
 
   function startQuiz(album: SpotifyAlbum) {
+    if (keepHostedArenaRoomOpen()) return;
     window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -435,6 +455,7 @@ function App() {
   }
 
   function restartApp() {
+    if (keepHostedArenaRoomOpen()) return;
     window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -444,6 +465,7 @@ function App() {
   }
 
   function showHome() {
+    if (keepHostedArenaRoomOpen()) return;
     window.history.pushState({}, "", "/");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -457,6 +479,7 @@ function App() {
   }
 
   function showLeaderboard() {
+    if (keepHostedArenaRoomOpen()) return;
     window.history.pushState({}, "", "/leaderboard");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -474,6 +497,27 @@ function App() {
     setActiveView("multiplayer");
   }
 
+  function keepHostedArenaRoomOpen() {
+    if (
+      !session?.user.id ||
+      activeArenaRoom?.hostUserId !== session.user.id ||
+      !["waiting", "starting", "active"].includes(activeArenaRoom.status)
+    ) {
+      return false;
+    }
+
+    window.history.pushState({}, "", "/multiplayer");
+    setPublicProfileUsername(null);
+    setArenaInviteCode(null);
+    setSelectedAlbum(null);
+    setIsQuizStarted(false);
+    setActiveView("multiplayer");
+    setArenaNavigationNotice(
+      `You are hosting an open room. Use End Lobby before leaving.|${Date.now()}`
+    );
+    return true;
+  }
+
   async function closeActiveArenaRoom(roomId?: string) {
     const targetRoomId = roomId || activeArenaRoom?.id;
 
@@ -481,13 +525,18 @@ function App() {
       return "";
     }
 
-    const { error } = await cancelDuelRoom(targetRoomId);
+    if (!window.confirm("End this lobby for everyone?")) {
+      return "";
+    }
+
+    const { error } = await endArenaRoom(targetRoomId);
     await refreshActiveArenaRoom();
 
     return error || "";
   }
 
   function showAuth(mode: AuthPageMode = "login", returnPath = "") {
+    if (keepHostedArenaRoomOpen()) return;
     if (returnPath && isSafeInternalPath(returnPath)) {
       window.sessionStorage.setItem(AUTH_RETURN_STORAGE_KEY, returnPath);
     } else if (activeView !== "auth") {
@@ -541,6 +590,7 @@ function App() {
   }
 
   function showProfile() {
+    if (keepHostedArenaRoomOpen()) return;
     if (session?.user && isAnonymousUser(session.user)) {
       showAuth("signup");
       return;
@@ -563,6 +613,7 @@ function App() {
   }
 
   function showPublicProfile(username: string) {
+    if (keepHostedArenaRoomOpen()) return;
     const normalizedUsername = username.toLowerCase();
 
     window.history.pushState(
@@ -579,6 +630,22 @@ function App() {
 
   async function logoutSupabase() {
     const localStatsSnapshot = getTrackTestStats();
+
+    if (
+      session?.user.id &&
+      activeArenaRoom?.hostUserId === session.user.id &&
+      ["waiting", "starting", "active"].includes(activeArenaRoom.status)
+    ) {
+      const { error } = await endArenaRoom(activeArenaRoom.id);
+      if (error) {
+        keepHostedArenaRoomOpen();
+        setArenaNavigationNotice(
+          `StanZer could not end the hosted room. Try End Lobby again before logging out.|${Date.now()}`
+        );
+        return;
+      }
+      setActiveArenaRoom(null);
+    }
 
     if (!supabase) {
       setSession(null);
@@ -709,6 +776,7 @@ function App() {
           recoveredRoom={activeArenaRoom}
           onArenaRoomChange={handleArenaRoomChange}
           onProgressionUpdated={refreshIdentityBadges}
+          navigationNotice={arenaNavigationNotice}
           onInviteHandled={() => {
             window.history.pushState({}, "", "/multiplayer");
             setArenaInviteCode(null);

@@ -17,6 +17,52 @@ export function getArenaStartMembers(room: ArenaRoom) {
   );
 }
 
+export type ArenaLobbyStartEligibility = {
+  canStart: boolean;
+  members: ArenaRoom["players"];
+  minimumPlayers: number;
+  reason: string;
+};
+
+export function getArenaLobbyStartEligibility(
+  room: ArenaRoom
+): ArenaLobbyStartEligibility {
+  const members = getArenaStartMembers(room);
+  const minimumPlayers = room.mode === "group_lobby" ? 3 : 2;
+
+  if (
+    members.length < minimumPlayers ||
+    members.length > room.maxPlayers ||
+    (room.mode === "duel" && members.length !== 2)
+  ) {
+    return {
+      canStart: false,
+      members,
+      minimumPlayers,
+      reason: `Waiting for ${minimumPlayers} active players to start.`,
+    };
+  }
+
+  if (
+    room.mode !== "party_mode" &&
+    members.some((player) => !player.lobbyReady)
+  ) {
+    return {
+      canStart: false,
+      members,
+      minimumPlayers,
+      reason: "Every current player must ready up before the match can start.",
+    };
+  }
+
+  return {
+    canStart: true,
+    members,
+    minimumPlayers,
+    reason: "",
+  };
+}
+
 type RoomResult = { room: ArenaRoom | null; error: string | null };
 type QuestionSet = {
   questions: DuelQuizQuestion[];
@@ -52,7 +98,8 @@ export async function prepareArenaLobbyStart(
     if (!roomId || !user.id) throw new Error("Sign in and refresh the room before starting.");
     const { room, error } = await dependencies.fetchRoom(roomId);
     if (error || !room) throw new Error(error || "Could not refresh room.");
-    const members = getArenaStartMembers(room);
+    const eligibility = getArenaLobbyStartEligibility(room);
+    const { members } = eligibility;
     context = {
       ...context, hostId: room.hostUserId, mode: room.mode, status: room.status,
       memberCount: members.length, matchGeneration: room.roundNumber,
@@ -65,11 +112,7 @@ export async function prepareArenaLobbyStart(
     if (!members.some((player) => player.userId === user.id)) {
       throw new Error("The host has not joined this room. Close the lobby and create it again.");
     }
-    const minimum = room.mode === "group_lobby" ? 3 : 2;
-    if (members.length < minimum || members.length > room.maxPlayers ||
-      (room.mode === "duel" && members.length !== 2)) {
-      throw new Error(`Waiting for ${minimum} active players to start.`);
-    }
+    if (!eligibility.canStart) throw new Error(eligibility.reason);
 
     stage = "load-album";
     let questions = room.quizQuestions;

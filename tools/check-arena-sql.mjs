@@ -25,6 +25,10 @@ const audioFastFail = readFileSync(
   new URL("../supabase/20261005_competitive_audio_fast_fail.sql", import.meta.url),
   "utf8"
 );
+const lobbyReadinessAndPresence = readFileSync(
+  new URL("../supabase/20261005_arena_lobby_readiness_and_presence.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -147,4 +151,60 @@ assert.doesNotMatch(
   "Party Mode must remain on its host-only audio timeline"
 );
 
-console.log("Arena SQL lifecycle guards passed (32 assertions).");
+assert.match(
+  lobbyReadinessAndPresence,
+  /^begin;/i,
+  "lobby lifecycle migration must begin transactionally"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /commit;\s*$/i,
+  "lobby lifecycle migration must commit transactionally"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /lobby_ready boolean not null default false/,
+  "lobby intent must remain separate from first-track audio acknowledgement"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /ready_count <> required_count/,
+  "the server must reject competitive starts until every member is ready"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /connected_count <> required_count/,
+  "the server must reject starts while a required player is reconnecting"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /presence_updated_at <= server_now - interval '12 seconds'/,
+  "short disconnects must enter a reconnecting grace state"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /presence_updated_at <= server_now - interval '45 seconds'/,
+  "expired disconnect grace must reconcile authoritative membership"
+);
+assert.doesNotMatch(
+  lobbyReadinessAndPresence,
+  /set\s+host_user_id/i,
+  "room ownership must never migrate"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /after update of round_number/,
+  "a new match generation must clear old readiness"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /close_reason = 'host_disconnected'/,
+  "host disconnect expiry must leave an authoritative close reason"
+);
+assert.match(
+  lobbyReadinessAndPresence,
+  /create or replace function public\.end_arena_room/,
+  "intentional host shutdown must use the same authoritative cleanup path"
+);
+
+console.log("Arena SQL lifecycle guards passed (43 assertions).");

@@ -57,7 +57,10 @@ export type ArenaRoomPlayer = {
   competitiveAnsweredQuestionIndex: number;
   competitiveSelectedAnswer: string | null;
   competitiveAnswerWasCorrect: boolean | null;
+  lobbyReady: boolean;
   isReady: boolean;
+  presenceStatus: "connected" | "reconnecting" | "left";
+  presenceUpdatedAt: string;
   finishedAt: string | null;
   leftAt: string | null;
   forfeitedAt: string | null;
@@ -79,6 +82,8 @@ export type ArenaRoom = {
   roundNumber: number;
   rematchRequestedBy: string | null;
   rematchRequestedAt: string | null;
+  hostIsChoosingAlbum: boolean;
+  closeReason: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -146,6 +151,8 @@ type ArenaRoomRow = {
   round_number?: number | null;
   rematch_requested_by?: string | null;
   rematch_requested_at?: string | null;
+  host_is_choosing_album?: boolean | null;
+  close_reason?: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -202,7 +209,10 @@ type ArenaRoomPlayerRow = {
   competitive_answered_question_index?: number;
   competitive_selected_answer?: string | null;
   competitive_answer_was_correct?: boolean | null;
+  lobby_ready?: boolean;
   is_ready?: boolean;
+  presence_status?: string | null;
+  presence_updated_at?: string | null;
   finished_at?: string | null;
   left_at?: string | null;
   forfeited_at?: string | null;
@@ -298,6 +308,13 @@ export function getFriendlyArenaError(error: string | null | undefined) {
     return "The game has already finished.";
   }
 
+  if (
+    normalizedError.includes("ready up") ||
+    normalizedError.includes("every current player must ready")
+  ) {
+    return "Every current player must ready up before the match can start.";
+  }
+
   if (normalizedError.includes("own room")) {
     return "You cannot join your own room as a second player.";
   }
@@ -344,10 +361,18 @@ export async function cancelStaleArenaRooms(force = false) {
   }
 
   lastStaleRoomCleanupAt = now;
-  staleRoomCleanupPromise = Promise.resolve(
-    supabase.rpc("cancel_stale_arena_rooms")
-  )
-    .then(({ error }) => ({ error: error?.message || null }))
+  staleRoomCleanupPromise = Promise.all([
+    supabase.rpc("cleanup_stale_arena_presence"),
+    supabase.rpc("cancel_stale_arena_rooms"),
+  ])
+    .then(([presenceCleanup, roomCleanup]) => ({
+      error:
+        (presenceCleanup.error?.code === "PGRST202"
+          ? null
+          : presenceCleanup.error?.message) ||
+        roomCleanup.error?.message ||
+        null,
+    }))
     .finally(() => {
       staleRoomCleanupPromise = null;
     });
@@ -638,6 +663,10 @@ export async function joinDuelRoom({
       username,
       left_at: null,
       forfeited_at: null,
+      lobby_ready: false,
+      is_ready: false,
+      presence_status: "connected",
+      presence_updated_at: new Date().toISOString(),
       result_status: "active",
     })
     .eq("room_id", targetRoom.id)
@@ -1353,6 +1382,77 @@ export async function finishDuelRoom(roomId: string) {
   return { error: getFriendlyArenaError(error?.message) || null };
 }
 
+export async function setArenaLobbyReady(
+  roomId: string,
+  ready: boolean
+) {
+  if (!supabase) {
+    return { result: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc("set_arena_lobby_ready", {
+    target_room_id: roomId,
+    target_ready: ready,
+  });
+
+  return {
+    result: error ? null : (data as Record<string, unknown>),
+    error: getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function heartbeatArenaRoomPresence(roomId: string) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("heartbeat_arena_room_presence", {
+    target_room_id: roomId,
+  });
+
+  return {
+    error:
+      error?.code === "PGRST202"
+        ? null
+        : getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function reconcileArenaRoomPresence(roomId: string) {
+  if (!supabase) {
+    return { result: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc(
+    "reconcile_arena_room_presence",
+    { target_room_id: roomId }
+  );
+
+  return {
+    result: error ? null : (data as Record<string, unknown>),
+    error:
+      error?.code === "PGRST202"
+        ? null
+        : getFriendlyArenaError(error?.message) || null,
+  };
+}
+
+export async function setArenaHostAlbumSelection(
+  roomId: string,
+  isChoosing: boolean
+) {
+  if (!supabase) {
+    return { error: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase.rpc("set_arena_host_album_selection", {
+    target_room_id: roomId,
+    target_is_choosing: isChoosing,
+  });
+
+  return { error: getFriendlyArenaError(error?.message) || null };
+}
+
 export async function cancelDuelRoom(roomId: string) {
   if (!supabase) {
     return { error: "Supabase is not configured yet." };
@@ -1495,6 +1595,8 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     roundNumber: row.round_number || 1,
     rematchRequestedBy: row.rematch_requested_by || null,
     rematchRequestedAt: row.rematch_requested_at || null,
+    hostIsChoosingAlbum: Boolean(row.host_is_choosing_album),
+    closeReason: row.close_reason || null,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -1664,7 +1766,13 @@ function mapPlayerRow(row: ArenaRoomPlayerRow): ArenaRoomPlayer {
       typeof row.competitive_answer_was_correct === "boolean"
         ? row.competitive_answer_was_correct
         : null,
+    lobbyReady: Boolean(row.lobby_ready),
     isReady: Boolean(row.is_ready),
+    presenceStatus:
+      row.presence_status === "reconnecting" || row.presence_status === "left"
+        ? row.presence_status
+        : "connected",
+    presenceUpdatedAt: row.presence_updated_at || row.joined_at,
     finishedAt: row.finished_at || null,
     leftAt: row.left_at || null,
     forfeitedAt: row.forfeited_at || null,
