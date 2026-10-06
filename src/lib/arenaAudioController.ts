@@ -262,6 +262,7 @@ export class ArenaAudioController {
   private mediaUnlocked = false;
   private questionReceivedAt = 0;
   private measuredReadinessRounds = new Set<string>();
+  private mediaReadyRounds = new Map<string, string>();
   private readinessDurations: number[] = [];
   private prefetchDurations: number[] = [];
   private reliability = {
@@ -345,6 +346,7 @@ export class ArenaAudioController {
     this.activePlayback = null;
     this.mediaUnlocked = false;
     this.prefetchedTargets.clear();
+    this.mediaReadyRounds.clear();
   }
 
   resetMatch(reason: string) {
@@ -369,6 +371,7 @@ export class ArenaAudioController {
     this.clearPreloaders();
 
     this.prefetchedTargets.clear();
+    this.mediaReadyRounds.clear();
     this.measuredReadinessRounds.clear();
     this.readinessDurations = [];
     this.prefetchDurations = [];
@@ -399,6 +402,7 @@ export class ArenaAudioController {
       this.activePlayback = null;
       this.stallRecoveryRoundKey = "";
       this.questionReceivedAt = Date.now();
+      if (previousRound) this.mediaReadyRounds.delete(previousRound.roundKey);
     }
 
     this.activeRound = round;
@@ -537,6 +541,14 @@ export class ArenaAudioController {
     return this.mediaUnlocked;
   }
 
+  isRoundMediaReady(roundKey: string, previewUrl?: string) {
+    const readyPreviewUrl = this.mediaReadyRounds.get(roundKey);
+    return Boolean(
+      readyPreviewUrl &&
+        (!previewUrl || sameMediaUrl(readyPreviewUrl, previewUrl))
+    );
+  }
+
   noteDiagnostic(
     event:
       | "READY_ACK_ATTEMPTED"
@@ -559,6 +571,20 @@ export class ArenaAudioController {
 
     if (!round || !audio || round.roundKey !== roundKey) {
       return { status: "stale" };
+    }
+
+    if (this.isRoundMediaReady(roundKey, round.previewUrl)) {
+      this.log("READINESS_CONFIRMED", {
+        sticky: true,
+        reason: "already-media-ready",
+      });
+      return {
+        status: "ready",
+        attempts: 0,
+        prefetched: this.prefetchedTargets.has(
+          getArenaPrefetchKey(round.previewUrl, round.clipStartSeconds)
+        ),
+      };
     }
 
     if (!round.previewUrl) {
@@ -745,6 +771,7 @@ export class ArenaAudioController {
           performance.now() - readinessStartedAt,
           attempt
         );
+        this.mediaReadyRounds.set(roundKey, round.previewUrl);
         return { status: "ready", attempts: attempt, prefetched: wasPrefetched };
       } catch (error) {
         const details = getErrorDetails(error);
@@ -771,6 +798,7 @@ export class ArenaAudioController {
       attemptsUsed,
       lastReason
     );
+    this.mediaReadyRounds.delete(roundKey);
     return {
       status: "failed",
       message: lastMessage,
@@ -1709,9 +1737,12 @@ export class ArenaAudioController {
       userAgent: navigator.userAgent,
       errorCode: mediaError?.code ?? null,
       errorMessage: mediaError?.message || null,
+      mediaReady: round
+        ? this.isRoundMediaReady(round.roundKey, round.previewUrl)
+        : false,
       ...details,
     };
-    console.info(`[STANZER_AUDIO] ${JSON.stringify(snapshot)}`);
+    console.info(`[STANZER_READY] ${JSON.stringify(snapshot)}`);
     this.callbacks.onDiagnostic?.(snapshot);
   }
 
@@ -1743,6 +1774,10 @@ export class ArenaAudioController {
       ? new DOMException(`MediaError code ${mediaError.code}: ${mediaError.message}`, "MediaError")
       : new DOMException("Unknown media error.", "MediaError");
     this.log("MEDIA_ERROR", getErrorDetails(error));
+
+    if (this.activeRound) {
+      this.mediaReadyRounds.delete(this.activeRound.roundKey);
+    }
 
     if (this.activePlayback) {
       this.reportPlaybackFailure(this.activePlayback.roundKey, error.message, error);

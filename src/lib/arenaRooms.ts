@@ -2,7 +2,15 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
-import { logArenaDiagnostic } from "./arenaDiagnostics";
+import {
+  getArenaClientId,
+  logArenaDiagnostic,
+  logArenaReadyDiagnostic,
+} from "./arenaDiagnostics";
+import type {
+  ArenaReadyAckResponse,
+  ArenaReadyAckResult,
+} from "./arenaReadyAcknowledgement";
 
 export type ArenaRoomMode = "duel" | "group_lobby" | "party_mode";
 export type PartyAudioStatus = "idle" | "pending" | "playing" | "skipped";
@@ -1024,6 +1032,34 @@ export type CompetitiveAnswerResult = {
   responseTimeMs?: number | null;
 };
 
+export type CompetitiveAudioReadinessPlayer = {
+  membershipId: string;
+  userId: string;
+  displayName: string;
+  username: string | null;
+  serverAckReady: boolean;
+  readinessStatus: string | null;
+  acknowledgedAt: string | null;
+  clientId: string | null;
+  ackAttempt: number | null;
+  acknowledgementCount: number;
+};
+
+export type CompetitiveAudioReadinessState = {
+  available: boolean;
+  reason?: string | null;
+  roomId?: string;
+  matchGeneration?: number;
+  roundNumber?: number;
+  roundId?: string | null;
+  roundKey?: string;
+  questionIndex?: number;
+  serverPhase?: string;
+  readyCount?: number;
+  requiredCount?: number;
+  players: CompetitiveAudioReadinessPlayer[];
+};
+
 export async function submitCompetitiveArenaAnswer({
   roomId,
   roundId,
@@ -1095,33 +1131,91 @@ export async function syncCompetitiveArenaTimeline(roomId: string) {
 
 export async function acknowledgeCompetitiveAudioReady({
   roomId,
+  matchGeneration,
   roundId,
   questionIndex,
   previewUrl,
+  roundKey,
+  attemptNumber,
 }: {
   roomId: string;
+  matchGeneration: number;
   roundId: string;
   questionIndex: number;
   previewUrl: string;
-}) {
+  roundKey: string;
+  attemptNumber: number;
+}): Promise<ArenaReadyAckResponse> {
   if (!supabase) {
     return { result: null, error: "Supabase is not configured yet." };
   }
 
-  const { data, error } = await supabase.rpc(
-    "acknowledge_competitive_audio_ready",
-    {
+  const clientId = getArenaClientId();
+  const startedAt = performance.now();
+  const diagnosticContext = {
+    roomId,
+    matchGeneration,
+    roundId,
+    roundKey,
+    questionIndex,
+    previewUrl,
+    clientId,
+    attemptNumber,
+  };
+  logArenaReadyDiagnostic("ACK_RPC_START", diagnosticContext);
+
+  let rpc = "acknowledge_competitive_audio_ready_v2";
+  let { data, error } = await supabase.rpc(rpc, {
+    target_room_id: roomId,
+    target_match_generation: matchGeneration,
+    target_round_id: roundId,
+    target_question_index: questionIndex,
+    target_preview_url: previewUrl,
+    target_client_id: clientId,
+    target_ack_attempt: attemptNumber,
+  });
+
+  // Keep the frontend deployable before the companion migration is applied.
+  // The legacy RPC remains safe, but lacks the richer reconciliation fields.
+  if (error?.code === "PGRST202") {
+    rpc = "acknowledge_competitive_audio_ready";
+    ({ data, error } = await supabase.rpc(rpc, {
       target_room_id: roomId,
       target_round_id: roundId,
       target_question_index: questionIndex,
       target_preview_url: previewUrl,
-    }
-  );
+    }));
+  }
+
+  const result = error ? null : (data as ArenaReadyAckResult);
+  logArenaReadyDiagnostic("ACK_RPC_RESULT", {
+    ...diagnosticContext,
+    rpc,
+    latencyMs: performance.now() - startedAt,
+    accepted: result?.accepted ?? false,
+    alreadyReady: result?.alreadyReady ?? false,
+    acknowledgementExisted: result?.acknowledgementExisted ?? false,
+    reason: result?.reason ?? null,
+    readyCountBefore: result?.readyCountBefore ?? null,
+    readyCount: result?.readyCount ?? null,
+    requiredCount: result?.requiredCount ?? null,
+    serverPhase: result?.serverPhase ?? null,
+    serverRoundKey: result?.roundKey ?? null,
+    membershipId: result?.membershipId ?? null,
+    error: error
+      ? {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        }
+      : null,
+  });
 
   if (error) {
     logArenaDiagnostic("RPC_ERROR", {
-      rpc: "acknowledge_competitive_audio_ready",
-      payload: { roomId, roundId, questionIndex, previewUrl },
+      rpc,
+      payload: diagnosticContext,
       code: error.code,
       message: error.message,
       details: error.details,
@@ -1130,8 +1224,41 @@ export async function acknowledgeCompetitiveAudioReady({
   }
 
   return {
-    result: error ? null : (data as Record<string, unknown>),
+    result,
     error: getFriendlyArenaError(error?.message) || null,
+    errorCode: error?.code || null,
+  };
+}
+
+export async function fetchCompetitiveAudioReadinessState(
+  roomId: string
+): Promise<{
+  state: CompetitiveAudioReadinessState | null;
+  error: string | null;
+}> {
+  if (!supabase) {
+    return { state: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc(
+    "get_competitive_audio_readiness_state",
+    { target_room_id: roomId }
+  );
+
+  if (error) {
+    return {
+      state: null,
+      error: getFriendlyArenaError(error.message),
+    };
+  }
+
+  const state = data as CompetitiveAudioReadinessState;
+  return {
+    state: {
+      ...state,
+      players: Array.isArray(state?.players) ? state.players : [],
+    },
+    error: null,
   };
 }
 

@@ -3303,6 +3303,27 @@ button:hover {
   text-transform: uppercase;
 }
 
+.arena-readiness-debug {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(97, 218, 251, 0.25);
+}
+
+.arena-readiness-player {
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.arena-readiness-player small {
+  color: #8899a8;
+}
+
 @media (max-width: 640px) {
   .arena-audio-check {
     align-items: stretch;

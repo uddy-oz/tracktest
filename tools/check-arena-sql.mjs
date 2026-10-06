@@ -29,6 +29,10 @@ const lobbyReadinessAndPresence = readFileSync(
   new URL("../supabase/20261005_arena_lobby_readiness_and_presence.sql", import.meta.url),
   "utf8"
 );
+const readyAckReconciliation = readFileSync(
+  new URL("../supabase/20261006_competitive_audio_ready_ack_reconciliation.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -207,4 +211,55 @@ assert.match(
   "intentional host shutdown must use the same authoritative cleanup path"
 );
 
-console.log("Arena SQL lifecycle guards passed (43 assertions).");
+assert.match(
+  readyAckReconciliation,
+  /^begin;/i,
+  "readiness ACK reconciliation must begin transactionally"
+);
+assert.match(
+  readyAckReconciliation,
+  /commit;\s*$/i,
+  "readiness ACK reconciliation must commit transactionally"
+);
+assert.match(
+  readyAckReconciliation,
+  /add column if not exists acknowledgement_count/,
+  "readiness diagnostic columns must be safe to rerun"
+);
+assert.match(
+  readyAckReconciliation,
+  /'accepted', true,[\s\S]*'alreadyReady', already_ready/,
+  "ACK responses must report accepted and idempotent readiness"
+);
+assert.match(
+  readyAckReconciliation,
+  /if not already_ready\s+and target_room\.competitive_round_phase <> 'preparing_audio'/,
+  "an existing current-round ACK must remain successful after countdown starts"
+);
+assert.match(
+  readyAckReconciliation,
+  /coalesce\(target_room\.round_number, 1\) <> target_match_generation/,
+  "ACKs must be bound to the current match generation"
+);
+assert.match(
+  readyAckReconciliation,
+  /on conflict \(room_id, room_round_number, round_id, user_id\)[\s\S]*readiness_status = 'ready'/,
+  "ACK writes must be idempotent"
+);
+assert.match(
+  readyAckReconciliation,
+  /get_competitive_audio_readiness_state/,
+  "development diagnostics need authoritative per-player readiness"
+);
+assert.doesNotMatch(
+  readyAckReconciliation,
+  /email/i,
+  "readiness diagnostics must never expose email addresses"
+);
+assert.doesNotMatch(
+  readyAckReconciliation,
+  /party_mode/,
+  "Party Mode must remain on its host-only audio path"
+);
+
+console.log("Arena SQL lifecycle guards passed (53 assertions).");

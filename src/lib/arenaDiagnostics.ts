@@ -59,3 +59,22 @@ export function logArenaDiagnostic(
     })}`
   );
 }
+
+export function logArenaReadyDiagnostic(
+  event: string,
+  details: Record<string, unknown> = {}
+) {
+  if (!isArenaDebugEnabled()) return;
+
+  console.info(
+    `[STANZER_READY] ${JSON.stringify({
+      event,
+      clientId: getArenaClientId(),
+      browserTimeMs: Date.now(),
+      performanceNowMs:
+        typeof performance === "undefined" ? null : performance.now(),
+      timestamp: new Date().toISOString(),
+      ...details,
+    })}`
+  );
+}
