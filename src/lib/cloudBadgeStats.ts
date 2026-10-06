@@ -33,6 +33,13 @@ type QuizResultRow = {
   rounds_played?: number | null;
   average_winning_response_time?: number | null;
   fastest_winning_response_time?: number | null;
+  multiplayer_outcome?: string | null;
+  competitive_progression_eligible?: boolean | null;
+  clean_sheet?: boolean | null;
+  opponent_round_wins?: number | null;
+  opponents_defeated?: number | null;
+  comeback_win?: boolean | null;
+  dominant_win?: boolean | null;
 };
 
 export async function fetchCloudBadgeStats(user: User) {
@@ -43,7 +50,7 @@ export async function fetchCloudBadgeStats(user: User) {
   const result = await supabase
     .from("quiz_results")
     .select(
-      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time"
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time, multiplayer_outcome, competitive_progression_eligible, clean_sheet, opponent_round_wins, opponents_defeated, comeback_win, dominant_win"
     )
     .eq("user_id", user.id)
     .order("played_at", { ascending: false });
@@ -51,6 +58,23 @@ export async function fetchCloudBadgeStats(user: User) {
   if (!result.error) {
     return {
       data: buildTrackTestStats((result.data || []) as QuizResultRow[]),
+      error: null,
+    };
+  }
+
+  const preProgressionResult = await supabase
+    .from("quiz_results")
+    .select(
+      "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time"
+    )
+    .eq("user_id", user.id)
+    .order("played_at", { ascending: false });
+
+  if (!preProgressionResult.error) {
+    return {
+      data: buildTrackTestStats(
+        (preProgressionResult.data || []) as QuizResultRow[]
+      ),
       error: null,
     };
   }
@@ -145,6 +169,20 @@ function mapQuizResult(row: QuizResultRow): QuizResult {
       row.fastest_winning_response_time == null
         ? null
         : Number(row.fastest_winning_response_time),
+    multiplayerOutcome:
+      row.multiplayer_outcome === "win" ||
+      row.multiplayer_outcome === "loss" ||
+      row.multiplayer_outcome === "draw"
+        ? row.multiplayer_outcome
+        : null,
+    competitiveProgressionEligible: Boolean(
+      row.competitive_progression_eligible
+    ),
+    cleanSheet: Boolean(row.clean_sheet),
+    opponentRoundWins: row.opponent_round_wins || 0,
+    opponentsDefeated: row.opponents_defeated || 0,
+    comebackWin: Boolean(row.comeback_win),
+    dominantWin: Boolean(row.dominant_win),
   };
 }
 

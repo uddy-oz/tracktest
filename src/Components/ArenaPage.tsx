@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   acknowledgeCompetitiveLobbyAudioReady,
@@ -55,6 +62,9 @@ import {
   type SpotifyTrack,
 } from "../lib/spotifyApi";
 import { sounds } from "../lib/sounds";
+import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
+import { getArenaBadges, type ArenaBadge } from "../lib/badges";
+import { isAnonymousUser } from "../lib/authIdentity";
 import {
   isArenaDebugEnabled,
   logArenaDiagnostic,
@@ -66,6 +76,7 @@ import {
   getCompetitiveRoundKey,
 } from "../lib/arenaRoundLifecycle";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
+import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import {
   getArenaAlbumError,
   getArenaLobbyStartEligibility,
@@ -397,6 +408,9 @@ function ArenaPage({
     useState<ArenaAudioDiagnosticSnapshot | null>(null);
   const [competitiveReadinessDebug, setCompetitiveReadinessDebug] =
     useState<CompetitiveAudioReadinessState | null>(null);
+  const [earnedMultiplayerBadges, setEarnedMultiplayerBadges] = useState<
+    ArenaBadge[]
+  >([]);
 
   const duelAudioRef = useRef<HTMLAudioElement | null>(null);
   const duelAudioFallbackTimerRef = useRef<number | null>(null);
@@ -428,12 +442,21 @@ function ArenaPage({
   const albumSearchSequenceRef = useRef(0);
   const gamePanelRef = useRef<HTMLElement | null>(null);
   const gameEntryScrollKeyRef = useRef("");
+  const multiplayerBadgeBaselineRef = useRef<{
+    key: string;
+    unlockedIds: Set<string>;
+  } | null>(null);
+  const multiplayerBadgeResultKeyRef = useRef("");
 
   if (!arenaAudioControllerRef.current) {
     arenaAudioControllerRef.current = new ArenaAudioController();
   }
 
   const arenaAudioController = arenaAudioControllerRef.current;
+  const dismissEarnedMultiplayerBadge = useCallback(() => {
+    setEarnedMultiplayerBadges((badges) => badges.slice(1));
+  }, []);
+
   arenaAudioController.setCallbacks({
     onPlaybackChange: setIsDuelClipPlaying,
     onPlaybackStopped: (roundKey, reason) => {
@@ -2167,6 +2190,76 @@ function ArenaPage({
 
     return () => window.clearTimeout(refreshId);
   }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, onProgressionUpdated]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.status === "finished" ||
+      !session?.user ||
+      isAnonymousUser(session.user)
+    ) {
+      return;
+    }
+
+    const matchKey = `${activeRoom.id}:${activeRoom.roundNumber}`;
+    if (multiplayerBadgeBaselineRef.current?.key === matchKey) return;
+    let isActive = true;
+
+    void fetchCloudBadgeStats(session.user).then(({ data }) => {
+      if (!isActive || !data) return;
+      multiplayerBadgeBaselineRef.current = {
+        key: matchKey,
+        unlockedIds: new Set(
+          getArenaBadges(data)
+            .filter((badge) => badge.unlocked)
+            .map((badge) => badge.id)
+        ),
+      };
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, session?.user]);
+
+  useEffect(() => {
+    if (
+      !activeRoom ||
+      activeRoom.status !== "finished" ||
+      !session?.user ||
+      isAnonymousUser(session.user)
+    ) {
+      return;
+    }
+
+    const matchKey = `${activeRoom.id}:${activeRoom.roundNumber}`;
+    const baseline = multiplayerBadgeBaselineRef.current;
+    if (
+      multiplayerBadgeResultKeyRef.current === matchKey ||
+      baseline?.key !== matchKey
+    ) {
+      return;
+    }
+
+    multiplayerBadgeResultKeyRef.current = matchKey;
+    let isActive = true;
+    const timerId = window.setTimeout(() => {
+      void fetchCloudBadgeStats(session.user).then(({ data }) => {
+        if (!isActive || !data) return;
+        const newlyUnlocked = getArenaBadges(data).filter(
+          (badge) => badge.unlocked && !baseline.unlockedIds.has(badge.id)
+        );
+        if (newlyUnlocked.length > 0) {
+          setEarnedMultiplayerBadges(newlyUnlocked);
+        }
+      });
+    }, 650);
+
+    return () => {
+      isActive = false;
+      window.clearTimeout(timerId);
+    };
+  }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, session?.user]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !activeRoom || activeRoom.status !== "finished") {
@@ -4823,6 +4916,68 @@ function ArenaPage({
 
       if (bothPlayersFinished) {
         const sortedPlayers = sortDuelResults(resultPlayers);
+        const currentResult = sortedPlayers.find(
+          (player) => player.userId === session?.user.id
+        );
+        const winnerLabel = getWinnerLabel(sortedPlayers);
+        const isDraw = winnerLabel === "Draw";
+        const didCurrentPlayerWin = Boolean(
+          currentResult && !isDraw && sortedPlayers[0]?.id === currentResult.id
+        );
+        const currentPlayerWasShutOut = Boolean(
+          currentResult &&
+            !isActivePartyMode &&
+            !didCurrentPlayerWin &&
+            currentResult.roundsWon === 0 &&
+            sortedPlayers[0]?.roundsWon > 0
+        );
+        const currentPlayerCleanSheet = Boolean(
+          currentResult &&
+            !isActivePartyMode &&
+            didCurrentPlayerWin &&
+            currentResult.roundsWon > 0 &&
+            sortedPlayers
+              .filter((player) => player.id !== currentResult.id)
+              .every((player) => player.roundsWon === 0)
+        );
+        const outcomeTitle = !currentResult
+          ? "Match Complete"
+          : isDraw
+            ? "Draw"
+            : currentPlayerCleanSheet
+              ? "Clean Sheet"
+              : currentPlayerWasShutOut
+                ? "Shut Out"
+                : didCurrentPlayerWin
+                  ? "Victory"
+                  : "Defeat";
+        const outcomeClass = currentPlayerCleanSheet
+          ? "clean-sheet"
+          : isDraw
+            ? "draw"
+            : didCurrentPlayerWin
+              ? "victory"
+              : "defeat";
+        const earnedMatchBadges = currentResult
+          ? [
+              currentPlayerCleanSheet ? "Clean Sheet" : null,
+              didCurrentPlayerWin &&
+              currentResult.fastestWinningResponseTime != null &&
+              currentResult.fastestWinningResponseTime < 1
+                ? "Lightning"
+                : null,
+              didCurrentPlayerWin &&
+              currentResult.fastestWinningResponseTime != null &&
+              currentResult.fastestWinningResponseTime < 2
+                ? "Quick Draw"
+                : null,
+              didCurrentPlayerWin &&
+              sortedPlayers.length > 1 &&
+              currentResult.roundsWon - sortedPlayers[1].roundsWon === 1
+                ? "Photo Finish"
+                : null,
+            ].filter((badge): badge is string => Boolean(badge))
+          : [];
 
         return (
           <section className="duel-room-screen">
@@ -4836,9 +4991,13 @@ function ArenaPage({
               >
               Back to Lobby
               </button>
-            <div className="duel-results-card">
+            <div className={`duel-results-card competitive-result ${outcomeClass}`}>
               <p className="eyebrow">{activeModeSettings.resultsTitle}</p>
-              <h2>{getWinnerLabel(sortedPlayers)}</h2>
+              <div className="competitive-outcome-banner" aria-live="polite">
+                <span>{currentPlayerCleanSheet ? "Perfect defense" : "Final result"}</span>
+                <h2>{outcomeTitle}</h2>
+                <p>{winnerLabel}</p>
+              </div>
               <div
                 className={`duel-player-grid ${
                   usesLiveLeaderboard ? "group-results-grid" : ""
@@ -4884,6 +5043,39 @@ function ArenaPage({
                   </div>
                 ))}
               </div>
+              {currentResult && (
+                <div className="competitive-match-summary">
+                  <div>
+                    <span>Rounds Won</span>
+                    <strong>{currentResult.roundsWon}</strong>
+                  </div>
+                  <div>
+                    <span>Avg Winning Response</span>
+                    <strong>
+                      {formatResponseTime(currentResult.averageWinningResponseTime)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Fastest Response</span>
+                    <strong>
+                      {formatResponseTime(currentResult.fastestWinningResponseTime)}
+                    </strong>
+                  </div>
+                </div>
+              )}
+              {earnedMatchBadges.length > 0 && (
+                <div className="match-badges-earned">
+                  <span>Achievements from this match</span>
+                  <div>
+                    {earnedMatchBadges.map((badge) => (
+                      <strong key={badge}>{badge}</strong>
+                    ))}
+                  </div>
+                  <small>
+                    Registered-player progression syncs from the authoritative result.
+                  </small>
+                </div>
+              )}
               {activeRoom.rematchRequestedBy && (
                 <p className="arena-note">
                   A player requested a rematch. Host controls the next start.
@@ -5623,6 +5815,10 @@ function ArenaPage({
         selectedArenaTheme ? `arena-theme-${selectedArenaTheme}` : ""
       }`}
     >
+      <BadgeEarnedPopup
+        badge={earnedMultiplayerBadges[0] || null}
+        onDone={dismissEarnedMultiplayerBadge}
+      />
       <audio
         ref={duelAudioRef}
         className="hidden-audio-preview"

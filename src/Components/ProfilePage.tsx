@@ -476,6 +476,54 @@ function ProfilePage({
         </div>
       </section>
 
+      <section className="profile-overview-section multiplayer-profile-section">
+        <div className="profile-section-header">
+          <div>
+            <p className="eyebrow">Competitive Career</p>
+            <h2>Multiplayer</h2>
+          </div>
+          <span>{profileState.stats.arena.gamesPlayed} completed matches</span>
+        </div>
+        <div className="leaderboard-grid profile-stats-grid">
+          <div className="stat-card">
+            <span>Multiplayer Wins</span>
+            <strong>{profileState.stats.arena.wins}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Win Rate</span>
+            <strong>{profileState.stats.arena.winPercentage}%</strong>
+          </div>
+          <div className="stat-card">
+            <span>Best Win Streak</span>
+            <strong>{profileState.stats.arena.bestWinStreak}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Clean Sheets</span>
+            <strong>{profileState.stats.arena.cleanSheets}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Avg Winning Response</span>
+            <strong>
+              {profileState.stats.arena.averageWinningResponseTime > 0
+                ? formatSeconds(
+                    profileState.stats.arena.averageWinningResponseTime
+                  )
+                : "--"}
+            </strong>
+          </div>
+          <div className="stat-card">
+            <span>Fastest Winning Response</span>
+            <strong>
+              {profileState.stats.arena.fastestWinningResponseTime > 0
+                ? formatSeconds(
+                    profileState.stats.arena.fastestWinningResponseTime
+                  )
+                : "--"}
+            </strong>
+          </div>
+        </div>
+      </section>
+
       <section className="badge-section profile-showcase">
         <div className="badge-section-header">
           <div>

@@ -2666,6 +2666,253 @@ button:hover {
   }
 }
 
+/* Competitive progression and post-match presentation */
+.global-ranking-tabs {
+  margin: 0 0 18px;
+}
+
+.multiplayer-rankings {
+  display: grid;
+  gap: 16px;
+}
+
+.multiplayer-category-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+
+.multiplayer-category-tabs button {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+}
+
+.multiplayer-category-tabs button.active {
+  border-color: var(--duel-accent, #a98cff);
+  color: var(--text-primary);
+  box-shadow: 0 0 24px rgba(155, 113, 255, 0.2);
+}
+
+.multiplayer-leaderboard-panel {
+  border-top: 3px solid var(--duel-accent, #a98cff);
+}
+
+.multiplayer-leaderboard-panel .leaderboard-list-row {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+}
+
+.competitive-rank-value {
+  color: var(--text-primary) !important;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.leaderboard-your-position {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px dashed rgba(169, 140, 255, 0.45);
+}
+
+.leaderboard-your-position > span {
+  color: var(--duel-accent, #a98cff);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.view-full-leaderboard {
+  margin-top: 16px;
+}
+
+.leaderboard-modal-overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 5, 10, 0.8);
+  backdrop-filter: blur(10px);
+}
+
+.leaderboard-modal {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(760px, 88vh);
+  padding: 24px;
+  border: 1px solid rgba(169, 140, 255, 0.38);
+  border-top: 3px solid var(--duel-accent, #a98cff);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+}
+
+.leaderboard-modal-scroll {
+  display: grid;
+  gap: 8px;
+  max-height: 62vh;
+  margin-top: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.leaderboard-modal-scroll .leaderboard-list-row {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+}
+
+.multiplayer-profile-section {
+  border-top-color: var(--duel-accent, #a98cff);
+}
+
+.competitive-result {
+  position: relative;
+  overflow: hidden;
+  border-top: 4px solid var(--result-accent, #a98cff);
+}
+
+.competitive-result.victory {
+  --result-accent: #47e39a;
+  box-shadow: 0 18px 60px rgba(71, 227, 154, 0.13);
+}
+
+.competitive-result.defeat {
+  --result-accent: #ff5f7d;
+}
+
+.competitive-result.draw {
+  --result-accent: #b8c3d7;
+}
+
+.competitive-result.clean-sheet {
+  --result-accent: #ffd447;
+  box-shadow: 0 18px 70px rgba(255, 212, 71, 0.18);
+}
+
+.competitive-result.clean-sheet::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 212, 71, 0.12), transparent 70%);
+  animation: result-sweep 2.8s ease-in-out infinite;
+}
+
+.competitive-outcome-banner {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  margin: 12px 0 22px;
+  text-align: center;
+}
+
+.competitive-outcome-banner span,
+.match-badges-earned > span {
+  color: var(--result-accent);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.competitive-outcome-banner h2 {
+  margin: 0;
+  color: var(--result-accent);
+  font-size: clamp(2.5rem, 9vw, 5.8rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+  text-shadow: 0 0 32px color-mix(in srgb, var(--result-accent) 48%, transparent);
+}
+
+.competitive-outcome-banner p {
+  margin: 4px 0 0;
+}
+
+.competitive-match-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.competitive-match-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.competitive-match-summary span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.competitive-match-summary strong {
+  font-size: 1.15rem;
+}
+
+.match-badges-earned {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--result-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--result-accent) 7%, transparent);
+}
+
+.match-badges-earned > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.match-badges-earned strong {
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--result-accent) 55%, transparent);
+  color: var(--result-accent);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+@keyframes result-sweep {
+  0%, 100% { transform: translateX(-65%); opacity: 0; }
+  45%, 60% { opacity: 1; }
+  80% { transform: translateX(65%); opacity: 0; }
+}
+
+@media (max-width: 620px) {
+  .competitive-match-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-modal {
+    padding: 20px 14px;
+  }
+
+  .multiplayer-leaderboard-panel .leaderboard-list-row,
+  .leaderboard-modal-scroll .leaderboard-list-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .competitive-rank-value {
+    grid-column: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .competitive-result.clean-sheet::before {
+    animation: none;
+  }
+}
+
 .arena-mode-card {
   --mode-accent: #7c5cff;
   --mode-accent-soft: rgba(124, 92, 255, 0.16);

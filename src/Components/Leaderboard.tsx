@@ -17,6 +17,16 @@ import {
 import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
 import { createEmptyTrackTestStats } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
+import {
+  fetchMultiplayerLeaderboardPage,
+  fetchMultiplayerLeaderboardSummary,
+  formatMultiplayerLeaderboardValue,
+  MULTIPLAYER_CATEGORY_LABELS,
+  MULTIPLAYER_LEADERBOARD_CATEGORIES,
+  type MultiplayerLeaderboardCategory,
+  type MultiplayerLeaderboardEntry,
+  type MultiplayerLeaderboardSummary,
+} from "../lib/multiplayerLeaderboard";
 
 type LeaderboardProps = {
   onPlay: () => void;
@@ -250,6 +260,7 @@ function Leaderboard({
           isLoading={isGlobalLoading}
           onOpenProfile={onOpenProfile}
           currentUserId={session?.user.id}
+          progressionRevision={progressionRevision}
         />
       ) : (
         <MyStats
@@ -277,13 +288,19 @@ function GlobalArena({
   isLoading,
   onOpenProfile,
   currentUserId,
+  progressionRevision,
 }: {
   data: GlobalLeaderboardData | null;
   error: string;
   isLoading: boolean;
   onOpenProfile: (username: string) => void;
   currentUserId?: string;
+  progressionRevision: number;
 }) {
+  const [rankingMode, setRankingMode] = useState<"solo" | "multiplayer">(
+    "multiplayer"
+  );
+
   if (isLoading) {
     return <p className="empty-stats">Loading StanZer rankings...</p>;
   }
@@ -298,6 +315,31 @@ function GlobalArena({
 
   return (
     <>
+      <div className="leaderboard-tabs global-ranking-tabs" role="tablist">
+        <button
+          type="button"
+          className={rankingMode === "multiplayer" ? "active" : ""}
+          onClick={() => setRankingMode("multiplayer")}
+        >
+          Multiplayer
+        </button>
+        <button
+          type="button"
+          className={rankingMode === "solo" ? "active" : ""}
+          onClick={() => setRankingMode("solo")}
+        >
+          Solo Rankings
+        </button>
+      </div>
+
+      {rankingMode === "multiplayer" ? (
+        <MultiplayerRankings
+          key={`multiplayer-${progressionRevision}`}
+          currentUserId={currentUserId}
+          onOpenProfile={onOpenProfile}
+        />
+      ) : (
+        <>
       <div className="leaderboard-sections global-leaderboard-sections">
         <div className="leaderboard-panel leaderboard-panel-overall">
           <h2>Overall Points</h2>
@@ -514,7 +556,245 @@ function GlobalArena({
           <p className="empty-stats">No perfect runs have hit the Arena yet.</p>
         )}
       </div>
+        </>
+      )}
     </>
+  );
+}
+
+function MultiplayerRankings({
+  currentUserId,
+  onOpenProfile,
+}: {
+  currentUserId?: string;
+  onOpenProfile: (username: string) => void;
+}) {
+  const [category, setCategory] =
+    useState<MultiplayerLeaderboardCategory>("most_wins");
+  const [summary, setSummary] =
+    useState<MultiplayerLeaderboardSummary | null>(null);
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [fullEntries, setFullEntries] = useState<MultiplayerLeaderboardEntry[]>(
+    []
+  );
+  const [isFullOpen, setIsFullOpen] = useState(false);
+  const [isFullLoading, setIsFullLoading] = useState(false);
+  const [fullOffset, setFullOffset] = useState(0);
+
+  useEffect(() => {
+    let isActive = true;
+
+    void fetchMultiplayerLeaderboardSummary().then((result) => {
+      if (!isActive) return;
+      setSummary(result.data);
+      setError(result.error || "");
+      setIsLoading(false);
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  async function openFullLeaderboard() {
+    setIsFullOpen(true);
+    setIsFullLoading(true);
+    setFullOffset(0);
+    const result = await fetchMultiplayerLeaderboardPage(category, 0, 50);
+    setFullEntries(result.data || []);
+    setError(result.error || "");
+    setIsFullLoading(false);
+  }
+
+  async function loadMoreLeaderboard() {
+    const nextOffset = fullOffset + 50;
+    setIsFullLoading(true);
+    const result = await fetchMultiplayerLeaderboardPage(
+      category,
+      nextOffset,
+      50
+    );
+    setFullEntries((currentEntries) => {
+      const entriesByUser = new Map(
+        currentEntries.map((entry) => [entry.userId, entry])
+      );
+      for (const entry of result.data || []) entriesByUser.set(entry.userId, entry);
+      return [...entriesByUser.values()].sort((a, b) => a.rank - b.rank);
+    });
+    setFullOffset(nextOffset);
+    setError(result.error || "");
+    setIsFullLoading(false);
+  }
+
+  if (isLoading) {
+    return <p className="empty-stats">Loading competitive rankings...</p>;
+  }
+
+  if (error && !summary) {
+    return (
+      <p className="empty-stats">
+        Multiplayer rankings are not available yet. Run the competitive
+        progression migration, then refresh this page.
+      </p>
+    );
+  }
+
+  const entries = summary?.[category] || [];
+  const topEntries = entries.filter((entry) => entry.rank <= 10);
+  const currentEntry = entries.find(
+    (entry) => entry.isCurrentUser || entry.userId === currentUserId
+  );
+  const currentIsOutsideTop = Boolean(currentEntry && currentEntry.rank > 10);
+
+  return (
+    <section className="multiplayer-rankings">
+      <div className="multiplayer-category-tabs" role="tablist">
+        {MULTIPLAYER_LEADERBOARD_CATEGORIES.map((item) => (
+          <button
+            type="button"
+            className={category === item ? "active" : ""}
+            onClick={() => setCategory(item)}
+            key={item}
+          >
+            {MULTIPLAYER_CATEGORY_LABELS[item]}
+          </button>
+        ))}
+      </div>
+
+      <div className="leaderboard-panel multiplayer-leaderboard-panel">
+        <div className="profile-panel-heading">
+          <div>
+            <p className="eyebrow">Competitive Arena</p>
+            <h2>{MULTIPLAYER_CATEGORY_LABELS[category]}</h2>
+          </div>
+          <span>Registered players only</span>
+        </div>
+        {topEntries.length > 0 ? (
+          <div className="leaderboard-list">
+            {topEntries.map((entry) => (
+              <MultiplayerLeaderboardRow
+                category={category}
+                entry={entry}
+                onOpenProfile={onOpenProfile}
+                key={entry.userId}
+              />
+            ))}
+            {currentIsOutsideTop && currentEntry && (
+              <div className="leaderboard-your-position">
+                <span>Your Position</span>
+                <MultiplayerLeaderboardRow
+                  category={category}
+                  entry={currentEntry}
+                  onOpenProfile={onOpenProfile}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="empty-stats">
+            No qualifying competitive results yet.
+          </p>
+        )}
+        <button
+          type="button"
+          className="secondary-button view-full-leaderboard"
+          disabled={topEntries.length === 0}
+          onClick={() => void openFullLeaderboard()}
+        >
+          View Full Leaderboard
+        </button>
+      </div>
+
+      {isFullOpen && (
+        <div
+          className="leaderboard-modal-overlay"
+          role="presentation"
+          onClick={() => setIsFullOpen(false)}
+        >
+          <section
+            className="leaderboard-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="full-leaderboard-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="badge-detail-close"
+              aria-label="Close full leaderboard"
+              onClick={() => setIsFullOpen(false)}
+            >
+              X
+            </button>
+            <p className="eyebrow">Full Rankings</p>
+            <h2 id="full-leaderboard-title">
+              {MULTIPLAYER_CATEGORY_LABELS[category]}
+            </h2>
+            <div className="leaderboard-modal-scroll">
+              {isFullLoading && fullEntries.length === 0 ? (
+                <p>Loading rankings...</p>
+              ) : (
+                fullEntries.map((entry) => (
+                  <MultiplayerLeaderboardRow
+                    category={category}
+                    entry={entry}
+                    onOpenProfile={onOpenProfile}
+                    key={entry.userId}
+                  />
+                ))
+              )}
+              {fullEntries.length > 0 &&
+                (fullEntries[0]?.totalCount || 0) > fullOffset + 50 && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={isFullLoading}
+                    onClick={() => void loadMoreLeaderboard()}
+                  >
+                    {isFullLoading ? "Loading..." : "Load More"}
+                  </button>
+                )}
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MultiplayerLeaderboardRow({
+  category,
+  entry,
+  onOpenProfile,
+}: {
+  category: MultiplayerLeaderboardCategory;
+  entry: MultiplayerLeaderboardEntry;
+  onOpenProfile: (username: string) => void;
+}) {
+  return (
+    <div
+      className={`leaderboard-list-row ${getRankingClass(entry.rank - 1)} ${
+        entry.isCurrentUser ? "leaderboard-current-user" : ""
+      }`}
+    >
+      <span className="rank-number">{entry.rank}</span>
+      <div>
+        <strong>
+          <PlayerLabel
+            playerName={entry.playerName}
+            username={entry.username}
+            onOpenProfile={onOpenProfile}
+          />
+        </strong>
+        <span>
+          {entry.wins} wins - {entry.matchesPlayed} matches
+        </span>
+      </div>
+      <span className="competitive-rank-value">
+        {formatMultiplayerLeaderboardValue(category, entry.value)}
+      </span>
+    </div>
   );
 }
 

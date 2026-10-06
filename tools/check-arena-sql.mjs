@@ -33,6 +33,10 @@ const readyAckReconciliation = readFileSync(
   new URL("../supabase/20261006_competitive_audio_ready_ack_reconciliation.sql", import.meta.url),
   "utf8"
 );
+const multiplayerProgression = readFileSync(
+  new URL("../supabase/20261007_multiplayer_progression_and_leaderboards.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -262,4 +266,50 @@ assert.doesNotMatch(
   "Party Mode must remain on its host-only audio path"
 );
 
-console.log("Arena SQL lifecycle guards passed (53 assertions).");
+assert.match(
+  multiplayerProgression,
+  /^begin;/i,
+  "multiplayer progression must begin transactionally"
+);
+assert.match(
+  multiplayerProgression,
+  /commit;\s*$/i,
+  "multiplayer progression must commit transactionally"
+);
+assert.match(
+  multiplayerProgression,
+  /status = 'finished'/,
+  "only authoritative finished rooms may qualify"
+);
+assert.match(
+  multiplayerProgression,
+  /coalesce\(registered_user\.is_anonymous, false\)/,
+  "guest accounts must not qualify for permanent progression"
+);
+assert.match(
+  multiplayerProgression,
+  /new\.scoring_model <> 'round_points'/,
+  "legacy Duel and Group points must not become round progression"
+);
+assert.match(
+  multiplayerProgression,
+  /new\.rounds_won := greatest\(coalesce\(target_player\.rounds_won, 0\), 0\)/,
+  "career progression must overwrite browser claims with authoritative player results"
+);
+assert.match(
+  multiplayerProgression,
+  /new\.rounds_won > 0[\s\S]*opponent_wins = 0/,
+  "Clean Sheets depend on scored opponent wins, not unclaimed rounds"
+);
+assert.match(
+  multiplayerProgression,
+  /unique index if not exists quiz_results_arena_round_user_unique_idx/,
+  "existing authoritative persistence must remain rematch-idempotent"
+);
+assert.doesNotMatch(
+  multiplayerProgression,
+  /email/i,
+  "public competitive rankings must never expose email addresses"
+);
+
+console.log("Arena SQL lifecycle guards passed (62 assertions).");

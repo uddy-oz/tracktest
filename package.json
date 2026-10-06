@@ -13,6 +13,7 @@
     "test:arena-audio": "node --experimental-strip-types --test tools/arena-audio-reliability.test.ts",
     "test:arena-ready-ack": "node --experimental-strip-types --test tools/arena-ready-ack.test.ts",
     "test:arena-sql": "node tools/check-arena-sql.mjs",
+    "test:multiplayer-progression": "node --experimental-strip-types tools/multiplayer-progression.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

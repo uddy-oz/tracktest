@@ -29,11 +29,21 @@ export type QuizResult = {
   roundsPlayed?: number;
   averageWinningResponseTime?: number;
   fastestWinningResponseTime?: number | null;
+  multiplayerOutcome?: "win" | "loss" | "draw" | null;
+  competitiveProgressionEligible?: boolean;
+  cleanSheet?: boolean;
+  opponentRoundWins?: number;
+  opponentsDefeated?: number;
+  comebackWin?: boolean;
+  dominantWin?: boolean;
 };
 
 export type ArenaProgressStats = {
   gamesPlayed: number;
   wins: number;
+  losses: number;
+  draws: number;
+  winPercentage: number;
   duelWins: number;
   lobbyWins: number;
   partyWins: number;
@@ -49,9 +59,20 @@ export type ArenaProgressStats = {
   currentWinStreak: number;
   bestWinStreak: number;
   roundWins: number;
+  roundLosses: number;
   roundsPlayed: number;
+  roundWinPercentage: number;
   averageWinningResponseTime: number;
   fastestWinningResponseTime: number;
+  cleanSheets: number;
+  duelGames: number;
+  lobbyGames: number;
+  opponentsDefeated: number;
+  comebackWins: number;
+  dominantWins: number;
+  photoFinishWins: number;
+  quickDraws: number;
+  lightningWins: number;
 };
 
 export type OverallStats = {
@@ -100,6 +121,9 @@ export function createEmptyArenaProgress(): ArenaProgressStats {
   return {
     gamesPlayed: 0,
     wins: 0,
+    losses: 0,
+    draws: 0,
+    winPercentage: 0,
     duelWins: 0,
     lobbyWins: 0,
     partyWins: 0,
@@ -115,9 +139,20 @@ export function createEmptyArenaProgress(): ArenaProgressStats {
     currentWinStreak: 0,
     bestWinStreak: 0,
     roundWins: 0,
+    roundLosses: 0,
     roundsPlayed: 0,
+    roundWinPercentage: 0,
     averageWinningResponseTime: 0,
     fastestWinningResponseTime: 0,
+    cleanSheets: 0,
+    duelGames: 0,
+    lobbyGames: 0,
+    opponentsDefeated: 0,
+    comebackWins: 0,
+    dominantWins: 0,
+    photoFinishWins: 0,
+    quickDraws: 0,
+    lightningWins: 0,
   };
 }
 
@@ -144,7 +179,12 @@ export function createEmptyTrackTestStats(): TrackTestStats {
 
 export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
   const arenaResults = results
-    .filter((result) => result.gameMode && result.gameMode !== "single_player")
+    .filter(
+      (result) =>
+        result.gameMode &&
+        result.gameMode !== "single_player" &&
+        result.competitiveProgressionEligible === true
+    )
     .sort(
       (a, b) =>
         new Date(b.datePlayed).getTime() - new Date(a.datePlayed).getTime()
@@ -171,6 +211,12 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
   }
 
   const wins = arenaResults.filter((result) => result.isWinner);
+  const losses = arenaResults.filter(
+    (result) => result.multiplayerOutcome === "loss"
+  );
+  const draws = arenaResults.filter(
+    (result) => result.multiplayerOutcome === "draw"
+  );
   const duelWins = wins.filter((result) => result.gameMode === "duel");
   const partyResults = arenaResults.filter(
     (result) => result.gameMode === "party_mode"
@@ -186,6 +232,10 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
     (total, result) => total + (result.roundsPlayed || 0),
     0
   );
+  const roundLosses = roundPointResults.reduce(
+    (total, result) => total + (result.opponentRoundWins || 0),
+    0
+  );
   const winningResponseTotal = roundPointResults.reduce(
     (total, result) =>
       total +
@@ -199,6 +249,12 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
   return {
     gamesPlayed: arenaResults.length,
     wins: wins.length,
+    losses: losses.length,
+    draws: draws.length,
+    winPercentage:
+      arenaResults.length > 0
+        ? Math.round((wins.length / arenaResults.length) * 1000) / 10
+        : 0,
     duelWins: duelWins.length,
     lobbyWins: wins.filter((result) => result.gameMode === "group_lobby").length,
     partyWins: wins.filter((result) => result.gameMode === "party_mode").length,
@@ -215,12 +271,7 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
           ? result.scoreMargin === 1
           : (result.scoreMargin || 0) > 0 && (result.scoreMargin || 0) <= 500
     ).length,
-    dominantDuelWins: duelWins.filter(
-      (result) =>
-        result.scoringModel === "round_points"
-          ? (result.scoreMargin || 0) >= 3
-          : (result.scoreMargin || 0) >= 2000
-    ).length,
+    dominantDuelWins: duelWins.filter((result) => result.dominantWin).length,
     fullLobbyWins: wins.filter(
       (result) =>
         result.gameMode === "group_lobby" && (result.playerCount || 0) >= 10
@@ -232,11 +283,40 @@ export function buildArenaProgress(results: QuizResult[]): ArenaProgressStats {
     currentWinStreak,
     bestWinStreak,
     roundWins,
+    roundLosses,
     roundsPlayed,
+    roundWinPercentage:
+      roundWins + roundLosses > 0
+        ? Math.round((roundWins / (roundWins + roundLosses)) * 1000) / 10
+        : 0,
     averageWinningResponseTime:
       roundWins > 0 ? winningResponseTotal / roundWins : 0,
     fastestWinningResponseTime:
       fastestWinningTimes.length > 0 ? Math.min(...fastestWinningTimes) : 0,
+    cleanSheets: arenaResults.filter((result) => result.cleanSheet).length,
+    duelGames: arenaResults.filter((result) => result.gameMode === "duel").length,
+    lobbyGames: arenaResults.filter(
+      (result) => result.gameMode === "group_lobby"
+    ).length,
+    opponentsDefeated: arenaResults.reduce(
+      (total, result) => total + (result.opponentsDefeated || 0),
+      0
+    ),
+    comebackWins: arenaResults.filter((result) => result.comebackWin).length,
+    dominantWins: arenaResults.filter((result) => result.dominantWin).length,
+    photoFinishWins: wins.filter((result) => result.scoreMargin === 1).length,
+    quickDraws: arenaResults.filter(
+      (result) =>
+        typeof result.fastestWinningResponseTime === "number" &&
+        result.fastestWinningResponseTime > 0 &&
+        result.fastestWinningResponseTime < 2
+    ).length,
+    lightningWins: arenaResults.filter(
+      (result) =>
+        typeof result.fastestWinningResponseTime === "number" &&
+        result.fastestWinningResponseTime > 0 &&
+        result.fastestWinningResponseTime < 1
+    ).length,
   };
 }
 
