@@ -278,8 +278,13 @@ assert.match(
 );
 assert.match(
   multiplayerProgression,
-  /status = 'finished'/,
-  "only authoritative finished rooms may qualify"
+  /if not is_existing_result and target_room\.status <> 'finished'/,
+  "new progression rows must require an authoritative finished room"
+);
+assert.doesNotMatch(
+  multiplayerProgression,
+  /where id = new\.arena_room_id\s+and status = 'finished'/,
+  "a live rematch must not invalidate an older completed generation"
 );
 assert.match(
   multiplayerProgression,
@@ -298,13 +303,57 @@ assert.match(
 );
 assert.match(
   multiplayerProgression,
+  /new\.arena_round_number := old\.arena_round_number/,
+  "historical backfills must preserve each saved rematch generation"
+);
+assert.match(
+  multiplayerProgression,
+  /new\.played_at := old\.played_at/,
+  "historical backfills must preserve the original match timestamp"
+);
+assert.match(
+  multiplayerProgression,
+  /set competitive_progression_eligible = competitive_progression_eligible/,
+  "historical backfill must touch a derived field instead of match identity"
+);
+assert.doesNotMatch(
+  multiplayerProgression,
+  /set played_at = played_at/,
+  "historical backfill must not target an identity/result field"
+);
+const historicalReturnIndex = multiplayerProgression.indexOf(
+  "    return new;\n  end if;\n\n  select * into target_player"
+);
+const currentGenerationRewriteIndex = multiplayerProgression.indexOf(
+  "new.arena_round_number := coalesce(target_room.round_number, 1)"
+);
+assert.ok(
+  historicalReturnIndex > 0 &&
+    historicalReturnIndex < currentGenerationRewriteIndex,
+  "historical rows must return before the current-generation authoritative rewrite"
+);
+const rematchKeys = [1, 2, 3].map(
+  (generation) => `room-a:${generation}:user-a`
+);
+assert.equal(
+  new Set(rematchKeys).size,
+  3,
+  "three rematch generations must remain distinct under the persistent identity key"
+);
+assert.match(
+  multiplayerProgression,
   /new\.rounds_won > 0[\s\S]*opponent_wins = 0/,
   "Clean Sheets depend on scored opponent wins, not unclaimed rounds"
 );
 assert.match(
-  multiplayerProgression,
+  authority,
   /unique index if not exists quiz_results_arena_round_user_unique_idx/,
   "existing authoritative persistence must remain rematch-idempotent"
+);
+assert.doesNotMatch(
+  multiplayerProgression,
+  /drop index[\s\S]*quiz_results_arena/i,
+  "the progression migration must not weaken the deployed rematch identity"
 );
 assert.doesNotMatch(
   multiplayerProgression,
@@ -312,4 +361,4 @@ assert.doesNotMatch(
   "public competitive rankings must never expose email addresses"
 );
 
-console.log("Arena SQL lifecycle guards passed (62 assertions).");
+console.log("Arena SQL lifecycle guards passed (70 assertions).");

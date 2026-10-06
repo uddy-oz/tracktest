@@ -27,10 +27,6 @@ create index if not exists quiz_results_competitive_user_idx
   on public.quiz_results (user_id, played_at desc)
   where competitive_progression_eligible;
 
-create unique index if not exists quiz_results_arena_round_user_unique_idx
-  on public.quiz_results (arena_room_id, arena_round_number, user_id)
-  where arena_room_id is not null;
-
 -- This trigger is the trust boundary for competitive career data. Even if a
 -- browser attempts to insert a quiz_result directly, the row only qualifies
 -- when it matches a finished authoritative room and a registered room member.
@@ -51,7 +47,40 @@ declare
   resolved_placement integer := 0;
   top_tie_count integer := 0;
   opponent_score integer := 0;
+  is_existing_result boolean := tg_op = 'UPDATE';
 begin
+  -- Existing result rows are immutable match records. Backfills may update only
+  -- derived progression fields; they must never rewrite a rematch generation or
+  -- replace an older score/timestamp with the room's latest player snapshot.
+  if is_existing_result then
+    new.id := old.id;
+    new.user_id := old.user_id;
+    new.album_name := old.album_name;
+    new.artist_name := old.artist_name;
+    new.total_questions := old.total_questions;
+    new.correct_answers := old.correct_answers;
+    new.accuracy := old.accuracy;
+    new.final_points := old.final_points;
+    new.average_answer_time := old.average_answer_time;
+    new.played_at := old.played_at;
+    new.game_mode := old.game_mode;
+    new.arena_room_id := old.arena_room_id;
+    new.arena_round_number := old.arena_round_number;
+    new.is_private := old.is_private;
+    new.is_winner := old.is_winner;
+    new.was_host := old.was_host;
+    new.player_count := old.player_count;
+    new.placement := old.placement;
+    new.score_margin := old.score_margin;
+    new.result_status := old.result_status;
+    new.scoring_model := old.scoring_model;
+    new.round_points := old.round_points;
+    new.rounds_won := old.rounds_won;
+    new.rounds_played := old.rounds_played;
+    new.average_winning_response_time := old.average_winning_response_time;
+    new.fastest_winning_response_time := old.fastest_winning_response_time;
+  end if;
+
   new.multiplayer_outcome := null;
   new.competitive_progression_eligible := false;
   new.clean_sheet := false;
@@ -66,10 +95,114 @@ begin
 
   select * into target_room
   from public.arena_rooms
-  where id = new.arena_room_id
-    and status = 'finished';
+  where id = new.arena_room_id;
 
   if target_room.id is null then
+    return new;
+  end if;
+
+  if not is_existing_result and target_room.status <> 'finished' then
+    return new;
+  end if;
+
+  if exists (
+    select 1 from auth.users registered_user
+    where registered_user.id = new.user_id
+      and coalesce(registered_user.is_anonymous, false)
+  ) then
+    return new;
+  end if;
+
+  if is_existing_result then
+    participant_count := greatest(coalesce(new.player_count, 0), 0);
+    minimum_participants := case new.game_mode
+      when 'duel' then 2
+      when 'group_lobby' then 3
+      when 'party_mode' then 1
+      else 2
+    end;
+
+    -- Point-era Duel/Group rows remain stored but cannot be translated into the
+    -- authoritative round model. Compatible generations retain their original
+    -- result data and receive derived progression only.
+    if participant_count < minimum_participants or (
+      new.game_mode in ('duel', 'group_lobby') and (
+        new.scoring_model <> 'round_points' or new.rounds_played <= 0
+      )
+    ) then
+      return new;
+    end if;
+
+    new.competitive_progression_eligible := true;
+    new.multiplayer_outcome := case
+      when new.is_winner then 'win'
+      when coalesce(new.placement, 0) = 1 then 'draw'
+      else 'loss'
+    end;
+
+    if new.scoring_model = 'round_points' then
+      select count(*) filter (
+        where answer.is_round_winner and answer.user_id <> new.user_id
+      )::integer
+      into opponent_wins
+      from public.arena_competitive_answers answer
+      where answer.room_id = new.arena_room_id
+        and answer.room_round_number = new.arena_round_number;
+
+      -- Older compatible deployments may have retained result rows after their
+      -- answer detail was pruned. Fall back to same-generation result records,
+      -- never to the room's latest arena_room_players state.
+      if opponent_wins = 0 then
+        select coalesce(sum(greatest(result.rounds_won, 0)), 0)::integer
+        into opponent_wins
+        from public.quiz_results result
+        where result.arena_room_id = new.arena_room_id
+          and result.arena_round_number = new.arena_round_number
+          and result.user_id <> new.user_id
+          and coalesce(result.result_status, 'active') not in ('cancelled', 'left');
+      end if;
+
+      new.opponent_round_wins := coalesce(opponent_wins, 0);
+      scored_rounds := greatest(new.rounds_won, 0) + new.opponent_round_wins;
+      new.clean_sheet := new.multiplayer_outcome = 'win'
+        and new.rounds_won > 0
+        and new.opponent_round_wins = 0;
+      new.dominant_win := new.multiplayer_outcome = 'win'
+        and scored_rounds > 0
+        and new.rounds_won::numeric / scored_rounds >= 0.75;
+
+      with per_question as (
+        select
+          answer.question_index,
+          count(*) filter (
+            where answer.is_round_winner and answer.user_id = new.user_id
+          )::integer as own_win,
+          count(*) filter (
+            where answer.is_round_winner and answer.user_id <> new.user_id
+          )::integer as opponent_win
+        from public.arena_competitive_answers answer
+        where answer.room_id = new.arena_room_id
+          and answer.room_round_number = new.arena_round_number
+        group by answer.question_index
+      ), scoreline as (
+        select
+          sum(own_win) over (order by question_index) as own_total,
+          sum(opponent_win) over (order by question_index) as opponent_total
+        from per_question
+      )
+      select coalesce(bool_or(opponent_total - own_total >= 2), false)
+      into was_behind_by_two
+      from scoreline;
+
+      new.comeback_win := new.multiplayer_outcome = 'win' and was_behind_by_two;
+    end if;
+
+    new.opponents_defeated := case
+      when new.multiplayer_outcome = 'win' then greatest(participant_count - 1, 0)
+      when new.multiplayer_outcome = 'draw' then 0
+      else greatest(participant_count - coalesce(new.placement, participant_count), 0)
+    end;
+
     return new;
   end if;
 
@@ -79,11 +212,7 @@ begin
     and user_id = new.user_id
     and coalesce(result_status, 'active') not in ('cancelled', 'left');
 
-  if target_player.id is null or exists (
-    select 1 from auth.users registered_user
-    where registered_user.id = new.user_id
-      and coalesce(registered_user.is_anonymous, false)
-  ) then
+  if target_player.id is null then
     return new;
   end if;
 
@@ -297,7 +426,7 @@ revoke all on function public.derive_competitive_progression()
 -- Re-evaluate compatible historical room results. The update is idempotent and
 -- leaves Solo rows and obsolete point-based multiplayer values untouched.
 update public.quiz_results
-set played_at = played_at
+set competitive_progression_eligible = competitive_progression_eligible
 where arena_room_id is not null;
 
 create or replace view public.multiplayer_career_stats as
