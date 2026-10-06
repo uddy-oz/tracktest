@@ -640,11 +640,11 @@ function ArenaPage({
 
     const refreshId = window.setInterval(() => {
       if (navigator.onLine) {
-        void refreshActiveRoom(false);
+        void refreshActiveRoom(false, "poll");
       }
     }, DUEL_ROOM_REFRESH_MS);
 
-    const handleOnline = () => void refreshActiveRoom(false);
+    const handleOnline = () => void refreshActiveRoom(false, "online");
     window.addEventListener("online", handleOnline);
 
     return () => {
@@ -675,7 +675,7 @@ function ArenaPage({
           filter: `id=eq.${activeRoom.id}`,
         },
         () => {
-          void refreshActiveRoom(false);
+          void refreshActiveRoom(false, "realtime");
         }
       )
       .on(
@@ -687,7 +687,7 @@ function ArenaPage({
           filter: `room_id=eq.${activeRoom.id}`,
         },
         () => {
-          void refreshActiveRoom(false);
+          void refreshActiveRoom(false, "realtime");
         }
       )
       .subscribe();
@@ -889,6 +889,8 @@ function ArenaPage({
         matchGeneration: activeRoom.roundNumber,
         userId: session?.user.id,
         authType: session?.user.is_anonymous ? "anonymous" : "permanent",
+        playerRole:
+          activeRoom.hostUserId === session?.user.id ? "host" : "player",
         mode: activeRoom.mode,
         roundKey,
         roundId:
@@ -3084,7 +3086,10 @@ function ArenaPage({
     }
   }
 
-  async function refreshActiveRoom(showMessage = true) {
+  async function refreshActiveRoom(
+    showMessage = true,
+    source: "manual" | "poll" | "realtime" | "online" = "manual"
+  ) {
     if (!activeRoom) {
       return;
     }
@@ -3107,6 +3112,28 @@ function ArenaPage({
     }
 
     if (room) {
+      const roomBeforeUpdate = activeRoomSnapshotRef.current;
+      if (
+        source === "poll" &&
+        roomBeforeUpdate?.id === room.id &&
+        (roomBeforeUpdate.status !== room.status ||
+          roomBeforeUpdate.roundNumber !== room.roundNumber ||
+          roomBeforeUpdate.competitiveRoundId !== room.competitiveRoundId ||
+          roomBeforeUpdate.competitiveRoundPhase !==
+            room.competitiveRoundPhase ||
+          roomBeforeUpdate.competitiveQuestionIndex !==
+            room.competitiveQuestionIndex)
+      ) {
+        arenaAudioController.noteDiagnostic("REALTIME_MISSED", {
+          previousStatus: roomBeforeUpdate.status,
+          nextStatus: room.status,
+          previousPhase: roomBeforeUpdate.competitiveRoundPhase,
+          nextPhase: room.competitiveRoundPhase,
+          previousQuestionIndex:
+            roomBeforeUpdate.competitiveQuestionIndex,
+          nextQuestionIndex: room.competitiveQuestionIndex,
+        });
+      }
       updateActiveRoom(room);
     }
 

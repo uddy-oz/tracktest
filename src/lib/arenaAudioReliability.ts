@@ -1,6 +1,8 @@
 export type ArenaAudioFailureReason =
   | "AUTOPLAY_LOCK"
+  | "PREVIEW_HTTP_FAILURE"
   | "METADATA_TIMEOUT"
+  | "CANPLAY_TIMEOUT"
   | "MEDIA_NETWORK_ERROR"
   | "MEDIA_DECODE_ERROR"
   | "SEEK_TIMEOUT"
@@ -10,8 +12,18 @@ export type ArenaAudioFailureReason =
   | "STALE_ROUND"
   | "STALE_GENERATION"
   | "CLIENT_DISCONNECTED"
+  | "PLAYER_LEFT"
+  | "SERVER_PHASE_ADVANCED"
+  | "REALTIME_MISSED"
   | "SERVER_STATE_CHANGED"
   | "UNKNOWN";
+
+export function getArenaPrefetchKey(
+  previewUrl: string,
+  clipStartSeconds: number
+) {
+  return `${previewUrl}::${Math.max(0, clipStartSeconds).toFixed(3)}`;
+}
 
 export function classifyArenaAudioFailure(
   message: string,
@@ -23,16 +35,25 @@ export function classifyArenaAudioFailure(
 ): ArenaAudioFailureReason {
   const normalized = `${options.errorName || ""} ${message}`.toLowerCase();
   if (options.online === false) return "CLIENT_DISCONNECTED";
+  if (normalized.includes("player left")) return "PLAYER_LEFT";
+  if (normalized.includes("realtime")) return "REALTIME_MISSED";
+  if (normalized.includes("server phase advanced")) {
+    return "SERVER_PHASE_ADVANCED";
+  }
   if (normalized.includes("notallowed") || normalized.includes("autoplay")) {
     return "AUTOPLAY_LOCK";
   }
-  if (options.mediaErrorCode === 2 || normalized.includes("network")) {
+  if (options.mediaErrorCode === 2 || normalized.includes("http")) {
+    return "PREVIEW_HTTP_FAILURE";
+  }
+  if (normalized.includes("network")) {
     return "MEDIA_NETWORK_ERROR";
   }
   if (options.mediaErrorCode === 3 || normalized.includes("decode")) {
     return "MEDIA_DECODE_ERROR";
   }
   if (normalized.includes("metadata")) return "METADATA_TIMEOUT";
+  if (normalized.includes("canplay")) return "CANPLAY_TIMEOUT";
   if (normalized.includes("seek")) return "SEEK_TIMEOUT";
   if (
     normalized.includes("buffer") ||

@@ -1,6 +1,7 @@
 import { getArenaClientId, isArenaDebugEnabled } from "./arenaDiagnostics";
 import {
   classifyArenaAudioFailure,
+  getArenaPrefetchKey,
   type ArenaAudioFailureReason,
 } from "./arenaAudioReliability";
 
@@ -22,6 +23,7 @@ export type ArenaAudioRound = {
   matchGeneration: number;
   userId?: string | null;
   authType?: "anonymous" | "permanent" | null;
+  playerRole?: "host" | "player" | null;
   mode: "duel" | "group_lobby" | "party_mode";
   roundKey: string;
   roundId: string;
@@ -70,6 +72,10 @@ export type ArenaAudioReliabilityMetrics = {
   failures: Partial<Record<ArenaAudioFailureReason, number>>;
   medianPreparationMs: number;
   p95PreparationMs: number;
+  prefetchReady: number;
+  prefetchFailed: number;
+  medianPrefetchMs: number;
+  p95PrefetchMs: number;
 };
 
 export type ArenaAudioReadyOptions = {
@@ -165,6 +171,7 @@ type DiagnosticEvent =
   | "READY_ACK_ATTEMPTED"
   | "READY_ACK_SUCCESS"
   | "READY_ACK_FAILURE"
+  | "REALTIME_MISSED"
   | "SERVER_PHASE_SEEN"
   | "MATCH_RESET";
 
@@ -235,9 +242,14 @@ export class ArenaAudioController {
   private audio: HTMLAudioElement | null = null;
   private preloaders = new Map<
     string,
-    { audio: HTMLAudioElement; cleanup: () => void }
+    {
+      audio: HTMLAudioElement;
+      cleanup: () => void;
+      target: ArenaAudioPrefetchTarget;
+      startedAt: number;
+    }
   >();
-  private prefetchedUrls = new Set<string>();
+  private prefetchedTargets = new Set<string>();
   private callbacks: ArenaAudioCallbacks = {};
   private activeRound: ArenaAudioRound | null = null;
   private activePlayback: ActivePlayback | null = null;
@@ -251,6 +263,7 @@ export class ArenaAudioController {
   private questionReceivedAt = 0;
   private measuredReadinessRounds = new Set<string>();
   private readinessDurations: number[] = [];
+  private prefetchDurations: number[] = [];
   private reliability = {
     rounds: 0,
     firstAttemptReady: 0,
@@ -258,6 +271,8 @@ export class ArenaAudioController {
     reserveReplacements: 0,
     visibleSkips: 0,
     failures: {} as Partial<Record<ArenaAudioFailureReason, number>>,
+    prefetchReady: 0,
+    prefetchFailed: 0,
   };
 
   setCallbacks(callbacks: ArenaAudioCallbacks) {
@@ -329,7 +344,7 @@ export class ArenaAudioController {
     this.activeRound = null;
     this.activePlayback = null;
     this.mediaUnlocked = false;
-    this.prefetchedUrls.clear();
+    this.prefetchedTargets.clear();
   }
 
   resetMatch(reason: string) {
@@ -353,9 +368,10 @@ export class ArenaAudioController {
 
     this.clearPreloaders();
 
-    this.prefetchedUrls.clear();
+    this.prefetchedTargets.clear();
     this.measuredReadinessRounds.clear();
     this.readinessDurations = [];
+    this.prefetchDurations = [];
     this.reliability = {
       rounds: 0,
       firstAttemptReady: 0,
@@ -363,6 +379,8 @@ export class ArenaAudioController {
       reserveReplacements: 0,
       visibleSkips: 0,
       failures: {},
+      prefetchReady: 0,
+      prefetchFailed: 0,
     };
     this.callbacks.onPlaybackChange?.(false);
   }
@@ -414,7 +432,10 @@ export class ArenaAudioController {
       : prefetchTargets;
     this.prefetchRounds(
       normalizedTargets.filter(
-        (target) => target.previewUrl && target.previewUrl !== round.previewUrl
+        (target) =>
+          target.previewUrl &&
+          getArenaPrefetchKey(target.previewUrl, target.clipStartSeconds) !==
+            getArenaPrefetchKey(round.previewUrl, round.clipStartSeconds)
       )
     );
   }
@@ -434,15 +455,29 @@ export class ArenaAudioController {
 
   getReliabilityMetrics(): ArenaAudioReliabilityMetrics {
     const sorted = [...this.readinessDurations].sort((left, right) => left - right);
+    const prefetchSorted = [...this.prefetchDurations].sort(
+      (left, right) => left - right
+    );
     const percentile = (ratio: number) =>
       sorted.length
         ? sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))]
+        : 0;
+    const prefetchPercentile = (ratio: number) =>
+      prefetchSorted.length
+        ? prefetchSorted[
+            Math.min(
+              prefetchSorted.length - 1,
+              Math.floor((prefetchSorted.length - 1) * ratio)
+            )
+          ]
         : 0;
     return {
       ...this.reliability,
       failures: { ...this.reliability.failures },
       medianPreparationMs: Math.round(percentile(0.5)),
       p95PreparationMs: Math.round(percentile(0.95)),
+      medianPrefetchMs: Math.round(prefetchPercentile(0.5)),
+      p95PrefetchMs: Math.round(prefetchPercentile(0.95)),
     };
   }
 
@@ -503,7 +538,12 @@ export class ArenaAudioController {
   }
 
   noteDiagnostic(
-    event: "READY_ACK_ATTEMPTED" | "READY_ACK_SUCCESS" | "READY_ACK_FAILURE" | "SERVER_PHASE_SEEN",
+    event:
+      | "READY_ACK_ATTEMPTED"
+      | "READY_ACK_SUCCESS"
+      | "READY_ACK_FAILURE"
+      | "REALTIME_MISSED"
+      | "SERVER_PHASE_SEEN",
     details: Record<string, unknown> = {}
   ) {
     this.log(event, details);
@@ -553,7 +593,9 @@ export class ArenaAudioController {
     const deadlineMs = Number.isFinite(options.deadlineMs)
       ? Number(options.deadlineMs)
       : Date.now() + COMPETITIVE_READY_TIMEOUT_MS;
-    const wasPrefetched = this.prefetchedUrls.has(round.previewUrl);
+    const wasPrefetched = this.prefetchedTargets.has(
+      getArenaPrefetchKey(round.previewUrl, round.clipStartSeconds)
+    );
     this.stopTimers();
     this.activePlayback = null;
     this.log("READINESS_CHECK_STARTED", {
@@ -1090,14 +1132,21 @@ export class ArenaAudioController {
       new Map(
         targets
           .filter((target) => Boolean(target.previewUrl))
-          .map((target) => [target.previewUrl, target])
+          .map((target) => [
+            getArenaPrefetchKey(target.previewUrl, target.clipStartSeconds),
+            target,
+          ])
       ).values()
     ).slice(0, MAX_PREFETCH_NODES);
 
     for (const target of uniqueTargets) {
+      const prefetchKey = getArenaPrefetchKey(
+        target.previewUrl,
+        target.clipStartSeconds
+      );
       if (
-        this.prefetchedUrls.has(target.previewUrl) ||
-        this.preloaders.has(target.previewUrl)
+        this.prefetchedTargets.has(prefetchKey) ||
+        this.preloaders.has(prefetchKey)
       ) {
         continue;
       }
@@ -1105,13 +1154,18 @@ export class ArenaAudioController {
     }
 
     while (this.preloaders.size > MAX_PREFETCH_NODES) {
-      const oldestUrl = this.preloaders.keys().next().value as string | undefined;
-      if (!oldestUrl) break;
-      this.releasePreloader(oldestUrl);
+      const oldestKey = this.preloaders.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.releasePreloader(oldestKey);
     }
   }
 
   private preloadPreview(target: ArenaAudioPrefetchTarget) {
+    const prefetchKey = getArenaPrefetchKey(
+      target.previewUrl,
+      target.clipStartSeconds
+    );
+    const startedAt = performance.now();
     const preloader = document.createElement("audio");
     preloader.preload = "auto";
     preloader.muted = true;
@@ -1120,6 +1174,7 @@ export class ArenaAudioController {
       nextRoundIndex: target.roundIndex,
       nextPreviewUrl: target.previewUrl,
       clipStartSeconds: target.clipStartSeconds,
+      prefetchKey,
     });
 
     let timeoutId: number | null = null;
@@ -1152,7 +1207,11 @@ export class ArenaAudioController {
       ) {
         return;
       }
-      this.prefetchedUrls.add(target.previewUrl);
+      if (!this.preloaders.has(prefetchKey)) return;
+      const elapsedMs = performance.now() - startedAt;
+      this.prefetchedTargets.add(prefetchKey);
+      this.prefetchDurations.push(elapsedMs);
+      this.reliability.prefetchReady += 1;
       this.log("PRELOAD_NEXT_READY", {
         nextRoundIndex: target.roundIndex,
         nextPreviewUrl: target.previewUrl,
@@ -1160,6 +1219,8 @@ export class ArenaAudioController {
         preloadReadyState: preloader.readyState,
         preloadNetworkState: preloader.networkState,
         preloadBuffered: this.readTimeRanges(preloader.buffered),
+        prefetchKey,
+        elapsedMs,
       });
       cleanupListeners();
     };
@@ -1176,7 +1237,8 @@ export class ArenaAudioController {
         preloadReadyState: preloader.readyState,
         preloadNetworkState: preloader.networkState,
       });
-      this.releasePreloader(target.previewUrl);
+      this.reliability.prefetchFailed += 1;
+      this.releasePreloader(prefetchKey);
     };
     const cleanup = () => cleanupListeners();
 
@@ -1195,26 +1257,37 @@ export class ArenaAudioController {
         failureReason: "BUFFER_TIMEOUT",
         preloadReadyState: preloader.readyState,
         preloadNetworkState: preloader.networkState,
+        prefetchKey,
+        elapsedMs: performance.now() - startedAt,
       });
-      cleanupListeners();
+      this.reliability.prefetchFailed += 1;
+      // A timed-out speculative node must be removed. Leaving it registered
+      // prevents future room updates from retrying this round and was a source
+      // of poisoned later-round preparation.
+      this.releasePreloader(prefetchKey);
     }, 6000);
-    this.preloaders.set(target.previewUrl, { audio: preloader, cleanup });
+    this.preloaders.set(prefetchKey, {
+      audio: preloader,
+      cleanup,
+      target,
+      startedAt,
+    });
     preloader.load();
   }
 
-  private releasePreloader(previewUrl: string) {
-    const entry = this.preloaders.get(previewUrl);
+  private releasePreloader(prefetchKey: string) {
+    const entry = this.preloaders.get(prefetchKey);
     if (!entry) return;
     entry.cleanup();
     entry.audio.pause();
     entry.audio.removeAttribute("src");
     entry.audio.load();
-    this.preloaders.delete(previewUrl);
+    this.preloaders.delete(prefetchKey);
   }
 
   private clearPreloaders() {
-    for (const previewUrl of [...this.preloaders.keys()]) {
-      this.releasePreloader(previewUrl);
+    for (const prefetchKey of [...this.preloaders.keys()]) {
+      this.releasePreloader(prefetchKey);
     }
   }
 
@@ -1567,6 +1640,17 @@ export class ArenaAudioController {
         return null;
       }
     })();
+    const resourceTiming = round?.previewUrl
+      ? performance
+          .getEntriesByName(round.previewUrl, "resource")
+          .map((entry) => entry as PerformanceResourceTiming)
+          .at(-1)
+      : undefined;
+    const responseStatus = resourceTiming
+      ? (resourceTiming as PerformanceResourceTiming & {
+          responseStatus?: number;
+        }).responseStatus
+      : undefined;
     const snapshot: ArenaAudioDiagnosticSnapshot = {
       event,
       clientId: this.clientId,
@@ -1574,6 +1658,7 @@ export class ArenaAudioController {
       matchGeneration: round?.matchGeneration ?? null,
       userId: round?.userId || null,
       authType: round?.authType || null,
+      playerRole: round?.playerRole || null,
       mode: round?.mode || null,
       roundId: round?.roundId || null,
       roundIndex: round?.roundIndex ?? null,
@@ -1609,6 +1694,16 @@ export class ArenaAudioController {
             downlink: connection.downlink ?? null,
             rtt: connection.rtt ?? null,
             saveData: connection.saveData ?? null,
+          }
+        : null,
+      resourceTiming: resourceTiming
+        ? {
+            durationMs: resourceTiming.duration,
+            transferSize: resourceTiming.transferSize,
+            encodedBodySize: resourceTiming.encodedBodySize,
+            decodedBodySize: resourceTiming.decodedBodySize,
+            responseStatus: responseStatus || null,
+            initiatorType: resourceTiming.initiatorType,
           }
         : null,
       userAgent: navigator.userAgent,

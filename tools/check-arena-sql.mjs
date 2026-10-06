@@ -21,6 +21,10 @@ const audioReservePipeline = readFileSync(
   new URL("../supabase/20260926_competitive_audio_reserve_pipeline.sql", import.meta.url),
   "utf8"
 );
+const audioFastFail = readFileSync(
+  new URL("../supabase/20261005_competitive_audio_fast_fail.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -60,6 +64,28 @@ assert.doesNotMatch(
   audioReservePipeline,
   /party_mode/,
   "Party Mode must remain on its host-only audio path"
+);
+assert.match(audioFastFail, /^begin;/i, "fast-fail migration must begin transactionally");
+assert.match(audioFastFail, /commit;\s*$/i, "fast-fail migration must commit transactionally");
+assert.match(
+  audioFastFail,
+  /maximum_deadline timestamptz := clock_timestamp\(\) \+ interval '4 seconds'/,
+  "silent clients must not hold a later round for the legacy 12-second window"
+);
+assert.match(
+  audioFastFail,
+  /new\.mode in \('duel', 'group_lobby'\)/,
+  "the deadline clamp must apply to competitive modes"
+);
+assert.doesNotMatch(
+  audioFastFail,
+  /party_mode/,
+  "Party Mode must remain on its separate host-only timeline"
+);
+assert.match(
+  audioFastFail,
+  /drop trigger if exists clamp_competitive_audio_ready_deadline/,
+  "the fast-fail trigger must be safe to rerun"
 );
 assert.doesNotMatch(
   migration,
@@ -121,4 +147,4 @@ assert.doesNotMatch(
   "Party Mode must remain on its host-only audio timeline"
 );
 
-console.log("Arena SQL lifecycle guards passed (26 assertions).");
+console.log("Arena SQL lifecycle guards passed (32 assertions).");
