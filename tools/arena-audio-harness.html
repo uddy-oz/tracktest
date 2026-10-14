@@ -71,6 +71,9 @@
         1,
         Number(harnessParams.get("rematches")) || 3
       );
+      const TEST_MODE = harnessParams.get("mode") === "party"
+        ? "party_mode"
+        : "duel";
       const TEST_CLIP_SECONDS = 0.5;
       const repeatOnePreview = harnessParams.has("repeat");
       const output = document.querySelector("#results");
@@ -81,7 +84,7 @@
         new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
       audio.muted = true;
-      description.textContent = `Runs the production Arena audio controller through ${TEST_ROUNDS} consecutive, sequential iTunes preview preparations and ${TEST_REMATCHES} rematches. Open the console for structured lifecycle logs.`;
+      description.textContent = `Runs the production Arena audio controller in ${TEST_MODE} through ${TEST_ROUNDS} consecutive, sequential iTunes preview preparations and ${TEST_REMATCHES} rematches. Open the console for structured lifecycle logs.`;
       runButton.textContent = `Run ${TEST_ROUNDS} preview preparations`;
 
       async function getPreviewUrls() {
@@ -158,7 +161,8 @@
               {
                 roomId: "harness",
                 matchGeneration: 1,
-                mode: "duel",
+                mode: TEST_MODE,
+                playerRole: TEST_MODE === "party_mode" ? "host" : "player",
                 roundKey,
                 roundId: `round-${index}`,
                 roundIndex: index,
@@ -239,7 +243,8 @@
               {
                 roomId: "harness",
                 matchGeneration: generation,
-                mode: "duel",
+                mode: TEST_MODE,
+                playerRole: TEST_MODE === "party_mode" ? "host" : "player",
                 roundKey: rematchRoundKey,
                 roundId: `rematch-${generation}-round-1`,
                 roundIndex: 0,
@@ -285,7 +290,8 @@
           controller.prepareRound({
             roomId: "harness",
             matchGeneration: 1,
-            mode: "duel",
+            mode: TEST_MODE,
+            playerRole: TEST_MODE === "party_mode" ? "host" : "player",
             roundKey: staleRoundKey,
             roundId: "stale-old",
             roundIndex: TEST_ROUNDS,
@@ -302,7 +308,8 @@
           controller.prepareRound({
             roomId: "harness",
             matchGeneration: 2,
-            mode: "duel",
+            mode: TEST_MODE,
+            playerRole: TEST_MODE === "party_mode" ? "host" : "player",
             roundKey: currentRoundKey,
             roundId: "stale-current",
             roundIndex: TEST_ROUNDS + 1,
@@ -329,7 +336,8 @@
           controller.prepareRound({
             roomId: "harness",
             matchGeneration: 1,
-            mode: "duel",
+            mode: TEST_MODE,
+            playerRole: TEST_MODE === "party_mode" ? "host" : "player",
             roundKey: failureRoundKey,
             roundId: "failure-bounded",
             roundIndex: TEST_ROUNDS + 2,

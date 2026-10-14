@@ -34,6 +34,7 @@ import {
   resetArenaRoomForRematch,
   type ArenaInvite,
   setPartyAudioState,
+  startPreparedPartyQuestion,
   setArenaHostAlbumSelection,
   setArenaLobbyReady,
   skipPartyQuestion,
@@ -76,6 +77,12 @@ import {
   canReportCompetitiveAudioFailure,
   getCompetitiveRoundKey,
 } from "../lib/arenaRoundLifecycle";
+import {
+  canPreparePartyHostAudio,
+  canStartPartyHostPlayback,
+  getPartyAudioRoundKey,
+  type PartyAudioRoundIdentity,
+} from "../lib/partyAudioLifecycle";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import GuestBadge from "./GuestBadge";
@@ -175,11 +182,12 @@ const COMPETITIVE_PHASE_ORDER = {
 } as const;
 const PARTY_PHASE_ORDER = {
   idle: 0,
-  countdown: 1,
-  awaiting_audio: 2,
-  answering: 3,
-  reveal: 4,
-  finished: 5,
+  preparing_audio: 1,
+  countdown: 2,
+  awaiting_audio: 3,
+  answering: 4,
+  reveal: 5,
+  finished: 6,
 } as const;
 const LEGACY_ARENA_ROOM_STORAGE_KEYS = [
   "tracktest.activeArenaRoomId",
@@ -433,7 +441,14 @@ function ArenaPage({
   const competitiveRevealSoundKeyRef = useRef<string>("");
   const competitiveCountdownSoundKeyRef = useRef<string>("");
   const partyQuestionKeyRef = useRef<string>("");
+  const partyAudioPrepareKeyRef = useRef<string>("");
   const partyAudioStartKeyRef = useRef<string>("");
+  const preparePartyHostQuestionRef = useRef<
+    (
+      isManualRetry: boolean,
+      expectedIdentity: PartyAudioRoundIdentity
+    ) => Promise<void>
+  >(async () => undefined);
   const leavingRoomIdRef = useRef<string | null>(null);
   const ignoredRoomIdsRef = useRef(new Set<string>());
   const activeRoomIdRef = useRef<string | null>(null);
@@ -534,7 +549,11 @@ function ArenaPage({
     : 0;
   const activeQuestionRunKey = activeRoom
     ? activeRoom.mode === "party_mode"
-      ? `${activeRoom.id}:${activeRoom.roundNumber}:party:${gameQuestionIndex}`
+      ? getPartyAudioRoundKey({
+          roomId: activeRoom.id,
+          matchGeneration: activeRoom.roundNumber,
+          questionIndex: gameQuestionIndex,
+        })
       : activeRoom.competitiveRoundId
         ? getCompetitiveRoundKey({
             roomId: activeRoom.id,
@@ -1206,6 +1225,44 @@ function ArenaPage({
   ]);
 
   useEffect(() => {
+    const roomSnapshot = activeRoomSnapshotRef.current;
+    if (
+      !roomSnapshot ||
+      !isPartyHost ||
+      roomSnapshot.status !== "active" ||
+      roomSnapshot.partyQuestionPhase !== "preparing_audio" ||
+      roomSnapshot.partyClipStartsAt ||
+      !currentDuelQuestion
+    ) {
+      return;
+    }
+
+    const identity: PartyAudioRoundIdentity = {
+      roomId: roomSnapshot.id,
+      matchGeneration: roomSnapshot.roundNumber,
+      questionIndex: roomSnapshot.partyQuestionIndex,
+    };
+    const preparationKey = getPartyAudioRoundKey(identity);
+
+    if (partyAudioPrepareKeyRef.current === preparationKey) {
+      return;
+    }
+
+    void preparePartyHostQuestionRef.current(false, identity);
+  }, [
+    activeRoom?.id,
+    activeRoom?.roundNumber,
+    activeRoom?.status,
+    activeRoom?.partyQuestionIndex,
+    activeRoom?.partyQuestionPhase,
+    activeRoom?.partyClipStartsAt,
+    activeRoom?.partyAudioReadyDeadlineAt,
+    currentDuelQuestion,
+    isPartyHost,
+    isArenaAudioUnlocked,
+  ]);
+
+  useEffect(() => {
     if (
       !isArenaDebugEnabled() ||
       !activeRoom ||
@@ -1840,6 +1897,7 @@ function ArenaPage({
 
     if (partyQuestionKeyRef.current !== questionKey) {
       partyQuestionKeyRef.current = questionKey;
+      partyAudioPrepareKeyRef.current = "";
       partyAudioStartKeyRef.current = "";
       duelClipCompletedRef.current = false;
       duelSelectedAnswerRef.current = "";
@@ -1870,6 +1928,26 @@ function ArenaPage({
       const answerEndsAt = Date.parse(activeRoom.partyAnswerEndsAt || "");
       const revealEndsAt = Date.parse(activeRoom.partyRevealEndsAt || "");
       const phase = activeRoom.partyQuestionPhase;
+
+      if (phase === "preparing_audio") {
+        if (isPartyHost) {
+          arenaAudioController.updateRoundPhase(
+            activeQuestionRunKeyRef.current,
+            "preparing_audio",
+            activeRoom.partyAudioReadyDeadlineAt
+          );
+          duelPhaseRef.current =
+            duelPhaseRef.current === "audioBlocked" ? "audioBlocked" : "preparing";
+          setDuelPhase(duelPhaseRef.current);
+          setDuelAudioFallbackMessage((currentMessage) =>
+            currentMessage || "Preparing the host preview before the shared countdown."
+          );
+        } else {
+          duelPhaseRef.current = "preparing";
+          setDuelPhase("preparing");
+        }
+        return;
+      }
 
       if (phase === "countdown") {
         if (isPartyHost) {
@@ -1989,6 +2067,8 @@ function ArenaPage({
     activeRoom?.status,
     activeRoom?.partyQuestionIndex,
     activeRoom?.partyQuestionPhase,
+    activeRoom?.partyAudioReadyDeadlineAt,
+    activeRoom?.partyClipStartsAt,
     activeRoom?.partyAnswerStartsAt,
     activeRoom?.partyAnswerEndsAt,
     activeRoom?.partyRevealEndsAt,
@@ -2011,10 +2091,13 @@ function ArenaPage({
     }
 
     const boundary =
-      activeRoom.partyQuestionPhase === "countdown"
+      activeRoom.partyQuestionPhase === "preparing_audio"
+        ? activeRoom.partyAudioReadyDeadlineAt
+        : activeRoom.partyQuestionPhase === "countdown"
         ? activeRoom.partyAnswerStartsAt
-        : activeRoom.partyQuestionPhase === "awaiting_audio" ||
-            activeRoom.partyQuestionPhase === "answering"
+        : activeRoom.partyQuestionPhase === "awaiting_audio"
+          ? activeRoom.partyAudioReadyDeadlineAt || activeRoom.partyAnswerEndsAt
+          : activeRoom.partyQuestionPhase === "answering"
           ? activeRoom.partyAnswerEndsAt
           : activeRoom.partyQuestionPhase === "reveal"
             ? activeRoom.partyRevealEndsAt
@@ -2068,6 +2151,7 @@ function ArenaPage({
     activeRoom?.id,
     activeRoom?.partyQuestionIndex,
     activeRoom?.partyQuestionPhase,
+    activeRoom?.partyAudioReadyDeadlineAt,
     activeRoom?.partyAnswerStartsAt,
     activeRoom?.partyAnswerEndsAt,
     activeRoom?.partyRevealEndsAt,
@@ -2090,6 +2174,26 @@ function ArenaPage({
     }
 
     const audioKey = `${activeRoom.id}:${activeRoom.roundNumber}:${activeRoom.partyQuestionIndex}`;
+    const expectedIdentity: PartyAudioRoundIdentity = {
+      roomId: activeRoom.id,
+      matchGeneration: activeRoom.roundNumber,
+      questionIndex: activeRoom.partyQuestionIndex,
+    };
+
+    if (
+      !canStartPartyHostPlayback(
+        {
+          ...expectedIdentity,
+          mode: activeRoom.mode,
+          status: activeRoom.status,
+          phase: activeRoom.partyQuestionPhase,
+          clipStartsAt: activeRoom.partyClipStartsAt,
+        },
+        expectedIdentity
+      )
+    ) {
+      return;
+    }
 
     if (partyAudioStartKeyRef.current === audioKey) {
       return;
@@ -2514,7 +2618,13 @@ function ArenaPage({
     }
 
     if (isPartyHost) {
-      void skipPartyQuestion(activeRoom!.id).then(({ room, error }) => {
+      const roomSnapshot = activeRoomSnapshotRef.current;
+      if (!roomSnapshot || roomSnapshot.mode !== "party_mode") return;
+      void skipPartyQuestion(
+        roomSnapshot.id,
+        roomSnapshot.roundNumber,
+        roomSnapshot.partyQuestionIndex
+      ).then(({ room, error }) => {
         if (room) {
           updateActiveRoom(room);
         }
@@ -2563,17 +2673,212 @@ function ArenaPage({
     }, AUDIO_BLOCKED_SKIP_DELAY_MS);
   }
 
-  async function publishPartyAudioState(
-    status: "pending" | "playing"
+  async function preparePartyHostQuestion(
+    isManualRetry: boolean,
+    expectedIdentity: PartyAudioRoundIdentity
   ) {
-    if (!activeRoom || !isPartyHost) {
+    const expectedRoundKey = getPartyAudioRoundKey(expectedIdentity);
+    const initialRoom = activeRoomSnapshotRef.current;
+
+    if (
+      !initialRoom ||
+      initialRoom.hostUserId !== session?.user.id ||
+      !canPreparePartyHostAudio(
+        {
+          ...expectedIdentity,
+          mode: initialRoom.mode,
+          status: initialRoom.status,
+          phase: initialRoom.partyQuestionPhase,
+          clipStartsAt: initialRoom.partyClipStartsAt,
+        },
+        expectedIdentity
+      )
+    ) {
+      return;
+    }
+
+    if (
+      !isManualRetry &&
+      partyAudioPrepareKeyRef.current === expectedRoundKey
+    ) {
+      return;
+    }
+
+    partyAudioPrepareKeyRef.current = expectedRoundKey;
+    clearDuelAudioFallbackTimer();
+    setDuelAudioFallbackMessage("Preparing the host preview before countdown...");
+    duelPhaseRef.current = "preparing";
+    setDuelPhase("preparing");
+
+    if (isManualRetry) {
+      sounds.prime();
+      const unlocked = await arenaAudioController.unlockFromUserGesture();
+      setIsArenaAudioUnlocked(unlocked);
+      if (!unlocked) {
+        partyAudioPrepareKeyRef.current = "";
+        duelPhaseRef.current = "audioBlocked";
+        setDuelPhase("audioBlocked");
+        setDuelAudioFallbackMessage(
+          "Host audio is blocked. Allow sound for this site, then retry once."
+        );
+        return;
+      }
+    } else if (!arenaAudioController.isMediaUnlocked()) {
+      partyAudioPrepareKeyRef.current = "";
+      setIsArenaAudioUnlocked(false);
+      duelPhaseRef.current = "audioBlocked";
+      setDuelPhase("audioBlocked");
+      setDuelAudioFallbackMessage(
+        "Host audio needs a tap before the shared countdown can begin."
+      );
+      return;
+    }
+
+    const question = initialRoom.quizQuestions[expectedIdentity.questionIndex];
+    const previewUrl = question?.correctTrack.previewUrl || "";
+
+    if (!question || !previewUrl) {
+      arenaAudioController.noteVisibleSkip();
+      const { room, error } = await skipPartyQuestion(
+        expectedIdentity.roomId,
+        expectedIdentity.matchGeneration,
+        expectedIdentity.questionIndex
+      );
+      if (room) updateActiveRoom(room);
+      setDuelAudioFallbackMessage(
+        error || "This preview is unavailable. Question skipped for everyone."
+      );
+      return;
+    }
+
+    arenaAudioController.prepareRound(
+      {
+        roomId: initialRoom.id,
+        matchGeneration: initialRoom.roundNumber,
+        userId: session?.user.id,
+        authType: session?.user.is_anonymous ? "anonymous" : "permanent",
+        playerRole: "host",
+        mode: "party_mode",
+        roundKey: expectedRoundKey,
+        roundId: `party:${initialRoom.roundNumber}:${expectedIdentity.questionIndex}`,
+        roundIndex: expectedIdentity.questionIndex,
+        phase: "preparing_audio",
+        previewUrl,
+        clipStartSeconds: question.clipStartSeconds,
+        serverTimestamp: initialRoom.partyAudioReadyDeadlineAt,
+      },
+      initialRoom.quizQuestions
+        .slice(expectedIdentity.questionIndex + 1, expectedIdentity.questionIndex + 3)
+        .map((nextQuestion, offset) => ({
+          roundIndex: expectedIdentity.questionIndex + offset + 1,
+          previewUrl: nextQuestion.correctTrack.previewUrl || "",
+          clipStartSeconds: nextQuestion.clipStartSeconds,
+        }))
+        .filter((target) => Boolean(target.previewUrl))
+    );
+
+    const serverDeadline = Date.parse(
+      initialRoom.partyAudioReadyDeadlineAt || ""
+    );
+    const localDeadline = Number.isFinite(serverDeadline)
+      ? serverDeadline - partyClockOffsetMs - 150
+      : Date.now() + 7000;
+    const readiness = await arenaAudioController.waitUntilRoundReady(
+      expectedRoundKey,
+      CLIP_LENGTH_SECONDS,
+      { deadlineMs: localDeadline, maxAttempts: 2 }
+    );
+    const latestRoom = activeRoomSnapshotRef.current;
+    const latestSnapshot = latestRoom
+      ? {
+          roomId: latestRoom.id,
+          matchGeneration: latestRoom.roundNumber,
+          questionIndex: latestRoom.partyQuestionIndex,
+          mode: latestRoom.mode,
+          status: latestRoom.status,
+          phase: latestRoom.partyQuestionPhase,
+          clipStartsAt: latestRoom.partyClipStartsAt,
+        }
+      : null;
+
+    if (
+      readiness.status === "stale" ||
+      !latestSnapshot ||
+      !canPreparePartyHostAudio(latestSnapshot, expectedIdentity) ||
+      activeQuestionRunKeyRef.current !== expectedRoundKey
+    ) {
+      logArenaDiagnostic("STALE_PARTY_AUDIO_PREPARATION_IGNORED", {
+        roomId: expectedIdentity.roomId,
+        matchGeneration: expectedIdentity.matchGeneration,
+        roundIndex: expectedIdentity.questionIndex,
+        readiness: readiness.status,
+      });
+      return;
+    }
+
+    if (readiness.status !== "ready") {
+      arenaAudioController.noteVisibleSkip();
+      const { room, error } = await skipPartyQuestion(
+        expectedIdentity.roomId,
+        expectedIdentity.matchGeneration,
+        expectedIdentity.questionIndex
+      );
+      if (room) updateActiveRoom(room);
+      setDuelAudioFallbackMessage(
+        error ||
+          `Host preview could not be prepared (${readiness.reason}). Question skipped for everyone.`
+      );
+      return;
+    }
+
+    const { room, error } = await startPreparedPartyQuestion({
+      roomId: expectedIdentity.roomId,
+      roundNumber: expectedIdentity.matchGeneration,
+      questionIndex: expectedIdentity.questionIndex,
+      previewUrl,
+    });
+
+    if (error) {
+      partyAudioPrepareKeyRef.current = "";
+      duelPhaseRef.current = "audioBlocked";
+      setDuelPhase("audioBlocked");
+      setDuelAudioFallbackMessage(
+        `Audio is ready, but the shared countdown could not start. ${error}`
+      );
+      return;
+    }
+
+    if (room) {
+      updateActiveRoom(room);
+      setDuelAudioFallbackMessage("");
+      setMessage("Host audio ready. Shared countdown started.");
+    }
+  }
+
+  preparePartyHostQuestionRef.current = preparePartyHostQuestion;
+
+  async function publishPartyAudioState(
+    status: "pending" | "playing",
+    expectedIdentity?: PartyAudioRoundIdentity
+  ) {
+    const roomSnapshot = activeRoomSnapshotRef.current;
+    if (!roomSnapshot || roomSnapshot.hostUserId !== session?.user.id) {
       return { error: "Only the Party host can control room audio." };
     }
 
+    if (
+      expectedIdentity &&
+      (roomSnapshot.id !== expectedIdentity.roomId ||
+        roomSnapshot.roundNumber !== expectedIdentity.matchGeneration ||
+        roomSnapshot.partyQuestionIndex !== expectedIdentity.questionIndex)
+    ) {
+      return { error: "This Party audio request belongs to an older question." };
+    }
+
     return setPartyAudioState({
-      roomId: activeRoom.id,
-      roundNumber: activeRoom.roundNumber,
-      questionIndex: gameQuestionIndex,
+      roomId: roomSnapshot.id,
+      roundNumber: roomSnapshot.roundNumber,
+      questionIndex: roomSnapshot.partyQuestionIndex,
       status,
     });
   }
@@ -2601,7 +2906,36 @@ function ArenaPage({
     setDuelAudioFallbackMessage("");
 
     if (isPartyMode) {
-      if (!isPartyHost || !activeRoom) {
+      const roomSnapshot = activeRoomSnapshotRef.current;
+      if (!isPartyHost || !roomSnapshot) {
+        return;
+      }
+
+      const expectedIdentity: PartyAudioRoundIdentity = {
+        roomId: roomSnapshot.id,
+        matchGeneration: roomSnapshot.roundNumber,
+        questionIndex: roomSnapshot.partyQuestionIndex,
+      };
+      if (
+        !canStartPartyHostPlayback(
+          {
+            ...expectedIdentity,
+            mode: roomSnapshot.mode,
+            status: roomSnapshot.status,
+            phase: roomSnapshot.partyQuestionPhase,
+            clipStartsAt: roomSnapshot.partyClipStartsAt,
+          },
+          expectedIdentity
+        ) ||
+        questionRunKey !== getPartyAudioRoundKey(expectedIdentity)
+      ) {
+        logArenaDiagnostic("STALE_PARTY_AUDIO_START_IGNORED", {
+          roomId: roomSnapshot.id,
+          matchGeneration: roomSnapshot.roundNumber,
+          roundIndex: roomSnapshot.partyQuestionIndex,
+          serverPhase: roomSnapshot.partyQuestionPhase,
+          roundKey: questionRunKey,
+        });
         return;
       }
 
@@ -2613,7 +2947,7 @@ function ArenaPage({
         return;
       }
 
-      const clipStartsAt = Date.parse(activeRoom.partyClipStartsAt || "");
+      const clipStartsAt = Date.parse(roomSnapshot.partyClipStartsAt || "");
       const timelineOffset = Number.isFinite(clipStartsAt)
         ? Math.max(
             0,
@@ -2658,7 +2992,10 @@ function ArenaPage({
         return;
       }
 
-      const { error } = await publishPartyAudioState("playing");
+      const { error } = await publishPartyAudioState(
+        "playing",
+        expectedIdentity
+      );
 
       if (!isCurrentQuestionRun()) {
         return;
@@ -2674,7 +3011,7 @@ function ArenaPage({
       clearDuelAudioFallbackTimer();
       duelPhaseRef.current = "partyHostWatching";
       setDuelPhase("partyHostWatching");
-      const refreshedRoom = await fetchArenaRoom(activeRoom.id);
+      const refreshedRoom = await fetchArenaRoom(roomSnapshot.id);
 
       if (refreshedRoom.room && isCurrentQuestionRun()) {
         updateActiveRoom(refreshedRoom.room);
@@ -2796,6 +3133,9 @@ function ArenaPage({
     competitiveLobbyReadyKeyRef.current = "";
     competitiveLobbyStartKeyRef.current = "";
     competitiveCountdownSoundKeyRef.current = "";
+    partyQuestionKeyRef.current = "";
+    partyAudioPrepareKeyRef.current = "";
+    partyAudioStartKeyRef.current = "";
     duelClipCompletedRef.current = false;
     setDuelScore(0);
     setDuelCorrectAnswers(0);
@@ -3774,7 +4114,13 @@ function ArenaPage({
             questions[0]?.correctTrack.previewUrl || "",
             0
           );
-          setIsArenaAudioUnlocked(await mediaUnlock);
+          const audioUnlocked = await mediaUnlock;
+          setIsArenaAudioUnlocked(audioUnlocked);
+          if (roomToStart.mode === "party_mode" && !audioUnlocked) {
+            throw new Error(
+              "Host audio is blocked. Allow sound for this site, then press Start Game again."
+            );
+          }
         },
         activateRoom: activateDuelRoom,
         log: logArenaDiagnostic,
@@ -3796,10 +4142,18 @@ function ArenaPage({
       }
       updateActiveRoom(result.room);
       resetDuelLocalState("syncing");
-      setMessage("First track staged. Checking audio on every device...");
+      setMessage(
+        result.room.mode === "party_mode"
+          ? "Preparing the first host preview before the shared countdown..."
+          : "First track staged. Checking audio on every device..."
+      );
     } catch (error) {
       logArenaDiagnostic("LOBBY_START_FAILED", { roomId: roomToStart.id, message: String(error) });
-      setStartError("Could not start match. Refresh the room and try again.");
+      setStartError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not start match. Refresh the room and try again."
+      );
     } finally {
       startRequestInFlightRef.current = false;
       setIsPreparingDuel(false);
@@ -4585,6 +4939,26 @@ function ArenaPage({
       );
     }
 
+    if (duelPhase === "preparing") {
+      return (
+        <>
+          <p className="game-state-label">
+            {isPartyMode
+              ? isPartyHost
+                ? "Preparing host audio"
+                : "Host is preparing audio"
+              : "Preparing audio"}
+          </p>
+          <p className="start-countdown" aria-hidden="true">...</p>
+          <p className="game-state-detail">
+            {isPartyMode
+              ? "The shared countdown starts only after the host preview is ready."
+              : duelAudioFallbackMessage || "Checking every player device."}
+          </p>
+        </>
+      );
+    }
+
     if (duelPhase === "countdown") {
       return (
         <>
@@ -4672,7 +5046,9 @@ function ArenaPage({
             {duelAudioFallbackMessage || "Click to play audio and continue."}
           </p>
           <p className="game-state-detail">
-            Question continues in {duelTimeRemaining}s on the shared timeline.
+            {isPartyMode && activeRoom?.partyQuestionPhase === "preparing_audio"
+              ? "The shared countdown is paused until host audio is ready."
+              : `Question continues in ${duelTimeRemaining}s on the shared timeline.`}
           </p>
         </>
       );
@@ -5429,9 +5805,25 @@ function ArenaPage({
                 <button
                   type="button"
                   className="clip-button"
-                  onClick={() => void startDuelAnswerRound(true)}
+                  onClick={() => {
+                    if (
+                      isActivePartyMode &&
+                      activeRoom.partyQuestionPhase === "preparing_audio"
+                    ) {
+                      void preparePartyHostQuestion(true, {
+                        roomId: activeRoom.id,
+                        matchGeneration: activeRoom.roundNumber,
+                        questionIndex: activeRoom.partyQuestionIndex,
+                      });
+                      return;
+                    }
+                    void startDuelAnswerRound(true);
+                  }}
                 >
-                  Retry audio once
+                  {isActivePartyMode &&
+                  activeRoom.partyQuestionPhase === "preparing_audio"
+                    ? "Enable host audio"
+                    : "Retry audio once"}
                 </button>
               )}
             </div>

@@ -12,6 +12,7 @@
     "test:arena-start": "node --experimental-strip-types --test tools/arena-lobby-start.test.ts",
     "test:arena-audio": "node --experimental-strip-types --test tools/arena-audio-reliability.test.ts",
     "test:arena-ready-ack": "node --experimental-strip-types --test tools/arena-ready-ack.test.ts",
+    "test:party-mode": "node --experimental-strip-types --test tools/party-mode-reliability.test.ts",
     "test:arena-sql": "node tools/check-arena-sql.mjs",
     "test:multiplayer-progression": "node --experimental-strip-types tools/multiplayer-progression.test.ts",
     "test:catalog": "node --experimental-strip-types --test tools/catalog-discovery.test.ts",

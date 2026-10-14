@@ -25,6 +25,7 @@ export type ArenaRoomMode = "duel" | "group_lobby" | "party_mode";
 export type PartyAudioStatus = "idle" | "pending" | "playing" | "skipped";
 export type PartyQuestionPhase =
   | "idle"
+  | "preparing_audio"
   | "countdown"
   | "awaiting_audio"
   | "answering"
@@ -130,6 +131,7 @@ export type ArenaRoom = {
   competitiveReserveReplacements: number;
   partyAudioQuestionIndex: number | null;
   partyAudioStatus: PartyAudioStatus;
+  partyAudioReadyDeadlineAt: string | null;
   partyQuestionIndex: number;
   partyQuestionPhase: PartyQuestionPhase;
   partyClipStartsAt: string | null;
@@ -200,6 +202,7 @@ type ArenaRoomRow = {
   competitive_reserve_replacements?: number | null;
   party_audio_question_index?: number | null;
   party_audio_status?: string | null;
+  party_audio_ready_deadline_at?: string | null;
   party_question_index?: number | null;
   party_question_phase?: string | null;
   party_clip_starts_at?: string | null;
@@ -1489,14 +1492,52 @@ export async function setPartyAudioState({
     return { error: "Supabase is not configured yet." };
   }
 
-  const { error } = await supabase.rpc("set_party_audio_state", {
+  const { data, error } = await supabase.rpc("set_party_audio_state", {
     target_room_id: roomId,
     target_round_number: roundNumber,
     target_question_index: questionIndex,
     target_status: status,
   });
 
-  return { error: getFriendlyArenaError(error?.message) || null };
+  return {
+    error:
+      getFriendlyArenaError(error?.message) ||
+      (data === false ? "This Party question is no longer accepting audio." : null),
+  };
+}
+
+export async function startPreparedPartyQuestion({
+  roomId,
+  roundNumber,
+  questionIndex,
+  previewUrl,
+}: {
+  roomId: string;
+  roundNumber: number;
+  questionIndex: number;
+  previewUrl: string;
+}) {
+  if (!supabase) {
+    return { room: null, error: "Supabase is not configured yet." };
+  }
+
+  const { data, error } = await supabase.rpc("start_prepared_party_question", {
+    target_room_id: roomId,
+    target_round_number: roundNumber,
+    target_question_index: questionIndex,
+    target_preview_url: previewUrl,
+  });
+
+  if (error || data !== true) {
+    return {
+      room: null,
+      error:
+        getFriendlyArenaError(error?.message) ||
+        "Party audio preparation expired. Refreshing the room state.",
+    };
+  }
+
+  return fetchArenaRoom(roomId);
 }
 
 export async function syncPartyRoomTimeline(roomId: string) {
@@ -1570,14 +1611,33 @@ export async function submitPartyAnswer(roomId: string, answer: string) {
   };
 }
 
-export async function skipPartyQuestion(roomId: string) {
+export async function skipPartyQuestion(
+  roomId: string,
+  roundNumber?: number,
+  questionIndex?: number
+) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
-  const { error } = await supabase.rpc("skip_party_question", {
-    target_room_id: roomId,
-  });
+  let { error } =
+    typeof roundNumber === "number" && typeof questionIndex === "number"
+      ? await supabase.rpc("skip_party_question_v2", {
+          target_room_id: roomId,
+          target_round_number: roundNumber,
+          target_question_index: questionIndex,
+        })
+      : await supabase.rpc("skip_party_question", {
+          target_room_id: roomId,
+        });
+
+  // During a rolling deployment the client may reach the old database briefly.
+  // Preserve the existing host-only skip rather than freezing the Party room.
+  if (error?.code === "PGRST202") {
+    ({ error } = await supabase.rpc("skip_party_question", {
+      target_room_id: roomId,
+    }));
+  }
 
   if (error) {
     return { room: null, error: getFriendlyArenaError(error.message) };
@@ -1939,6 +1999,7 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
         ? row.party_audio_question_index
         : null,
     partyAudioStatus: normalizePartyAudioStatus(row.party_audio_status),
+    partyAudioReadyDeadlineAt: row.party_audio_ready_deadline_at || null,
     partyQuestionIndex:
       typeof row.party_question_index === "number"
         ? row.party_question_index
@@ -1987,6 +2048,7 @@ function normalizePartyQuestionPhase(
   value: string | null | undefined
 ): PartyQuestionPhase {
   if (
+    value === "preparing_audio" ||
     value === "countdown" ||
     value === "awaiting_audio" ||
     value === "answering" ||
