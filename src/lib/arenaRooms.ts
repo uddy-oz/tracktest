@@ -392,7 +392,7 @@ function getPlayerDisplay(
     : null;
 
   if (guestId) {
-    const safeName = getSafeGuestDisplayName(preferredDisplayName, guestId);
+    const safeName = getSafeGuestDisplayName(preferredDisplayName);
     const takenNames = roomPlayers
       .filter(
         (player) =>
@@ -403,7 +403,7 @@ function getPlayerDisplay(
       .map((player) => player.displayName);
 
     return {
-      displayName: resolveUniqueGuestName(safeName, takenNames, guestId),
+      displayName: resolveUniqueGuestName(safeName, takenNames),
       username: createGuestRoomHandle(guestId),
     };
   }
@@ -832,10 +832,7 @@ export async function fetchArenaInvite(inviteCode: string) {
       hostUserId: row.host_user_id,
       hostDisplayName:
         getStoredArenaGuestId(row.host_username, row.host_display_name)
-          ? getSafeGuestDisplayName(
-              row.host_display_name,
-              getStoredArenaGuestId(row.host_username, row.host_display_name)!
-            )
+          ? getSafeGuestDisplayName(row.host_display_name)
           : row.host_display_name || row.host_username || "Arena Host",
       hostUsername: getStoredArenaGuestId(
         row.host_username,
@@ -1901,11 +1898,7 @@ function ensureUniqueGuestLobbyNames(players: ArenaRoomPlayer[]) {
         return;
       }
 
-      const displayName = resolveUniqueGuestName(
-        player.displayName,
-        takenNames,
-        guestId
-      );
+      const displayName = resolveUniqueGuestName(player.displayName, takenNames);
       takenNames.add(displayName.toLowerCase());
       guestDisplayNames.set(player.id, displayName);
     });
@@ -2097,7 +2090,7 @@ function mapPlayerRow(row: ArenaRoomPlayerRow): ArenaRoomPlayer {
     roomId: row.room_id,
     userId: row.user_id,
     displayName: guestId
-      ? getSafeGuestDisplayName(row.display_name, guestId)
+      ? getSafeGuestDisplayName(row.display_name)
       : row.display_name || row.username || "Arena Player",
     username: row.username,
     joinedAt: row.joined_at,

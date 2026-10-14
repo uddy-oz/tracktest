@@ -325,7 +325,7 @@ type ArenaPageProps = {
   profile: UserProfile | null;
   onHome: () => void;
   onLogin: () => void;
-  onGuest?: () => Promise<string>;
+  onGuest?: () => void;
   inviteCode?: string | null;
   recoveredRoom?: ArenaRoom | null;
   onArenaRoomChange?: (room: ArenaRoom | null) => void;
@@ -4481,8 +4481,8 @@ function ArenaPage({
               key={player.id}
             >
               <span className="rank-number">{index + 1}</span>
-              <strong>
-                {player.displayName || player.username || "Arena Player"}
+              <strong className="guest-name-line">
+                <span>{player.displayName || player.username || "Arena Player"}</span>
                 {isGuestArenaPlayer(player) && <GuestBadge compact />}
                 {player.userId === session?.user.id && (
                   <b className="group-you-tag">YOU</b>
@@ -6146,9 +6146,7 @@ function ArenaPage({
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => {
-                      void onGuest().then((error) => error && setMessage(error));
-                    }}
+                    onClick={onGuest}
                   >
                     Continue as Guest
                   </button>

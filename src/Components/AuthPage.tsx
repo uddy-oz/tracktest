@@ -39,7 +39,7 @@ type AuthPageProps = {
   onProfileSaved: (profile: UserProfile) => void;
   onLogout: () => void | Promise<void>;
   onPlay: () => void;
-  onGuest?: () => Promise<string>;
+  onGuest?: () => void;
   onProgressReset?: () => void | Promise<void>;
 };
 
@@ -367,22 +367,12 @@ function LoginForm({
   onNavigate: (mode: AuthPageMode) => void;
   onAuthenticated: () => void;
   onProfileSaved: (profile: UserProfile) => void;
-  onGuest?: () => Promise<string>;
+  onGuest?: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isStartingGuest, setIsStartingGuest] = useState(false);
-
-  async function handleGuest() {
-    if (!onGuest) return;
-    setIsStartingGuest(true);
-    setNotice(null);
-    const error = await onGuest();
-    if (error) setNotice({ kind: "error", text: error });
-    setIsStartingGuest(false);
-  }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -474,10 +464,10 @@ function LoginForm({
         <button
           type="button"
           className="auth-secondary-button auth-guest-button"
-          disabled={!isSupabaseConfigured || isStartingGuest}
-          onClick={() => void handleGuest()}
+          disabled={!isSupabaseConfigured}
+          onClick={onGuest}
         >
-          {isStartingGuest ? "Starting guest session..." : "Play multiplayer as guest"}
+          Play multiplayer as guest
         </button>
       )}
 

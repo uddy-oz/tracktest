@@ -9,6 +9,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
 import HomePage from "./Components/HomePage";
+import GuestNameModal from "./Components/GuestNameModal";
 import type { AuthPageMode } from "./Components/AuthPage";
 import {
   endArenaRoom,
@@ -27,11 +28,12 @@ import type { SpotifyAlbum } from "./lib/spotifyApi";
 import {
   clearGuestName,
   createGuestId,
-  createGuestName,
   getGuestId,
   getGuestName,
   isAnonymousUser,
   rememberGuestIdentity,
+  rememberGuestId,
+  validateGuestDisplayName,
 } from "./lib/authIdentity";
 import { sounds } from "./lib/sounds";
 
@@ -158,6 +160,7 @@ function App() {
   const [activeArenaRoom, setActiveArenaRoom] = useState<ArenaRoom | null>(null);
   const [arenaNavigationNotice, setArenaNavigationNotice] = useState("");
   const [progressionRevision, setProgressionRevision] = useState(0);
+  const [isGuestNamePromptOpen, setIsGuestNamePromptOpen] = useState(false);
   const arenaRecoveryGenerationRef = useRef(0);
   const guestSessionStartInFlightRef = useRef(false);
 
@@ -185,17 +188,42 @@ function App() {
     return room;
   }, [session?.user]);
 
-  const startGuestSession = useCallback(async () => {
+  const startGuestSession = useCallback(async (requestedName: string) => {
     if (!supabase) {
       return "Supabase is not configured yet.";
     }
 
+    const nameValidation = validateGuestDisplayName(requestedName);
+    if (!nameValidation.ok) return nameValidation.error;
+    const guestName = nameValidation.value;
+
     if (session?.user && !isAnonymousUser(session.user)) {
+      setIsGuestNamePromptOpen(false);
       showMultiplayer();
       return "";
     }
 
     if (session?.user && isAnonymousUser(session.user)) {
+      const guestId = getGuestId(session.user) || createGuestId();
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          guest_id: guestId,
+          guest_name: guestName,
+          guest_name_source: "player",
+          display_name: guestName,
+        },
+      });
+
+      if (error) return error.message || "Could not save your guest name.";
+
+      rememberGuestIdentity(guestId, guestName);
+      setProfile({
+        id: session.user.id,
+        email: null,
+        username: guestId,
+        displayName: guestName,
+      });
+      setIsGuestNamePromptOpen(false);
       navigateToInternalPath(
         window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
       );
@@ -208,7 +236,6 @@ function App() {
     }
 
     const guestId = createGuestId();
-    const guestName = createGuestName();
     rememberGuestIdentity(guestId, guestName);
 
     guestSessionStartInFlightRef.current = true;
@@ -219,6 +246,7 @@ function App() {
           data: {
             guest_id: guestId,
             guest_name: guestName,
+            guest_name_source: "player",
             display_name: guestName,
           },
         },
@@ -229,6 +257,7 @@ function App() {
         return error?.message || "Could not start a guest session.";
       }
 
+      setIsGuestNamePromptOpen(false);
       navigateToInternalPath(
         window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
       );
@@ -238,6 +267,10 @@ function App() {
       guestSessionStartInFlightRef.current = false;
     }
   }, [session?.user]);
+
+  const requestGuestSession = useCallback(() => {
+    setIsGuestNamePromptOpen(true);
+  }, []);
 
   const handleArenaRoomChange = useCallback(
     (room: ArenaRoom | null) => {
@@ -403,21 +436,28 @@ function App() {
 
       if (isAnonymousUser(session.user)) {
         const guestId = getGuestId(session.user) || createGuestId();
-        const guestName = getGuestName(session.user) || createGuestName();
-        rememberGuestIdentity(guestId, guestName);
+        const guestName = getGuestName(session.user);
+        rememberGuestId(guestId);
+        if (guestName) rememberGuestIdentity(guestId, guestName);
         setProfile({
           id: session.user.id,
           email: null,
           username: guestId,
-          displayName: guestName,
+          displayName: guestName || "Guest Player",
         });
         setIdentityBadges([]);
         setIsProfileLoading(false);
+
+        if (!guestName) {
+          setIsGuestNamePromptOpen(true);
+          return;
+        }
 
         if (
           supabase &&
           (session.user.user_metadata?.guest_id !== guestId ||
             session.user.user_metadata?.guest_name !== guestName ||
+            session.user.user_metadata?.guest_name_source !== "player" ||
             session.user.user_metadata?.display_name !== guestName)
         ) {
           void supabase.auth
@@ -425,6 +465,7 @@ function App() {
               data: {
                 guest_id: guestId,
                 guest_name: guestName,
+                guest_name_source: "player",
                 display_name: guestName,
               },
             })
@@ -856,7 +897,7 @@ function App() {
           profile={profile}
           onHome={showHome}
           onLogin={() => showAuth("login", window.location.pathname)}
-          onGuest={startGuestSession}
+          onGuest={requestGuestSession}
           inviteCode={arenaInviteCode}
           recoveredRoom={activeArenaRoom}
           onArenaRoomChange={handleArenaRoomChange}
@@ -880,7 +921,7 @@ function App() {
           onProfileSaved={setProfile}
           onLogout={logoutSupabase}
           onPlay={showHome}
-          onGuest={startGuestSession}
+          onGuest={requestGuestSession}
           onProgressReset={refreshIdentityBadges}
         />
       )}
@@ -898,6 +939,15 @@ function App() {
         />
         )}
       </Suspense>
+
+      {isGuestNamePromptOpen && (
+        <GuestNameModal
+          open
+          canDismiss={!isAnonymousUser(session?.user) || Boolean(getGuestName(session?.user))}
+          onClose={() => setIsGuestNamePromptOpen(false)}
+          onSubmit={startGuestSession}
+        />
+      )}
     </>
   );
 }

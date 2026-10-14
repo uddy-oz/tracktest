@@ -4,60 +4,18 @@ const GUEST_NAME_KEY = "stanzer.guest.name";
 const GUEST_ID_KEY = "stanzer.guest.id";
 const INTERNAL_GUEST_ID_PATTERN = /^guest_\d{6}$/i;
 const GUEST_ROOM_HANDLE_PREFIX = "temporary_guest:";
+type InternalGuestId = `guest_${string}`;
+export const GUEST_DISPLAY_NAME_MIN_LENGTH = 2;
+export const GUEST_DISPLAY_NAME_MAX_LENGTH = 24;
 
-export const FRIENDLY_GUEST_NAMES = Object.freeze([
-  "Aaliyah",
-  "Alex",
-  "Amara",
-  "Amina",
-  "Andre",
-  "Ari",
-  "Avery",
-  "Bella",
-  "Caleb",
-  "Chloe",
-  "Daniel",
-  "Dylan",
-  "Elijah",
-  "Ella",
-  "Ethan",
-  "Eva",
-  "Grace",
-  "Isaac",
-  "Jade",
-  "Jasmine",
-  "Jayden",
-  "Johnny",
-  "Jordan",
-  "Kai",
-  "Layla",
-  "Leo",
-  "Liam",
-  "Maya",
-  "Mia",
-  "Naomi",
-  "Noah",
-  "Nora",
-  "Olivia",
-  "Owen",
-  "Patrick",
-  "Ruby",
-  "Sam",
-  "Sophie",
-  "Theo",
-  "Zara",
+const GUEST_DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} .'-]*$/u;
+const RESERVED_GUEST_NAMES = new Set([
+  "admin",
+  "moderator",
+  "stanzer",
+  "support",
+  "system",
 ]);
-
-function stableGuestNumber(value: string) {
-  let hash = 2166136261;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return hash >>> 0;
-}
 
 function readSessionValue(key: string) {
   try {
@@ -67,13 +25,58 @@ function readSessionValue(key: string) {
   }
 }
 
-function isFriendlyGuestName(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    FRIENDLY_GUEST_NAMES.some(
-      (name) => name.toLowerCase() === value.trim().toLowerCase()
-    )
-  );
+export function normalizeGuestDisplayName(value: string) {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+export function validateGuestDisplayName(value: string) {
+  const normalized = normalizeGuestDisplayName(value);
+
+  if (!normalized) {
+    return { ok: false as const, error: "Enter a name to continue.", value: "" };
+  }
+
+  if (normalized.length < GUEST_DISPLAY_NAME_MIN_LENGTH) {
+    return {
+      ok: false as const,
+      error: `Use at least ${GUEST_DISPLAY_NAME_MIN_LENGTH} characters.`,
+      value: normalized,
+    };
+  }
+
+  if (normalized.length > GUEST_DISPLAY_NAME_MAX_LENGTH) {
+    return {
+      ok: false as const,
+      error: `Keep your name to ${GUEST_DISPLAY_NAME_MAX_LENGTH} characters or fewer.`,
+      value: normalized,
+    };
+  }
+
+  if (isInternalGuestId(normalized)) {
+    return {
+      ok: false as const,
+      error: "Choose a player name instead of an internal guest ID.",
+      value: normalized,
+    };
+  }
+
+  if (!GUEST_DISPLAY_NAME_PATTERN.test(normalized)) {
+    return {
+      ok: false as const,
+      error: "Use letters, numbers, spaces, apostrophes, periods, or hyphens only.",
+      value: normalized,
+    };
+  }
+
+  if (RESERVED_GUEST_NAMES.has(normalized.toLowerCase())) {
+    return {
+      ok: false as const,
+      error: "That name is reserved. Choose another player name.",
+      value: normalized,
+    };
+  }
+
+  return { ok: true as const, error: "", value: normalized };
 }
 
 export function isAnonymousUser(user: User | null | undefined) {
@@ -85,21 +88,7 @@ export function createGuestId() {
   return `guest_${String(digits).padStart(6, "0")}`;
 }
 
-export function createGuestName(excludedNames: Iterable<string> = []) {
-  const excluded = new Set(
-    Array.from(excludedNames, (name) => name.trim().toLowerCase())
-  );
-  const availableNames = FRIENDLY_GUEST_NAMES.filter(
-    (name) => !excluded.has(name.toLowerCase())
-  );
-  const candidates = availableNames.length > 0 ? availableNames : FRIENDLY_GUEST_NAMES;
-  const randomIndex =
-    crypto.getRandomValues(new Uint32Array(1))[0] % candidates.length;
-
-  return candidates[randomIndex];
-}
-
-export function isInternalGuestId(value: unknown): value is string {
+export function isInternalGuestId(value: unknown): value is InternalGuestId {
   return typeof value === "string" && INTERNAL_GUEST_ID_PATTERN.test(value.trim());
 }
 
@@ -141,77 +130,80 @@ export function getGuestId(user?: User | null) {
     : null;
 }
 
-export function getFallbackGuestName(guestId: string) {
-  return FRIENDLY_GUEST_NAMES[
-    stableGuestNumber(guestId.toLowerCase()) % FRIENDLY_GUEST_NAMES.length
-  ];
+export function getFallbackGuestName() {
+  return "Guest Player";
 }
 
 export function getGuestName(user?: User | null) {
-  const metadataName = user?.user_metadata?.guest_name;
-  if (isFriendlyGuestName(metadataName)) {
-    return FRIENDLY_GUEST_NAMES.find(
-      (name) => name.toLowerCase() === metadataName.trim().toLowerCase()
-    ) || metadataName.trim();
+  if (user && user.user_metadata?.guest_name_source !== "player") {
+    return null;
+  }
+
+  const metadataNames = [
+    user?.user_metadata?.guest_name,
+    user?.user_metadata?.display_name,
+  ];
+
+  for (const metadataName of metadataNames) {
+    if (typeof metadataName !== "string") continue;
+    const validation = validateGuestDisplayName(metadataName);
+    if (validation.ok) return validation.value;
   }
 
   const stored = readSessionValue(GUEST_NAME_KEY);
-  if (isFriendlyGuestName(stored)) {
-    return FRIENDLY_GUEST_NAMES.find(
-      (name) => name.toLowerCase() === stored.trim().toLowerCase()
-    ) || stored.trim();
+  if (stored) {
+    const validation = validateGuestDisplayName(stored);
+    if (validation.ok) return validation.value;
   }
 
-  const guestId = getGuestId(user);
-  return guestId ? getFallbackGuestName(guestId) : null;
+  return null;
 }
 
 export function getSafeGuestDisplayName(
-  displayName: string | null | undefined,
-  guestId: string
+  displayName: string | null | undefined
 ) {
-  const normalizedDisplayName = displayName?.trim();
-
-  if (normalizedDisplayName && !isInternalGuestId(normalizedDisplayName)) {
-    return normalizedDisplayName;
+  if (displayName) {
+    const validation = validateGuestDisplayName(displayName);
+    if (validation.ok) return validation.value;
   }
 
-  return getFallbackGuestName(guestId);
+  return getFallbackGuestName();
 }
 
 export function resolveUniqueGuestName(
   preferredName: string,
-  takenNames: Iterable<string>,
-  guestId: string
+  takenNames: Iterable<string>
 ) {
   const taken = new Set(
     Array.from(takenNames, (name) => name.trim().toLowerCase()).filter(Boolean)
   );
-  const normalizedPreferred = preferredName.trim();
+  const validation = validateGuestDisplayName(preferredName);
+  const normalizedPreferred = validation.ok
+    ? validation.value
+    : getFallbackGuestName();
 
   if (normalizedPreferred && !taken.has(normalizedPreferred.toLowerCase())) {
     return normalizedPreferred;
   }
 
-  const startIndex = stableGuestNumber(guestId) % FRIENDLY_GUEST_NAMES.length;
-
-  for (let offset = 0; offset < FRIENDLY_GUEST_NAMES.length; offset += 1) {
-    const candidate =
-      FRIENDLY_GUEST_NAMES[(startIndex + offset) % FRIENDLY_GUEST_NAMES.length];
-
-    if (!taken.has(candidate.toLowerCase())) {
-      return candidate;
-    }
+  let suffix = 2;
+  while (suffix < 10_000) {
+    const suffixText = ` ${suffix}`;
+    const availableBaseLength = GUEST_DISPLAY_NAME_MAX_LENGTH - suffixText.length;
+    const candidate = `${normalizedPreferred.slice(0, availableBaseLength).trim()}${suffixText}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+    suffix += 1;
   }
 
-  return `${getFallbackGuestName(guestId)} ${
-    (stableGuestNumber(`${guestId}:suffix`) % 90) + 10
-  }`;
+  return "Guest Player";
 }
 
 export function rememberGuestName(name: string) {
+  const validation = validateGuestDisplayName(name);
+  if (!validation.ok) return;
+
   try {
-    window.sessionStorage.setItem(GUEST_NAME_KEY, name);
+    window.sessionStorage.setItem(GUEST_NAME_KEY, validation.value);
   } catch {
     // Session storage can be blocked in privacy-restricted contexts.
   }
