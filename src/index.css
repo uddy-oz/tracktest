@@ -465,6 +465,47 @@ button:hover {
   margin-bottom: 34px;
 }
 
+.music-search-tabs {
+  width: min(100%, 560px);
+  margin: 0 auto 20px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--arena-border);
+  border-radius: 12px;
+  background: rgba(9, 9, 15, 0.72);
+}
+
+.music-search-tabs button {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--arena-muted);
+  font-size: 14px;
+}
+
+.music-search-tabs button.is-active {
+  border-color: rgba(167, 139, 250, 0.42);
+  background: rgba(124, 92, 255, 0.18);
+  color: #ffffff;
+}
+
+.music-search-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.music-search-tabs small {
+  display: block;
+  margin-top: 2px;
+  color: inherit;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
 .search-box {
   display: flex;
   justify-content: center;
@@ -513,6 +554,72 @@ button:hover {
   gap: 18px;
   max-width: 940px;
   width: 100%;
+}
+
+.artist-search-grid {
+  width: min(100%, 940px);
+  margin: 32px auto 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.artist-search-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #282838;
+  border-radius: 14px;
+  background: var(--arena-surface);
+  text-align: left;
+}
+
+.artist-search-card img,
+.artist-image-fallback {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.artist-image-fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #392465, #7c5cff);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.artist-search-card h3,
+.artist-search-card p {
+  overflow-wrap: anywhere;
+}
+
+.artist-search-card h3 {
+  margin: 0 0 5px;
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.album-search .artist-search-card p {
+  margin: 0;
+  color: var(--arena-muted);
+  font-size: 13px;
+}
+
+.artist-search-card .secondary-button {
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
+.album-search .artist-search-note {
+  margin: 18px auto 0;
+  color: var(--arena-muted);
+  font-size: 13px;
 }
 
 .album-card {
@@ -1311,6 +1418,10 @@ button:hover {
   .album-grid {
     grid-template-columns: 1fr;
   }
+
+  .artist-search-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1526,6 +1637,29 @@ button:hover {
     grid-template-columns: 1fr;
     padding: 0;
     gap: 18px;
+  }
+
+  .music-search-tabs {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .music-search-tabs button:disabled {
+    grid-column: 1 / -1;
+  }
+
+  .artist-search-card {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .artist-search-card img,
+  .artist-image-fallback {
+    width: 52px;
+    height: 52px;
+  }
+
+  .artist-search-card .secondary-button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .album-card {
@@ -2000,9 +2134,17 @@ button:hover {
   justify-content: flex-start;
 }
 
+.album-search-compact .music-search-tabs {
+  margin-left: 0;
+}
+
 .album-search-compact .album-grid {
   max-width: none;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.album-search-compact .artist-search-grid {
+  max-width: none;
 }
 
 .album-search-compact .album-card {

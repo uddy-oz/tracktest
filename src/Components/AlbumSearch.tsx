@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import type { SpotifyAlbum } from "../lib/spotifyApi";
+import type { SpotifyAlbum, SpotifyArtist } from "../lib/spotifyApi";
 import {
   prefetchSpotifyAlbumTracks,
   searchSpotifyAlbums,
+  searchSpotifyArtists,
 } from "../lib/spotifyApi";
 
 type AlbumSearchProps = {
@@ -14,12 +15,15 @@ type AlbumSearchProps = {
 const ALBUMS_PER_PAGE = 12;
 const MAX_VISIBLE_ALBUMS = 48;
 const SEARCH_DEBOUNCE_MS = 450;
+type SearchMode = "albums" | "artists";
 
 function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
+  const [artists, setArtists] = useState<SpotifyArtist[]>([]);
+  const [searchMode, setSearchMode] = useState<SearchMode>("albums");
   const [visibleAlbumCount, setVisibleAlbumCount] = useState(ALBUMS_PER_PAGE);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -30,7 +34,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
   const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
 
-  async function runSearch(rawQuery: string) {
+  const runSearch = useCallback(async (rawQuery: string, mode = searchMode) => {
     const query = rawQuery.trim();
     if (query.length < 2) {
       return;
@@ -46,18 +50,35 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       setSubmittedSearch(query);
       setVisibleAlbumCount(ALBUMS_PER_PAGE);
 
-      const results = await searchSpotifyAlbums(query, {
-        signal: controller.signal,
-      });
-      if (sequence === searchSequenceRef.current) setAlbums(results);
+      if (mode === "artists") {
+        const results = await searchSpotifyArtists(query, {
+          signal: controller.signal,
+        });
+        if (sequence === searchSequenceRef.current) {
+          setArtists(results);
+          setAlbums([]);
+        }
+      } else {
+        const results = await searchSpotifyAlbums(query, {
+          signal: controller.signal,
+        });
+        if (sequence === searchSequenceRef.current) {
+          setAlbums(results);
+          setArtists([]);
+        }
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       console.error(error);
-      setError("Could not search albums. Try again or search another album.");
+      setError(
+        mode === "artists"
+          ? "Could not search artists. Try again."
+          : "Could not search albums. Try again or search another album."
+      );
     } finally {
       if (sequence === searchSequenceRef.current) setIsLoading(false);
     }
-  }
+  }, [searchMode]);
 
   useEffect(() => {
     const query = searchTerm.trim();
@@ -68,7 +89,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(debounceId);
-  }, [searchTerm]);
+  }, [runSearch, searchTerm]);
 
   useEffect(
     () => () => {
@@ -80,6 +101,26 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void runSearch(searchTerm);
+  }
+
+  function handleSearchModeChange(mode: SearchMode) {
+    if (mode === searchMode) return;
+    searchRequestRef.current?.abort();
+    searchSequenceRef.current += 1;
+    setSearchMode(mode);
+    setAlbums([]);
+    setArtists([]);
+    setSelectedAlbum(null);
+    setSubmittedSearch("");
+    setError("");
+    setIsLoading(false);
+  }
+
+  function handleExploreArtist(artist: SpotifyArtist) {
+    setSearchMode("albums");
+    setSearchTerm(artist.name);
+    setSelectedAlbum(null);
+    void runSearch(artist.name, "albums");
   }
 
   function handleSelectAlbum(album: SpotifyAlbum) {
@@ -102,15 +143,44 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       <h2>Choose an album</h2>
 
       <p className="section-sub">
-        Search by artist or album title, then lock in your pick.
+        Find an album or explore an artist's available releases.
       </p>
+
+      <div className="music-search-tabs" role="tablist" aria-label="Music search category">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={searchMode === "albums"}
+          className={searchMode === "albums" ? "is-active" : ""}
+          onClick={() => handleSearchModeChange("albums")}
+        >
+          Albums &amp; EPs
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={searchMode === "artists"}
+          className={searchMode === "artists" ? "is-active" : ""}
+          onClick={() => handleSearchModeChange("artists")}
+        >
+          Artists
+        </button>
+        <button type="button" role="tab" aria-selected="false" disabled>
+          Playlists
+          <small>Later</small>
+        </button>
+      </div>
 
       <form className="search-box" onSubmit={handleSearch}>
         <input
           type="search"
-          placeholder="Album or artist..."
+          placeholder={
+            searchMode === "artists" ? "Search artists..." : "Album or artist..."
+          }
           value={searchTerm}
-          aria-label="Search for an album or artist"
+          aria-label={
+            searchMode === "artists" ? "Search for an artist" : "Search for an album or artist"
+          }
           onChange={(event) => setSearchTerm(event.target.value)}
         />
 
@@ -121,7 +191,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
 
       {error && <p className="search-result">{error}</p>}
 
-      {isLoading && albums.length === 0 && (
+      {isLoading && albums.length === 0 && artists.length === 0 && (
         <div className="album-grid album-grid-loading" aria-label="Loading albums">
           {Array.from({ length: 6 }, (_, index) => (
             <div className="album-card album-card-skeleton" key={index} aria-hidden>
@@ -133,13 +203,14 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         </div>
       )}
 
-      {submittedSearch && !error && !isLoading && albums.length === 0 && (
+      {submittedSearch && !error && !isLoading && albums.length === 0 && artists.length === 0 && (
         <p className="search-result">
-          Nothing found for: <strong>{submittedSearch}</strong>
+          No matching {searchMode === "artists" ? "artists" : "albums or EPs"} found for:{" "}
+          <strong>{submittedSearch}</strong>
         </p>
       )}
 
-      {submittedSearch && !error && albums.length > 0 && (
+      {searchMode === "albums" && submittedSearch && !error && albums.length > 0 && (
         <>
           <p className="search-result">
             Showing results for: <strong>{submittedSearch}</strong>
@@ -191,6 +262,41 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
               View more albums
             </button>
           )}
+        </>
+      )}
+
+      {searchMode === "artists" && submittedSearch && !error && artists.length > 0 && (
+        <>
+          <p className="search-result">
+            Artists matching: <strong>{submittedSearch}</strong>
+          </p>
+          <div className="artist-search-grid">
+            {artists.map((artist) => (
+              <article className="artist-search-card" key={artist.id}>
+                {artist.imageUrl ? (
+                  <img src={artist.imageUrl} alt="" aria-hidden loading="lazy" />
+                ) : (
+                  <span className="artist-image-fallback" aria-hidden>
+                    {artist.name.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <div>
+                  <h3>{artist.name}</h3>
+                  <p>{artist.genre}</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => handleExploreArtist(artist)}
+                >
+                  Explore albums
+                </button>
+              </article>
+            ))}
+          </div>
+          <p className="artist-search-note">
+            Artist quizzes are not enabled yet. Explore an artist to choose an album.
+          </p>
         </>
       )}
 

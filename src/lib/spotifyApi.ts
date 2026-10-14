@@ -6,13 +6,20 @@ export type SpotifyAlbum = {
   imageUrl: string;
 };
 
+export type SpotifyArtist = {
+  id: string;
+  name: string;
+  genre: string;
+  imageUrl: string;
+};
+
 export type SpotifyTrack = {
   id: string;
   name: string;
   previewUrl: string | null;
 };
 
-type ITunesAlbum = {
+export type ITunesAlbum = {
   wrapperType?: string;
   collectionType?: string;
   collectionId?: number;
@@ -24,7 +31,7 @@ type ITunesAlbum = {
   trackCount?: number;
 };
 
-type ITunesArtist = {
+export type ITunesArtist = {
   wrapperType?: string;
   artistType?: string;
   artistId?: number;
@@ -73,6 +80,8 @@ const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const ALBUM_TRACK_CACHE_TTL_MS = 30 * 60 * 1000;
 const albumSearchCache = new Map<string, CachedValue<SpotifyAlbum[]>>();
 const albumSearchRequests = new Map<string, Promise<SpotifyAlbum[]>>();
+const artistSearchCache = new Map<string, CachedValue<SpotifyArtist[]>>();
+const artistSearchRequests = new Map<string, Promise<SpotifyArtist[]>>();
 const albumTrackCache = new Map<string, CachedValue<SpotifyTrack[]>>();
 const albumTrackRequests = new Map<string, Promise<SpotifyTrack[]>>();
 
@@ -104,7 +113,7 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 }
 
 function getITunesBaseUrl(path: "search" | "lookup") {
-  if (!import.meta.env.PROD) {
+  if (!import.meta.env?.PROD) {
     return `https://itunes.apple.com/${path}`;
   }
 
@@ -155,7 +164,7 @@ function getWords(text: string) {
     .filter((word) => word.length > 1);
 }
 
-function isSearchableAlbum(album: ITunesAlbum) {
+export function isSearchableAlbum(album: ITunesAlbum) {
   if (!album.collectionId || !album.collectionName) {
     return false;
   }
@@ -172,28 +181,36 @@ function isSearchableAlbum(album: ITunesAlbum) {
     return false;
   }
 
+  const title = cleanText(album.collectionName);
+  const isExplicitSingle = /(?:^| )single$/.test(title);
+
+  if (isExplicitSingle && (album.trackCount || 0) <= 3) {
+    return false;
+  }
+
   return true;
 }
+
+const ALBUM_NOISE_TERMS = [
+  "karaoke",
+  "instrumental",
+  "tribute",
+  "piano",
+  "lullaby",
+  "cover",
+  "covers",
+  "made famous by",
+  "scary hours instrumental",
+  "music box",
+  "workout",
+];
 
 function isLikelyNoiseAlbum(album: ITunesAlbum) {
   const combinedText = cleanText(
     `${album.collectionName || ""} ${album.artistName || ""}`
   );
-  const noiseTerms = [
-    "karaoke",
-    "instrumental",
-    "tribute",
-    "piano",
-    "lullaby",
-    "cover",
-    "covers",
-    "made famous by",
-    "scary hours instrumental",
-    "music box",
-    "workout",
-  ];
 
-  return noiseTerms.some((term) => combinedText.includes(term));
+  return ALBUM_NOISE_TERMS.some((term) => combinedText.includes(term));
 }
 
 function isSameArtistName(artistName: string, targetArtistName: string) {
@@ -207,7 +224,7 @@ function isSameArtistName(artistName: string, targetArtistName: string) {
   );
 }
 
-function scoreArtist(artist: ITunesArtist, query: string) {
+export function scoreArtist(artist: ITunesArtist, query: string) {
   const queryText = cleanText(query);
   const artistName = cleanText(artist.artistName || "");
   const queryWords = getWords(query);
@@ -241,7 +258,11 @@ function scoreArtist(artist: ITunesArtist, query: string) {
   return score;
 }
 
-function scoreAlbum(album: ITunesAlbum, query: string, matchedArtistName = "") {
+export function scoreAlbum(
+  album: ITunesAlbum,
+  query: string,
+  matchedArtistName = ""
+) {
   const queryText = cleanText(query);
   const albumTitle = cleanText(album.collectionName || "");
   const artistName = cleanText(album.artistName || "");
@@ -253,11 +274,11 @@ function scoreAlbum(album: ITunesAlbum, query: string, matchedArtistName = "") {
   let score = 0;
 
   if (artistName === queryText) {
-    score += 240;
+    score += 220;
   }
 
   if (artistName.includes(queryText)) {
-    score += 150;
+    score += 120;
   }
 
   if (queryText.includes(artistName) && artistName.length > 1) {
@@ -265,15 +286,15 @@ function scoreAlbum(album: ITunesAlbum, query: string, matchedArtistName = "") {
   }
 
   if (matchedArtist && isSameArtistName(artistName, matchedArtist)) {
-    score += 180;
+    score += 100;
   }
 
   if (albumTitle === queryText) {
-    score += 170;
+    score += 600;
   }
 
   if (albumTitle.includes(queryText)) {
-    score += 120;
+    score += 180;
   }
 
   if (queryText.includes(albumTitle) && albumTitle.length > 1) {
@@ -289,6 +310,15 @@ function scoreAlbum(album: ITunesAlbum, query: string, matchedArtistName = "") {
       score += 24;
     }
   });
+
+  if (
+    queryWords.length > 1 &&
+    queryWords.every(
+      (word) => artistName.includes(word) || albumTitle.includes(word)
+    )
+  ) {
+    score += 280;
+  }
 
   if (
     queryWords.length > 0 &&
@@ -314,12 +344,11 @@ function scoreAlbum(album: ITunesAlbum, query: string, matchedArtistName = "") {
     score -= 45;
   }
 
-  if (albumTitle.includes("single")) {
-    score -= 55;
-  }
-
-  if (isLikelyNoiseAlbum(album)) {
-    score -= 220;
+  if (
+    isLikelyNoiseAlbum(album) &&
+    !ALBUM_NOISE_TERMS.some((term) => queryText.includes(term))
+  ) {
+    score -= 600;
   }
 
   return score;
@@ -346,7 +375,7 @@ function isPreviewTrack(item: ITunesTrack | ITunesAlbum | ITunesArtist): item is
   );
 }
 
-function removeDuplicateAlbums(albums: SpotifyAlbum[]) {
+export function removeDuplicateAlbums(albums: SpotifyAlbum[]) {
   const seenAlbums = new Set<string>();
 
   return albums.filter((album) => {
@@ -363,7 +392,8 @@ function removeDuplicateAlbums(albums: SpotifyAlbum[]) {
 
 async function searchDirectAlbums(
   query: string,
-  country: string
+  country: string,
+  signal?: AbortSignal
 ): Promise<RankedAlbum[]> {
   const params = new URLSearchParams({
     term: query,
@@ -377,7 +407,7 @@ async function searchDirectAlbums(
 
   console.log("Album search URL:", searchUrl);
 
-  const response = await fetch(searchUrl);
+  const response = await fetch(searchUrl, { signal });
 
   if (!response.ok) {
     console.error("iTunes album search failed:", response.status, country);
@@ -392,41 +422,55 @@ async function searchDirectAlbums(
   }));
 }
 
-async function searchBestArtist(query: string, country: string) {
+async function searchArtistsByCountry(
+  query: string,
+  country: string,
+  signal?: AbortSignal,
+  limit = 20
+) {
   const params = new URLSearchParams({
     term: query,
     media: "music",
     entity: "musicArtist",
-    limit: "5",
+    limit: String(limit),
     country,
   });
   const searchUrl = `${getITunesBaseUrl("search")}?${params.toString()}`;
 
   console.log("Artist search URL:", searchUrl);
 
-  const response = await fetch(searchUrl);
+  const response = await fetch(searchUrl, { signal });
 
   if (!response.ok) {
     console.error("iTunes artist search failed:", response.status, country);
-    return null;
+    return [];
   }
 
   const data: ITunesArtistSearchResponse = await response.json();
-  const rankedArtists = data.results
+  return data.results
     .filter((artist) => artist.artistId && artist.artistName)
     .map((artist) => ({
       artist,
       score: scoreArtist(artist, query),
     }))
+    .filter((item) => item.score >= 60)
     .sort((a, b) => b.score - a.score);
+}
 
-  return rankedArtists[0]?.score > 60 ? rankedArtists[0].artist : null;
+async function searchBestArtist(
+  query: string,
+  country: string,
+  signal?: AbortSignal
+) {
+  const rankedArtists = await searchArtistsByCountry(query, country, signal, 5);
+  return rankedArtists[0]?.artist || null;
 }
 
 async function lookupArtistAlbums(
   query: string,
   country: string,
-  artist: ITunesArtist
+  artist: ITunesArtist,
+  signal?: AbortSignal
 ): Promise<RankedAlbum[]> {
   if (!artist.artistId) {
     return [];
@@ -442,7 +486,7 @@ async function lookupArtistAlbums(
 
   console.log("Artist albums lookup URL:", lookupUrl);
 
-  const response = await fetch(lookupUrl);
+  const response = await fetch(lookupUrl, { signal });
 
   if (!response.ok) {
     console.error("iTunes artist albums lookup failed:", response.status, country);
@@ -456,31 +500,74 @@ async function lookupArtistAlbums(
     .filter(isSearchableAlbum)
     .map((album) => ({
       album: mapAlbum(country, album),
-      score: scoreAlbum(album, query, artist.artistName || "") + 120,
+      score: scoreAlbum(album, query, artist.artistName || "") + 40,
     }));
 }
 
-async function searchAlbumsUncached(query: string): Promise<SpotifyAlbum[]> {
+async function searchAlbumsUncached(
+  query: string,
+  signal?: AbortSignal
+): Promise<SpotifyAlbum[]> {
   const countries = ["US", "NG", "GB", "CA", "ZA"];
   const countryResults = await Promise.all(
     countries.map(async (country) => {
       const [directAlbums, bestArtist] = await Promise.all([
-        searchDirectAlbums(query, country),
-        searchBestArtist(query, country),
+        searchDirectAlbums(query, country, signal),
+        searchBestArtist(query, country, signal),
       ]);
       const artistAlbums = bestArtist
-        ? await lookupArtistAlbums(query, country, bestArtist)
+        ? await lookupArtistAlbums(query, country, bestArtist, signal)
         : [];
       return [...directAlbums, ...artistAlbums];
     })
   );
-  const rankedAlbums = countryResults.flat();
+  const rankedAlbums = countryResults.flat().filter((item) => item.score >= 60);
 
   const sortedAlbums = rankedAlbums
     .sort((a, b) => b.score - a.score)
     .map((item) => item.album);
 
   return removeDuplicateAlbums(sortedAlbums).slice(0, 50);
+}
+
+function mapArtist(artist: ITunesArtist): SpotifyArtist {
+  return {
+    id: `itunes-artist:${artist.artistId}`,
+    name: artist.artistName || "Unknown artist",
+    genre: artist.primaryGenreName || "Genre unavailable",
+    imageUrl: "",
+  };
+}
+
+function removeDuplicateArtists(
+  artists: Array<{ artist: ITunesArtist; score: number }>
+) {
+  const bestByName = new Map<
+    string,
+    { artist: ITunesArtist; score: number }
+  >();
+
+  artists.forEach((item) => {
+    const key = cleanText(item.artist.artistName || "");
+    const current = bestByName.get(key);
+    if (!current || item.score > current.score) bestByName.set(key, item);
+  });
+
+  return [...bestByName.values()]
+    .sort((a, b) => b.score - a.score)
+    .map((item) => mapArtist(item.artist))
+    .slice(0, 12);
+}
+
+async function searchArtistsUncached(
+  query: string,
+  signal?: AbortSignal
+): Promise<SpotifyArtist[]> {
+  const countries = ["US", "NG", "GB", "CA", "ZA"];
+  const countryResults = await Promise.all(
+    countries.map((country) => searchArtistsByCountry(query, country, signal))
+  );
+  return removeDuplicateArtists(countryResults.flat());
 }
 
 export async function searchSpotifyAlbums(
@@ -509,6 +596,37 @@ export async function searchSpotifyAlbums(
       })
       .finally(() => albumSearchRequests.delete(normalizedQuery));
     albumSearchRequests.set(normalizedQuery, request);
+  }
+
+  return withAbort(request, options.signal);
+}
+
+export async function searchSpotifyArtists(
+  query: string,
+  options: RequestOptions = {}
+): Promise<SpotifyArtist[]> {
+  const normalizedQuery = normalizeCacheKey(query);
+  if (normalizedQuery.length < 2) return [];
+
+  const cached = getCachedValue(artistSearchCache, normalizedQuery);
+  if (cached) return withAbort(Promise.resolve(cached), options.signal);
+
+  let request = artistSearchRequests.get(normalizedQuery);
+  if (!request) {
+    const startedAt = performance.now();
+    request = searchArtistsUncached(normalizedQuery)
+      .then((artists) => {
+        artistSearchCache.set(normalizedQuery, {
+          value: artists,
+          expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+        });
+        console.info(
+          `[STANZER_PERF] artist search "${normalizedQuery}" ${Math.round(performance.now() - startedAt)}ms`
+        );
+        return artists;
+      })
+      .finally(() => artistSearchRequests.delete(normalizedQuery));
+    artistSearchRequests.set(normalizedQuery, request);
   }
 
   return withAbort(request, options.signal);
