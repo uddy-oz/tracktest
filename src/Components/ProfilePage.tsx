@@ -24,6 +24,8 @@ import {
   type UserProfile,
 } from "../lib/profiles";
 import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
+import { isAnonymousUser } from "../lib/authIdentity";
+import GuestBadge from "./GuestBadge";
 
 type ProfilePageProps = {
   session: Session | null;
@@ -172,6 +174,11 @@ function ProfilePage({
       }
 
       if (!session?.user) {
+        setIsLoading(false);
+        return;
+      }
+
+      if (isAnonymousUser(session.user)) {
         setIsLoading(false);
         return;
       }
@@ -344,6 +351,32 @@ function ProfilePage({
           <div className="profile-actions">
             <button type="button" onClick={onShowAuth}>
               Login
+            </button>
+            <button type="button" className="secondary-button" onClick={onPlay}>
+              Back Home
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (!isPublicProfile && isAnonymousUser(session?.user)) {
+    return (
+      <section className="profile-page">
+        <div className="profile-empty">
+          <p className="eyebrow">Temporary Player</p>
+          <div className="guest-name-line profile-guest-name">
+            <h1>{profile?.displayName || "Guest Player"}</h1>
+            <GuestBadge />
+          </div>
+          <p>
+            Your guest identity lasts for this browser session. Create an
+            account to save stats, badges, wins, and rank.
+          </p>
+          <div className="profile-actions">
+            <button type="button" onClick={onShowAuth}>
+              Create Account
             </button>
             <button type="button" className="secondary-button" onClick={onPlay}>
               Back Home

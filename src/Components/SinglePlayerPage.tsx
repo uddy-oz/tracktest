@@ -12,6 +12,8 @@ import {
 import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
 import type { SpotifyAlbum } from "../lib/spotifyApi";
 import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
+import { isAnonymousUser } from "../lib/authIdentity";
+import GuestBadge from "./GuestBadge";
 
 type SinglePlayerPageProps = {
   session: Session | null;
@@ -77,7 +79,12 @@ function SinglePlayerPage({
   const displayName = session
     ? getProfileDisplayLabel(profile, session.user.email)
     : "Guest Player";
-  const username = profile?.username ? `@${profile.username}` : "Local run";
+  const isGuestSession = isAnonymousUser(session?.user);
+  const username = isGuestSession
+    ? "Temporary player"
+    : profile?.username
+      ? `@${profile.username}`
+      : "Local run";
   const recentResults = stats.quizResults.slice(0, 3);
 
   return (
@@ -97,7 +104,10 @@ function SinglePlayerPage({
             <span>Solo Career</span>
             <strong>{statsSource === "cloud" ? "Cloud" : "Local"}</strong>
           </div>
-          <h2>{displayName}</h2>
+          <div className="guest-name-line">
+            <h2>{displayName}</h2>
+            {isGuestSession && <GuestBadge />}
+          </div>
           <p>{username}</p>
           <PlayerIdentityBadges badges={playerBadges} />
           <div className="home-player-stats single-player-stats">

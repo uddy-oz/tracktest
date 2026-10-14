@@ -20,6 +20,7 @@ import {
 } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
+import GuestBadge from "./GuestBadge";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 
 type HomePageProps = {
@@ -137,7 +138,12 @@ function HomePage({
   const displayName = session
     ? getProfileDisplayLabel(profile, session.user.email)
     : "Guest Player";
-  const username = profile?.username ? `@${profile.username}` : "Local profile";
+  const isGuestSession = isAnonymousUser(session?.user);
+  const username = isGuestSession
+    ? "Temporary player"
+    : profile?.username
+      ? `@${profile.username}`
+      : "Local profile";
 
   async function handleCloseArenaRoom() {
     if (!recoverableArenaRoom) {
@@ -175,12 +181,15 @@ function HomePage({
             <span>Player Career</span>
             <strong>{statsSource === "cloud" ? "Cloud" : "Local"}</strong>
           </div>
-          <h2>{displayName}</h2>
+          <div className="guest-name-line">
+            <h2>{displayName}</h2>
+            {isGuestSession && <GuestBadge />}
+          </div>
           <p>{username}</p>
           <PlayerIdentityBadges badges={playerBadges} />
           <div className="home-tier-row">
             <button type="button" className="secondary-button" onClick={onProfile}>
-              View Profile
+              {isGuestSession ? "Create Account" : "View Profile"}
             </button>
           </div>
           <div className="home-player-stats">

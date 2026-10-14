@@ -26,10 +26,12 @@ import { getTrackTestStats, setTrackTestStats } from "./lib/stats";
 import type { SpotifyAlbum } from "./lib/spotifyApi";
 import {
   clearGuestName,
+  createGuestId,
   createGuestName,
+  getGuestId,
   getGuestName,
   isAnonymousUser,
-  rememberGuestName,
+  rememberGuestIdentity,
 } from "./lib/authIdentity";
 import { sounds } from "./lib/sounds";
 
@@ -201,12 +203,13 @@ function App() {
       return "";
     }
 
-    const guestName = getGuestName(session?.user) || createGuestName();
-    rememberGuestName(guestName);
-
     if (guestSessionStartInFlightRef.current) {
       return "";
     }
+
+    const guestId = createGuestId();
+    const guestName = createGuestName();
+    rememberGuestIdentity(guestId, guestName);
 
     guestSessionStartInFlightRef.current = true;
 
@@ -214,6 +217,7 @@ function App() {
       const { data, error } = await supabase.auth.signInAnonymously({
         options: {
           data: {
+            guest_id: guestId,
             guest_name: guestName,
             display_name: guestName,
           },
@@ -398,16 +402,38 @@ function App() {
       }
 
       if (isAnonymousUser(session.user)) {
+        const guestId = getGuestId(session.user) || createGuestId();
         const guestName = getGuestName(session.user) || createGuestName();
-        rememberGuestName(guestName);
+        rememberGuestIdentity(guestId, guestName);
         setProfile({
           id: session.user.id,
           email: null,
-          username: guestName,
+          username: guestId,
           displayName: guestName,
         });
         setIdentityBadges([]);
         setIsProfileLoading(false);
+
+        if (
+          supabase &&
+          (session.user.user_metadata?.guest_id !== guestId ||
+            session.user.user_metadata?.guest_name !== guestName ||
+            session.user.user_metadata?.display_name !== guestName)
+        ) {
+          void supabase.auth
+            .updateUser({
+              data: {
+                guest_id: guestId,
+                guest_name: guestName,
+                display_name: guestName,
+              },
+            })
+            .then(({ error }) => {
+              if (error) {
+                console.error("Could not refresh the guest display name:", error);
+              }
+            });
+        }
         return;
       }
 
@@ -790,7 +816,7 @@ function App() {
           onSinglePlayer={showPlay}
           onMultiplayer={showMultiplayer}
           onLeaderboard={showLeaderboard}
-          onProfile={showProfile}
+          onProfile={isGuestSession ? () => showAuth("login") : showProfile}
           onResumeArenaRoom={showMultiplayer}
           onCloseArenaRoom={closeActiveArenaRoom}
           progressionRevision={progressionRevision}

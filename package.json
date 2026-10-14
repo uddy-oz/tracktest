@@ -15,6 +15,7 @@
     "test:arena-sql": "node tools/check-arena-sql.mjs",
     "test:multiplayer-progression": "node --experimental-strip-types tools/multiplayer-progression.test.ts",
     "test:catalog": "node --experimental-strip-types --test tools/catalog-discovery.test.ts",
+    "test:guest-identity": "node --experimental-strip-types --test tools/guest-identity.test.ts",
     "test:music-search": "node --experimental-strip-types --test tools/music-search.test.ts",
     "preview": "vite preview"
   },

@@ -2,6 +2,7 @@ import type { Session } from "@supabase/supabase-js";
 import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 import type { CompactPlayerBadge } from "../lib/playerIdentity";
+import GuestBadge from "./GuestBadge";
 
 type NavbarProps = {
   onLogout: () => void;
@@ -34,7 +35,9 @@ function Navbar({
   isGuest = false,
   activeView,
 }: NavbarProps) {
-  const accountLabel = profile?.username
+  const accountLabel = isGuest
+    ? profile?.displayName || "Guest Player"
+    : profile?.username
     ? getProfileDisplayLabel(profile, session?.user.email)
     : session
       ? "Set username"
@@ -88,10 +91,10 @@ function Navbar({
               className={`nav-link-button account-button ${
                 activeView === "profile" ? "active" : ""
               }`}
-              onClick={profile?.username ? onShowProfile : onShowAuth}
+              onClick={isGuest ? onShowAuth : profile?.username ? onShowProfile : onShowAuth}
             >
               <span>{accountLabel}</span>
-              {isGuest && <span className="nav-guest-tag">Guest</span>}
+              {isGuest && <GuestBadge compact />}
               {identityBadges && (
                 <PlayerIdentityBadges badges={accountBadges} compact />
               )}

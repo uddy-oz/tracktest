@@ -23,6 +23,7 @@ import {
   getFriendlyArenaError,
   heartbeatArenaRoomPresence,
   isArenaRoomRecoverableForUser,
+  isGuestArenaPlayer,
   joinArenaRoomByInvite,
   joinDuelRoom,
   leaveArenaRoom,
@@ -77,6 +78,7 @@ import {
 } from "../lib/arenaRoundLifecycle";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
+import GuestBadge from "./GuestBadge";
 import {
   getArenaAlbumError,
   getArenaHostStartEligibility,
@@ -3414,7 +3416,9 @@ function ArenaPage({
     }
 
     const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
-    const hostHandle = profile?.username
+    const hostHandle = isAnonymousUser(session?.user)
+      ? getHostName(room)
+      : profile?.username
       ? `@${profile.username}`
       : getHostName(room);
     const roomLabel =
@@ -3979,10 +3983,14 @@ function ArenaPage({
     setIsDuelMuted(sounds.toggleMuted());
   }
 
-  function getHostName(room: ArenaRoom) {
-    const hostPlayer = getPresentPlayers(room).find(
+  function getHostPlayer(room: ArenaRoom) {
+    return getPresentPlayers(room).find(
       (player) => player.userId === room.hostUserId
     );
+  }
+
+  function getHostName(room: ArenaRoom) {
+    const hostPlayer = getHostPlayer(room);
 
     return hostPlayer?.displayName || hostPlayer?.username || "Arena host";
   }
@@ -4121,6 +4129,7 @@ function ArenaPage({
               <span className="rank-number">{index + 1}</span>
               <strong>
                 {player.displayName || player.username || "Arena Player"}
+                {isGuestArenaPlayer(player) && <GuestBadge compact />}
                 {player.userId === session?.user.id && (
                   <b className="group-you-tag">YOU</b>
                 )}
@@ -4197,6 +4206,13 @@ function ArenaPage({
       : pendingPublicRoom
         ? getHostName(pendingPublicRoom)
         : "Arena host";
+    const inviteHostPlayer = pendingPublicRoom
+      ? getHostPlayer(pendingPublicRoom)
+      : null;
+    const hostIsGuest = Boolean(
+      pendingInvite?.hostIsGuest ||
+        (inviteHostPlayer && isGuestArenaPlayer(inviteHostPlayer))
+    );
     const isRecoverableInviteStatus = ["waiting", "starting", "active"].includes(
       status
     );
@@ -4241,11 +4257,15 @@ function ArenaPage({
                 : "Duel Request"}
           </p>
           <h2>
+            <span className="arena-invite-host-name">
+              {hostName}
+              {hostIsGuest && <GuestBadge compact />}
+            </span>{" "}
             {inviteMode === "party_mode"
-              ? `${hostName} invited you to a Party Mode room on ${albumName}`
+              ? `invited you to a Party Mode room on ${albumName}`
               : isGroupInvite
-              ? `${hostName} invited you to join ${albumName}`
-                : `${hostName} wants to Duel on ${albumName}`}
+              ? `invited you to join ${albumName}`
+                : `wants to Duel on ${albumName}`}
           </h2>
           {artworkUrl && <img src={artworkUrl} alt="" aria-hidden />}
           <p>{artistName}</p>
@@ -5058,7 +5078,10 @@ function ArenaPage({
                     key={player.id}
                   >
                     <span>{player.userId === activeRoom.hostUserId ? "Host" : "Player"}</span>
-                    <strong>{player.displayName}</strong>
+                    <div className="guest-name-line">
+                      <strong>{player.displayName}</strong>
+                      {isGuestArenaPlayer(player) && <GuestBadge compact />}
+                    </div>
                     {player.resultStatus === "forfeit" && <p>Forfeited</p>}
                     {player.resultStatus === "win_by_forfeit" && <p>Win by forfeit</p>}
                     {isActivePartyMode ? (
@@ -5298,7 +5321,12 @@ function ArenaPage({
               <div className="duel-head-to-head">
                 <div className="duel-h2h-card current">
                   <span>You <b className="group-you-tag">YOU</b></span>
-                  <strong>{currentPlayer?.displayName || "Arena Player"}</strong>
+                  <div className="guest-name-line">
+                    <strong>{currentPlayer?.displayName || "Arena Player"}</strong>
+                    {currentPlayer && isGuestArenaPlayer(currentPlayer) && (
+                      <GuestBadge compact />
+                    )}
+                  </div>
                   <p>{duelScore.toLocaleString()} round points</p>
                   <small>
                     {duelCorrectAnswers}/{arenaQuestionTotal} rounds won
@@ -5308,7 +5336,12 @@ function ArenaPage({
                 <div className="duel-h2h-vs">VS</div>
                 <div className="duel-h2h-card">
                   <span>Opponent</span>
-                  <strong>{opponentPlayer?.displayName || "Waiting"}</strong>
+                  <div className="guest-name-line">
+                    <strong>{opponentPlayer?.displayName || "Waiting"}</strong>
+                    {opponentPlayer && isGuestArenaPlayer(opponentPlayer) && (
+                      <GuestBadge compact />
+                    )}
+                  </div>
                   <p>
                     {(opponentPlayer?.currentScore || 0).toLocaleString()} round points
                   </p>
@@ -5523,8 +5556,13 @@ function ArenaPage({
                       <span>
                         {player.userId === activeRoom.hostUserId ? "Host" : "Player"}
                       </span>
-                      <strong>{player.displayName || "Arena Player"}</strong>
-                      {player.username && <p>@{player.username}</p>}
+                      <div className="guest-name-line">
+                        <strong>{player.displayName || "Arena Player"}</strong>
+                        {isGuestArenaPlayer(player) && <GuestBadge compact />}
+                      </div>
+                      {player.username && !isGuestArenaPlayer(player) && (
+                        <p>@{player.username}</p>
+                      )}
                       {activeRoom.status === "waiting" && activeRoom.mode !== "party_mode" && (
                         <small className="lobby-player-status">
                           {player.userId === activeRoom.hostUserId ? "HOST" : lobbyState}
@@ -5555,8 +5593,15 @@ function ArenaPage({
                     : ""
               }`}>
                 <span>Host</span>
-                <strong>{hostPlayer?.displayName || "Arena host"}</strong>
-                {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
+                <div className="guest-name-line">
+                  <strong>{hostPlayer?.displayName || "Arena host"}</strong>
+                  {hostPlayer && isGuestArenaPlayer(hostPlayer) && (
+                    <GuestBadge compact />
+                  )}
+                </div>
+                {hostPlayer?.username && !isGuestArenaPlayer(hostPlayer) && (
+                  <p>@{hostPlayer.username}</p>
+                )}
                 {activeRoom.status === "waiting" && hostPlayer && (
                   <small className="lobby-player-status">
                     HOST
@@ -5574,10 +5619,17 @@ function ArenaPage({
                     : ""
               }`}>
                 <span>Joined Player</span>
-                <strong>
-                  {guestPlayer?.displayName || recentDepartedPlayer?.displayName || "Waiting for rival"}
-                </strong>
-                {(guestPlayer?.username || recentDepartedPlayer?.username) && (
+                <div className="guest-name-line">
+                  <strong>
+                    {guestPlayer?.displayName || recentDepartedPlayer?.displayName || "Waiting for rival"}
+                  </strong>
+                  {(guestPlayer || recentDepartedPlayer) &&
+                    isGuestArenaPlayer(guestPlayer || recentDepartedPlayer!) && (
+                      <GuestBadge compact />
+                    )}
+                </div>
+                {(guestPlayer?.username || recentDepartedPlayer?.username) &&
+                  !isGuestArenaPlayer(guestPlayer || recentDepartedPlayer!) && (
                   <p>@{guestPlayer?.username || recentDepartedPlayer?.username}</p>
                 )}
                 {activeRoom.status === "waiting" && (guestPlayer || recentDepartedPlayer) && (
@@ -5832,7 +5884,13 @@ function ArenaPage({
                     <div>
                       <strong>{room.albumName}</strong>
                       <span>{room.artistName}</span>
-                      <small>Host: {getHostName(room)}</small>
+                      <small className="arena-room-host-line">
+                        Host: {getHostName(room)}
+                        {getHostPlayer(room) &&
+                          isGuestArenaPlayer(getHostPlayer(room)!) && (
+                            <GuestBadge compact />
+                          )}
+                      </small>
                     </div>
                     <span className="duel-room-status">{room.status}</span>
                     <span className="duel-room-count">

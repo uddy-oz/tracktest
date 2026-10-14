@@ -3,6 +3,15 @@ import { supabase } from "./supabaseClient";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
 import {
+  createGuestRoomHandle,
+  getGuestId,
+  getGuestIdFromRoomHandle,
+  getSafeGuestDisplayName,
+  isAnonymousUser,
+  isInternalGuestId,
+  resolveUniqueGuestName,
+} from "./authIdentity";
+import {
   getArenaClientId,
   logArenaDiagnostic,
   logArenaReadyDiagnostic,
@@ -75,6 +84,11 @@ export type ArenaRoomPlayer = {
   resultStatus: string;
 };
 
+type ArenaDisplayPlayer = Pick<
+  ArenaRoomPlayer,
+  "userId" | "displayName" | "leftAt" | "resultStatus"
+>;
+
 export type ArenaRoom = {
   id: string;
   hostUserId: string;
@@ -140,6 +154,7 @@ export type ArenaInvite = {
   hostUserId: string;
   hostDisplayName: string;
   hostUsername: string | null;
+  hostIsGuest: boolean;
   playerCount: number;
   expiresAt: string | null;
 };
@@ -338,11 +353,61 @@ function generateInviteCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-function getPlayerDisplay(profile: UserProfile | null) {
+export function isGuestArenaPlayer(
+  player: Pick<ArenaRoomPlayer, "displayName" | "username">
+) {
+  return Boolean(
+    getGuestIdFromRoomHandle(player.username) ||
+      (isInternalGuestId(player.username) &&
+        isInternalGuestId(player.displayName))
+  );
+}
+
+function getStoredArenaGuestId(
+  username: string | null | undefined,
+  displayName: string | null | undefined
+) {
+  return (
+    getGuestIdFromRoomHandle(username) ||
+    (isInternalGuestId(username) && isInternalGuestId(displayName)
+      ? username.toLowerCase()
+      : null)
+  );
+}
+
+function getPlayerDisplay(
+  profile: UserProfile | null,
+  user: User,
+  roomPlayers: readonly ArenaDisplayPlayer[] = [],
+  currentUserId?: string
+) {
+  const username = profile?.username || null;
+  const preferredDisplayName =
+    profile?.displayName || profile?.username || "Arena Player";
+  const guestId = isAnonymousUser(user)
+    ? getGuestId(user) || (isInternalGuestId(username) ? username : null)
+    : null;
+
+  if (guestId) {
+    const safeName = getSafeGuestDisplayName(preferredDisplayName, guestId);
+    const takenNames = roomPlayers
+      .filter(
+        (player) =>
+          player.userId !== currentUserId &&
+          !player.leftAt &&
+          !INACTIVE_MEMBERSHIP_STATUSES.has(player.resultStatus)
+      )
+      .map((player) => player.displayName);
+
+    return {
+      displayName: resolveUniqueGuestName(safeName, takenNames, guestId),
+      username: createGuestRoomHandle(guestId),
+    };
+  }
+
   return {
-    displayName:
-      profile?.displayName || profile?.username || "Arena Player",
-    username: profile?.username || null,
+    displayName: preferredDisplayName,
+    username,
   };
 }
 
@@ -554,7 +619,7 @@ export async function createDuelRoom({
   }
 
   const room = mapRoomRow(roomData as ArenaRoomRow);
-  const { displayName, username } = getPlayerDisplay(profile);
+  const { displayName, username } = getPlayerDisplay(profile, user);
   if (room.isPrivate && room.inviteCode) {
     // Direct membership inserts only allow public rooms. The invite RPC already
     // validates private membership, including the host, under its row lock.
@@ -663,7 +728,12 @@ export async function joinDuelRoom({
     return { room: targetRoom, error: "This Arena room is already full." };
   }
 
-  const { displayName, username } = getPlayerDisplay(profile);
+  const { displayName, username } = getPlayerDisplay(
+    profile,
+    user,
+    targetRoom.players,
+    user.id
+  );
   const { data: rejoinedPlayers, error: rejoinError } = await supabase
     .from("arena_room_players")
     .update({
@@ -758,8 +828,21 @@ export async function fetchArenaInvite(inviteCode: string) {
       inviteCode: row.invite_code || normalizeArenaInviteCode(inviteCode),
       hostUserId: row.host_user_id,
       hostDisplayName:
-        row.host_display_name || row.host_username || "Arena Host",
-      hostUsername: row.host_username,
+        getStoredArenaGuestId(row.host_username, row.host_display_name)
+          ? getSafeGuestDisplayName(
+              row.host_display_name,
+              getStoredArenaGuestId(row.host_username, row.host_display_name)!
+            )
+          : row.host_display_name || row.host_username || "Arena Host",
+      hostUsername: getStoredArenaGuestId(
+        row.host_username,
+        row.host_display_name
+      )
+        ? null
+        : row.host_username,
+      hostIsGuest: Boolean(
+        getStoredArenaGuestId(row.host_username, row.host_display_name)
+      ),
       playerCount: row.player_count || 0,
       expiresAt: row.expires_at || null,
     },
@@ -796,7 +879,22 @@ export async function joinArenaRoomByInvite({
     };
   }
 
-  const { displayName, username } = getPlayerDisplay(profile);
+  const inviteResult = await fetchArenaInvite(inviteCode);
+  const { displayName, username } = getPlayerDisplay(
+    profile,
+    user,
+    inviteResult.invite
+      ? [
+          {
+            userId: inviteResult.invite.hostUserId,
+            displayName: inviteResult.invite.hostDisplayName,
+            leftAt: null,
+            resultStatus: "active",
+          },
+        ]
+      : [],
+    user.id
+  );
   const { data, error } = await supabase.rpc("join_arena_room_by_invite", {
     target_invite_code: normalizeArenaInviteCode(inviteCode),
     player_display_name: displayName,
@@ -812,7 +910,35 @@ export async function joinArenaRoomByInvite({
     };
   }
 
-  return fetchArenaRoom(String(data));
+  const joinedRoom = await fetchArenaRoom(String(data));
+
+  if (!joinedRoom.room || !getGuestIdFromRoomHandle(username)) {
+    return joinedRoom;
+  }
+
+  const currentPlayer = joinedRoom.room.players.find(
+    (player) => player.userId === user.id && !player.leftAt
+  );
+  const uniqueDisplay = getPlayerDisplay(
+    profile,
+    user,
+    joinedRoom.room.players,
+    user.id
+  );
+
+  if (!currentPlayer || currentPlayer.displayName === uniqueDisplay.displayName) {
+    return joinedRoom;
+  }
+
+  const { error: displayNameError } = await supabase
+    .from("arena_room_players")
+    .update({ display_name: uniqueDisplay.displayName })
+    .eq("room_id", joinedRoom.room.id)
+    .eq("user_id", user.id);
+
+  return displayNameError
+    ? joinedRoom
+    : fetchArenaRoom(joinedRoom.room.id);
 }
 
 export async function fetchArenaRoom(roomId: string) {
@@ -844,8 +970,10 @@ export async function fetchArenaRoom(roomId: string) {
   return {
     room: {
       ...room,
-      players: dedupeActivePlayers(
-        ((playersData || []) as ArenaRoomPlayerRow[]).map(mapPlayerRow)
+      players: ensureUniqueGuestLobbyNames(
+        dedupeActivePlayers(
+          ((playersData || []) as ArenaRoomPlayerRow[]).map(mapPlayerRow)
+        )
       ),
     },
     error: null,
@@ -1681,12 +1809,54 @@ export async function endArenaRoom(roomId: string) {
 function attachPlayers(rooms: ArenaRoom[], players: ArenaRoomPlayerRow[]) {
   return rooms.map((room) => ({
     ...room,
-    players: dedupeActivePlayers(
-      players
-        .filter((player) => player.room_id === room.id)
-        .map(mapPlayerRow)
+    players: ensureUniqueGuestLobbyNames(
+      dedupeActivePlayers(
+        players
+          .filter((player) => player.room_id === room.id)
+          .map(mapPlayerRow)
+      )
     ),
   }));
+}
+
+function ensureUniqueGuestLobbyNames(players: ArenaRoomPlayer[]) {
+  const takenNames = new Set(
+    players
+      .filter((player) => !isGuestArenaPlayer(player))
+      .map((player) => player.displayName.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const guestDisplayNames = new Map<string, string>();
+
+  [...players]
+    .filter(isGuestArenaPlayer)
+    .sort((left, right) => {
+      const joinedAtComparison = left.joinedAt.localeCompare(right.joinedAt);
+      return joinedAtComparison || left.userId.localeCompare(right.userId);
+    })
+    .forEach((player) => {
+      const guestId = getStoredArenaGuestId(player.username, player.displayName);
+      if (!guestId) {
+        return;
+      }
+
+      const displayName = resolveUniqueGuestName(
+        player.displayName,
+        takenNames,
+        guestId
+      );
+      takenNames.add(displayName.toLowerCase());
+      guestDisplayNames.set(player.id, displayName);
+    });
+
+  return players.map((player) => {
+    const displayName = guestDisplayNames.get(player.id);
+
+    return !displayName || displayName === player.displayName
+      ? player
+      : { ...player, displayName };
+  });
 }
 
 function dedupeActivePlayers(players: ArenaRoomPlayer[]) {
@@ -1858,11 +2028,15 @@ function normalizeDuelQuestions(questions: unknown): DuelQuizQuestion[] {
 }
 
 function mapPlayerRow(row: ArenaRoomPlayerRow): ArenaRoomPlayer {
+  const guestId = getStoredArenaGuestId(row.username, row.display_name);
+
   return {
     id: row.id,
     roomId: row.room_id,
     userId: row.user_id,
-    displayName: row.display_name || row.username || "Arena Player",
+    displayName: guestId
+      ? getSafeGuestDisplayName(row.display_name, guestId)
+      : row.display_name || row.username || "Arena Player",
     username: row.username,
     joinedAt: row.joined_at,
     finalScore: row.final_score,
