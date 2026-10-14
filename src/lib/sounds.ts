@@ -77,6 +77,16 @@ export const sounds = {
     try {
       const context = getAudioContext();
       void context.resume();
+
+      // A silent oscillator created inside the user's click reliably unlocks
+      // short Web Audio cues in browsers that otherwise drop later countdowns.
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.01);
     } catch {
       // AudioContext support is optional; gameplay audio uses its own element.
     }

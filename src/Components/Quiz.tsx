@@ -147,6 +147,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const previewCacheRef = useRef<Record<string, string | null>>({});
   const hasSavedQuizResultRef = useRef(false);
   const hasAnsweredRef = useRef(false);
+  const isEndingRunRef = useRef(false);
 
   const CLIP_LENGTH_SECONDS = 5;
 
@@ -215,6 +216,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
         previewCacheRef.current = {};
         hasSavedQuizResultRef.current = false;
+        isEndingRunRef.current = false;
 
         const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
 
@@ -657,7 +659,8 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       !currentQuestion ||
       quizPhase === "answering" ||
       quizPhase === "correctHold" ||
-      quizPhase === "reveal"
+      quizPhase === "reveal" ||
+      isEndingRunRef.current
     ) {
       return;
     }
@@ -666,6 +669,11 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
     if (previewUrl) {
       const didPlay = await playFiveSecondClip();
+
+      if (isEndingRunRef.current) {
+        stopClip(false);
+        return;
+      }
 
       if (!didPlay) {
         setQuizPhase("audioBlocked");
@@ -823,6 +831,10 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   }
 
   function finishQuiz() {
+    if (isEndingRunRef.current) {
+      return;
+    }
+
     stopClip(false);
     const isPerfectRun = questions.length > 0 && correctAnswers === questions.length;
 
@@ -944,12 +956,26 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     setIsQuizComplete(false);
     setCloudSaveMessage("");
     hasSavedQuizResultRef.current = false;
+    isEndingRunRef.current = false;
     setQuestions(buildQuizQuestions(tracks));
     setQuizPhase("countdown");
   }
 
   function handleToggleMute() {
-    setIsMuted(sounds.toggleMuted());
+    const nextMuted = sounds.toggleMuted();
+    setIsMuted(nextMuted);
+    if (!nextMuted) sounds.prime();
+  }
+
+  function handleEndRun() {
+    if (!window.confirm("End this run? Your unfinished quiz will not be saved.")) {
+      return;
+    }
+
+    isEndingRunRef.current = true;
+    hasAnsweredRef.current = true;
+    stopClip(false);
+    onRestartApp();
   }
 
   function enqueueEarnedBadges(badges: ArenaBadge[]) {
@@ -1133,6 +1159,13 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
           aria-pressed={isMuted}
         >
           {isMuted ? "Sound off" : "Sound on"}
+        </button>
+        <button
+          type="button"
+          className="mute-toggle quiz-end-run"
+          onClick={handleEndRun}
+        >
+          End Run
         </button>
       </div>
 

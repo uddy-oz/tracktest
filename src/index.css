@@ -1001,6 +1001,16 @@ button:hover {
   background: var(--arena-surface-hover);
 }
 
+.quiz-end-run {
+  border-color: rgba(255, 77, 77, 0.42);
+  color: #ffb4b4;
+}
+
+.quiz-end-run:hover {
+  border-color: rgba(255, 77, 77, 0.72);
+  background: rgba(255, 77, 77, 0.12);
+}
+
 .quiz-flash,
 .danger-vignette {
   position: absolute;

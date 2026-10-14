@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   getArenaAlbumError,
+  getArenaHostStartEligibility,
   getArenaLobbyStartEligibility,
   prepareArenaLobbyStart,
 } from "../src/lib/arenaLobbyStart.ts";
@@ -70,6 +71,31 @@ test("competitive start rejects a current player who has not readied up", async 
   assert.match(result.error!, /must ready up/);
   assert.equal(f.calls.length, 0);
   assert.equal(f.events.at(-1)?.details.stage, "validate-membership");
+});
+
+test("host can use one Start action after every other player is ready", () => {
+  const waitingHost = room({
+    players: [
+      { ...player("host"), lobbyReady: false },
+      player("opponent"),
+    ],
+  });
+
+  assert.equal(getArenaLobbyStartEligibility(waitingHost).canStart, false);
+  assert.equal(getArenaHostStartEligibility(waitingHost).canStart, true);
+});
+
+test("host Start remains locked until every other player is ready", () => {
+  const waitingOpponent = room({
+    players: [
+      { ...player("host"), lobbyReady: false },
+      { ...player("opponent"), lobbyReady: false },
+    ],
+  });
+
+  const eligibility = getArenaHostStartEligibility(waitingOpponent);
+  assert.equal(eligibility.canStart, false);
+  assert.match(eligibility.reason, /other player must be ready/);
 });
 
 test("lobby eligibility updates immediately when a ready player leaves", () => {

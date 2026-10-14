@@ -63,6 +63,47 @@ export function getArenaLobbyStartEligibility(
   };
 }
 
+export function getArenaHostStartEligibility(
+  room: ArenaRoom
+): ArenaLobbyStartEligibility {
+  const members = getArenaStartMembers(room);
+  const minimumPlayers = room.mode === "group_lobby" ? 3 : 2;
+
+  if (
+    members.length < minimumPlayers ||
+    members.length > room.maxPlayers ||
+    (room.mode === "duel" && members.length !== 2)
+  ) {
+    return {
+      canStart: false,
+      members,
+      minimumPlayers,
+      reason: `Waiting for ${minimumPlayers} active players to start.`,
+    };
+  }
+
+  if (
+    room.mode !== "party_mode" &&
+    members.some(
+      (player) => player.userId !== room.hostUserId && !player.lobbyReady
+    )
+  ) {
+    return {
+      canStart: false,
+      members,
+      minimumPlayers,
+      reason: "Every other player must be ready before the host can start.",
+    };
+  }
+
+  return {
+    canStart: true,
+    members,
+    minimumPlayers,
+    reason: "",
+  };
+}
+
 type RoomResult = { room: ArenaRoom | null; error: string | null };
 type QuestionSet = {
   questions: DuelQuizQuestion[];

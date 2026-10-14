@@ -14,6 +14,7 @@ import {
   endArenaRoom,
   fetchCurrentDuelRoom,
   isArenaRoomRecoverableForUser,
+  leaveArenaRoom,
   type ArenaRoom,
 } from "./lib/arenaRooms";
 import { supabase } from "./lib/supabaseClient";
@@ -30,6 +31,7 @@ import {
   isAnonymousUser,
   rememberGuestName,
 } from "./lib/authIdentity";
+import { sounds } from "./lib/sounds";
 
 const SinglePlayerPage = lazy(() => import("./Components/SinglePlayerPage"));
 const Quiz = lazy(() => import("./Components/Quiz"));
@@ -155,6 +157,7 @@ function App() {
   const [arenaNavigationNotice, setArenaNavigationNotice] = useState("");
   const [progressionRevision, setProgressionRevision] = useState(0);
   const arenaRecoveryGenerationRef = useRef(0);
+  const guestSessionStartInFlightRef = useRef(false);
 
   const refreshActiveArenaRoom = useCallback(async () => {
     const recoveryGeneration = ++arenaRecoveryGenerationRef.current;
@@ -190,28 +193,46 @@ function App() {
       return "";
     }
 
+    if (session?.user && isAnonymousUser(session.user)) {
+      navigateToInternalPath(
+        window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
+      );
+      window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
+      return "";
+    }
+
     const guestName = getGuestName(session?.user) || createGuestName();
     rememberGuestName(guestName);
 
-    const { data, error } = await supabase.auth.signInAnonymously({
-      options: {
-        data: {
-          guest_name: guestName,
-          display_name: guestName,
-        },
-      },
-    });
-
-    if (error || !data.user) {
-      clearGuestName();
-      return error?.message || "Could not start a guest session.";
+    if (guestSessionStartInFlightRef.current) {
+      return "";
     }
 
-    navigateToInternalPath(
-      window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
-    );
-    window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
-    return "";
+    guestSessionStartInFlightRef.current = true;
+
+    try {
+      const { data, error } = await supabase.auth.signInAnonymously({
+        options: {
+          data: {
+            guest_name: guestName,
+            display_name: guestName,
+          },
+        },
+      });
+
+      if (error || !data.user) {
+        clearGuestName();
+        return error?.message || "Could not start a guest session.";
+      }
+
+      navigateToInternalPath(
+        window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
+      );
+      window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
+      return "";
+    } finally {
+      guestSessionStartInFlightRef.current = false;
+    }
   }, [session?.user]);
 
   const handleArenaRoomChange = useCallback(
@@ -255,18 +276,40 @@ function App() {
   }, []);
 
   useEffect(() => {
-    function handlePopState() {
+    async function handlePopState() {
+      const room = activeArenaRoom;
+      const userId = session?.user.id;
+
       if (
-        session?.user.id &&
-        activeArenaRoom?.hostUserId === session.user.id &&
-        ["waiting", "starting", "active"].includes(activeArenaRoom.status)
+        room &&
+        userId &&
+        ["waiting", "starting", "active"].includes(room.status)
       ) {
-        window.history.pushState({}, "", "/multiplayer");
-        setActiveView("multiplayer");
-        setArenaNavigationNotice(
-          `You are hosting an open room. Use End Lobby before leaving.|${Date.now()}`
+        const isHost = room.hostUserId === userId;
+        const confirmed = !isHost || window.confirm(
+          "Leaving Multiplayer will end this lobby for everyone. Continue?"
         );
-        return;
+
+        if (!confirmed) {
+          window.history.pushState({}, "", "/multiplayer");
+          setActiveView("multiplayer");
+          return;
+        }
+
+        const { error } = isHost
+          ? await endArenaRoom(room.id)
+          : await leaveArenaRoom(room.id);
+
+        if (error) {
+          window.history.pushState({}, "", "/multiplayer");
+          setActiveView("multiplayer");
+          setArenaNavigationNotice(
+            `StanZer could not leave the room: ${error}|${Date.now()}`
+          );
+          return;
+        }
+
+        setActiveArenaRoom(null);
       }
 
       const username = getProfileUsernameFromPath();
@@ -286,9 +329,7 @@ function App() {
       window.removeEventListener("popstate", handlePopState);
     };
   }, [
-    activeArenaRoom?.hostUserId,
-    activeArenaRoom?.id,
-    activeArenaRoom?.status,
+    activeArenaRoom,
     session?.user.id,
   ]);
 
@@ -444,8 +485,9 @@ function App() {
     return () => window.removeEventListener("focus", refreshProgressionOnFocus);
   }, [refreshIdentityBadges]);
 
-  function startQuiz(album: SpotifyAlbum) {
-    if (keepHostedArenaRoomOpen()) return;
+  async function startQuiz(album: SpotifyAlbum) {
+    sounds.prime();
+    if (!(await releaseArenaRoomForNavigation())) return;
     window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -454,8 +496,8 @@ function App() {
     setIsQuizStarted(true);
   }
 
-  function restartApp() {
-    if (keepHostedArenaRoomOpen()) return;
+  async function restartApp() {
+    if (!(await releaseArenaRoomForNavigation())) return;
     window.history.pushState({}, "", "/play");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -464,8 +506,8 @@ function App() {
     setIsQuizStarted(false);
   }
 
-  function showHome() {
-    if (keepHostedArenaRoomOpen()) return;
+  async function showHome() {
+    if (!(await releaseArenaRoomForNavigation())) return;
     window.history.pushState({}, "", "/");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -474,12 +516,12 @@ function App() {
     setActiveView("home");
   }
 
-  function showPlay() {
-    restartApp();
+  async function showPlay() {
+    await restartApp();
   }
 
-  function showLeaderboard() {
-    if (keepHostedArenaRoomOpen()) return;
+  async function showLeaderboard() {
+    if (!(await releaseArenaRoomForNavigation())) return;
     window.history.pushState({}, "", "/leaderboard");
     setPublicProfileUsername(null);
     setArenaInviteCode(null);
@@ -497,24 +539,35 @@ function App() {
     setActiveView("multiplayer");
   }
 
-  function keepHostedArenaRoomOpen() {
+  async function releaseArenaRoomForNavigation() {
     if (
       !session?.user.id ||
-      activeArenaRoom?.hostUserId !== session.user.id ||
+      !activeArenaRoom ||
       !["waiting", "starting", "active"].includes(activeArenaRoom.status)
+    ) {
+      return true;
+    }
+
+    const isHost = activeArenaRoom.hostUserId === session.user.id;
+    if (
+      isHost &&
+      !window.confirm("Leaving Multiplayer will end this lobby for everyone. Continue?")
     ) {
       return false;
     }
 
-    window.history.pushState({}, "", "/multiplayer");
-    setPublicProfileUsername(null);
-    setArenaInviteCode(null);
-    setSelectedAlbum(null);
-    setIsQuizStarted(false);
-    setActiveView("multiplayer");
-    setArenaNavigationNotice(
-      `You are hosting an open room. Use End Lobby before leaving.|${Date.now()}`
-    );
+    const { error } = isHost
+      ? await endArenaRoom(activeArenaRoom.id)
+      : await leaveArenaRoom(activeArenaRoom.id);
+
+    if (error) {
+      setArenaNavigationNotice(
+        `StanZer could not leave the room: ${error}|${Date.now()}`
+      );
+      return false;
+    }
+
+    setActiveArenaRoom(null);
     return true;
   }
 
@@ -535,8 +588,12 @@ function App() {
     return error || "";
   }
 
-  function showAuth(mode: AuthPageMode = "login", returnPath = "") {
-    if (keepHostedArenaRoomOpen()) return;
+  async function showAuth(
+    mode: AuthPageMode = "login",
+    returnPath = "",
+    arenaRoomAlreadyReleased = false
+  ) {
+    if (!arenaRoomAlreadyReleased && !(await releaseArenaRoomForNavigation())) return;
     if (returnPath && isSafeInternalPath(returnPath)) {
       window.sessionStorage.setItem(AUTH_RETURN_STORAGE_KEY, returnPath);
     } else if (activeView !== "auth") {
@@ -552,8 +609,8 @@ function App() {
     setActiveView("auth");
   }
 
-  function showSettings() {
-    showAuth("settings", session ? "" : "/settings");
+  async function showSettings() {
+    await showAuth("settings", session ? "" : "/settings");
   }
 
   function navigateToInternalPath(path: string, replace = true) {
@@ -589,14 +646,14 @@ function App() {
     navigateToInternalPath(returnPath || "/");
   }
 
-  function showProfile() {
-    if (keepHostedArenaRoomOpen()) return;
+  async function showProfile() {
+    if (!(await releaseArenaRoomForNavigation())) return;
     if (session?.user && isAnonymousUser(session.user)) {
-      showAuth("signup");
+      await showAuth("signup", "", true);
       return;
     }
     if (profile?.username) {
-      showPublicProfile(profile.username);
+      await showPublicProfile(profile.username, true);
       return;
     }
 
@@ -608,12 +665,15 @@ function App() {
     if (session) {
       setActiveView("profile");
     } else {
-      showAuth("login", "/profile");
+      await showAuth("login", "/profile", true);
     }
   }
 
-  function showPublicProfile(username: string) {
-    if (keepHostedArenaRoomOpen()) return;
+  async function showPublicProfile(
+    username: string,
+    arenaRoomAlreadyReleased = false
+  ) {
+    if (!arenaRoomAlreadyReleased && !(await releaseArenaRoomForNavigation())) return;
     const normalizedUsername = username.toLowerCase();
 
     window.history.pushState(
@@ -638,7 +698,6 @@ function App() {
     ) {
       const { error } = await endArenaRoom(activeArenaRoom.id);
       if (error) {
-        keepHostedArenaRoomOpen();
         setArenaNavigationNotice(
           `StanZer could not end the hosted room. Try End Lobby again before logging out.|${Date.now()}`
         );

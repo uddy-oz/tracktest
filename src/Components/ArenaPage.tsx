@@ -79,6 +79,7 @@ import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import {
   getArenaAlbumError,
+  getArenaHostStartEligibility,
   getArenaLobbyStartEligibility,
   getArenaStartMembers,
   MIN_ARENA_TRACKS as MIN_QUESTIONS,
@@ -3802,12 +3803,57 @@ function ArenaPage({
   }
 
   async function handleStartDuel() {
-    if (!activeRoom) {
+    if (!activeRoom || !session?.user) {
       setStartError("Could not start match. Refresh the room and try again.");
       return;
     }
 
-    await startArenaRoom(activeRoom);
+    let roomToStart = activeRoom;
+    const hostPlayer = roomToStart.players.find(
+      (player) =>
+        player.userId === session.user.id &&
+        !player.leftAt &&
+        !player.finishedAt
+    );
+
+    if (roomToStart.mode !== "party_mode" && !hostPlayer?.lobbyReady) {
+      setIsPreparingDuel(true);
+      setStartError("");
+      setMessage("Preparing host audio...");
+
+      try {
+        sounds.prime();
+        const audioUnlocked = await arenaAudioController.unlockFromUserGesture();
+        setIsArenaAudioUnlocked(audioUnlocked);
+        if (!audioUnlocked) {
+          setStartError(
+            "Game audio is blocked. Check this browser's sound permission, then press Start Game again."
+          );
+          return;
+        }
+
+        const readyResult = await setArenaLobbyReady(roomToStart.id, true);
+        if (readyResult.error) {
+          setStartError(readyResult.error);
+          return;
+        }
+
+        const refreshed = await fetchArenaRoom(roomToStart.id);
+        if (refreshed.error || !refreshed.room) {
+          setStartError(
+            refreshed.error || "Could not refresh the lobby before starting."
+          );
+          return;
+        }
+
+        roomToStart = refreshed.room;
+        updateActiveRoom(roomToStart);
+      } finally {
+        setIsPreparingDuel(false);
+      }
+    }
+
+    await startArenaRoom(roomToStart);
   }
 
   async function handleHostRematch(album?: SpotifyAlbum | null) {
@@ -4885,15 +4931,16 @@ function ArenaPage({
         lobbyMembers.some(
           (player) => getLobbyPlayerState(player) === "RECONNECTING"
         );
+      const hostStartEligibility = getArenaHostStartEligibility(activeRoom);
       const canHostStartLobby =
-        lobbyEligibility.canStart && !hasReconnectingLobbyPlayer;
+        hostStartEligibility.canStart && !hasReconnectingLobbyPlayer;
 
       if (activeRoom.status === "cancelled") {
         const cancellationMessage =
           activeRoom.closeReason === "host_disconnected"
             ? "Host disconnected. This lobby has been closed."
             : activeRoom.closeReason === "host_ended"
-              ? "Host ended the lobby."
+              ? "The host has left. This lobby has ended."
               : "This room was cancelled.";
         return (
           <section className="duel-room-screen">
@@ -5447,10 +5494,10 @@ function ArenaPage({
               <p>{activeRoom.artistName}</p>
               <span>
                 {activeRoom.status === "starting"
-                  ? "Audio check"
+                  ? "Preparing audio"
                   : activeRoom.status === "active"
                     ? "Active"
-                    : "Waiting to start"}
+                    : "Waiting for players"}
               </span>
             </div>
           </div>
@@ -5479,7 +5526,9 @@ function ArenaPage({
                       <strong>{player.displayName || "Arena Player"}</strong>
                       {player.username && <p>@{player.username}</p>}
                       {activeRoom.status === "waiting" && activeRoom.mode !== "party_mode" && (
-                        <small className="lobby-player-status">{lobbyState}</small>
+                        <small className="lobby-player-status">
+                          {player.userId === activeRoom.hostUserId ? "HOST" : lobbyState}
+                        </small>
                       )}
                       {activeRoom.status === "starting" && (
                         <small>{player.isReady ? "Audio ready" : "Preparing audio..."}</small>
@@ -5510,7 +5559,7 @@ function ArenaPage({
                 {hostPlayer?.username && <p>@{hostPlayer.username}</p>}
                 {activeRoom.status === "waiting" && hostPlayer && (
                   <small className="lobby-player-status">
-                    {getLobbyPlayerState(hostPlayer)}
+                    HOST
                   </small>
                 )}
                 {activeRoom.status === "starting" && (
@@ -5568,7 +5617,7 @@ function ArenaPage({
             </div>
           ) : (
             <div className="arena-ready-controls">
-              {activeRoom.mode !== "party_mode" && currentPlayer && (
+              {activeRoom.mode !== "party_mode" && currentPlayer && !isHost && (
                 <button
                   type="button"
                   className={`duel-ready-button ${
@@ -5581,7 +5630,7 @@ function ArenaPage({
                     ? "Updating..."
                     : currentPlayer.lobbyReady
                       ? "Ready - Cancel"
-                      : "Ready Up"}
+                      : "Ready"}
                 </button>
               )}
 
@@ -5594,7 +5643,7 @@ function ArenaPage({
                 >
                   {isPreparingDuel
                     ? "Starting match..."
-                    : `Start Synced ${activeModeSettings.title}`}
+                    : "Start Game"}
                 </button>
               ) : (
                 <p className="arena-note">
@@ -5642,11 +5691,12 @@ function ArenaPage({
           {!session && (
             <div className="arena-guest-entry">
               <p className="arena-note">
-                Log in to save multiplayer progression, or enter as a temporary guest.
+                Continue as a guest, or sign in to save multiplayer progression.
+                Guest progress is temporary and is not saved to your account.
               </p>
               <div className="arena-guest-actions">
                 <button type="button" className="secondary-button" onClick={onLogin}>
-                  Log in
+                  Sign In / Create Account
                 </button>
                 {onGuest && (
                   <button
@@ -5656,7 +5706,7 @@ function ArenaPage({
                       void onGuest().then((error) => error && setMessage(error));
                     }}
                   >
-                    Play as Guest
+                    Continue as Guest
                   </button>
                 )}
               </div>
