@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { FormEvent } from "react";
 import type { SpotifyAlbum, SpotifyArtist } from "../lib/spotifyApi";
 import {
@@ -6,6 +13,9 @@ import {
   searchSpotifyAlbums,
   searchSpotifyArtists,
 } from "../lib/spotifyApi";
+import { isCatalogDiscoveryEnabled } from "../lib/catalogFeatureFlags";
+
+const CatalogDiscovery = lazy(() => import("./CatalogDiscovery"));
 
 type AlbumSearchProps = {
   onStartQuiz: (album: SpotifyAlbum) => void;
@@ -15,7 +25,7 @@ type AlbumSearchProps = {
 const ALBUMS_PER_PAGE = 12;
 const MAX_VISIBLE_ALBUMS = 48;
 const SEARCH_DEBOUNCE_MS = 450;
-type SearchMode = "albums" | "artists";
+type SearchMode = "albums" | "artists" | "playlists";
 
 function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -33,6 +43,9 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
   const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
   const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
+  const isDiscoveryMode =
+    isCatalogDiscoveryEnabled &&
+    (searchMode === "artists" || searchMode === "playlists");
 
   const runSearch = useCallback(async (rawQuery: string, mode = searchMode) => {
     const query = rawQuery.trim();
@@ -81,6 +94,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   }, [searchMode]);
 
   useEffect(() => {
+    if (isDiscoveryMode) return;
     const query = searchTerm.trim();
     if (query.length < 2) return;
 
@@ -89,7 +103,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(debounceId);
-  }, [runSearch, searchTerm]);
+  }, [isDiscoveryMode, runSearch, searchTerm]);
 
   useEffect(
     () => () => {
@@ -139,11 +153,15 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       className={`album-search ${compact ? "album-search-compact" : ""}`}
       id="album-search"
     >
-      <p className="eyebrow">Start a new run</p>
-      <h2>Choose an album</h2>
+      <p className="eyebrow">
+        {isDiscoveryMode ? "StanZer discovery" : "Start a new run"}
+      </p>
+      <h2>{isDiscoveryMode ? "Explore future modes" : "Choose an album"}</h2>
 
       <p className="section-sub">
-        Find an album or explore an artist's available releases.
+        {isDiscoveryMode
+          ? "Browse future quiz sources without changing your current game."
+          : "Find an album or explore an artist's available releases."}
       </p>
 
       <div className="music-search-tabs" role="tablist" aria-label="Music search category">
@@ -165,33 +183,44 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         >
           Artists
         </button>
-        <button type="button" role="tab" aria-selected="false" disabled>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={searchMode === "playlists"}
+          className={searchMode === "playlists" ? "is-active" : ""}
+          disabled={!isCatalogDiscoveryEnabled}
+          onClick={() => handleSearchModeChange("playlists")}
+        >
           Playlists
-          <small>Later</small>
+          <small>{isCatalogDiscoveryEnabled ? "Preview" : "Later"}</small>
         </button>
       </div>
 
-      <form className="search-box" onSubmit={handleSearch}>
-        <input
-          type="search"
-          placeholder={
-            searchMode === "artists" ? "Search artists..." : "Album or artist..."
-          }
-          value={searchTerm}
-          aria-label={
-            searchMode === "artists" ? "Search for an artist" : "Search for an album or artist"
-          }
-          onChange={(event) => setSearchTerm(event.target.value)}
-        />
+      {!isDiscoveryMode && (
+        <form className="search-box" onSubmit={handleSearch}>
+          <input
+            type="search"
+            placeholder={
+              searchMode === "artists" ? "Search artists..." : "Album or artist..."
+            }
+            value={searchTerm}
+            aria-label={
+              searchMode === "artists"
+                ? "Search for an artist"
+                : "Search for an album or artist"
+            }
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
 
-        <button type="submit" disabled={isLoading}>
-          {isLoading ? "Searching..." : "Search"}
-        </button>
-      </form>
+          <button type="submit" disabled={isLoading}>
+            {isLoading ? "Searching..." : "Search"}
+          </button>
+        </form>
+      )}
 
-      {error && <p className="search-result">{error}</p>}
+      {!isDiscoveryMode && error && <p className="search-result">{error}</p>}
 
-      {isLoading && albums.length === 0 && artists.length === 0 && (
+      {!isDiscoveryMode && isLoading && albums.length === 0 && artists.length === 0 && (
         <div className="album-grid album-grid-loading" aria-label="Loading albums">
           {Array.from({ length: 6 }, (_, index) => (
             <div className="album-card album-card-skeleton" key={index} aria-hidden>
@@ -203,7 +232,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         </div>
       )}
 
-      {submittedSearch && !error && !isLoading && albums.length === 0 && artists.length === 0 && (
+      {!isDiscoveryMode && submittedSearch && !error && !isLoading && albums.length === 0 && artists.length === 0 && (
         <p className="search-result">
           No matching {searchMode === "artists" ? "artists" : "albums or EPs"} found for:{" "}
           <strong>{submittedSearch}</strong>
@@ -298,6 +327,21 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
             Artist quizzes are not enabled yet. Explore an artist to choose an album.
           </p>
         </>
+      )}
+
+      {isDiscoveryMode && (
+        <Suspense
+          fallback={
+            <div className="catalog-state catalog-discovery-loading" role="status">
+              <strong>Loading discovery...</strong>
+            </div>
+          }
+        >
+          <CatalogDiscovery
+            key={searchMode}
+            mode={searchMode === "playlists" ? "playlists" : "artists"}
+          />
+        </Suspense>
       )}
 
       {selectedAlbum && (

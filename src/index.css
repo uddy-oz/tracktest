@@ -622,6 +622,302 @@ button:hover {
   font-size: 13px;
 }
 
+.catalog-discovery {
+  width: min(100%, 1040px);
+  margin: 28px auto 0;
+  padding: 24px;
+  border: 1px solid rgba(167, 139, 250, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(124, 92, 255, 0.09), transparent 44%),
+    rgba(13, 12, 22, 0.82);
+  text-align: left;
+}
+
+.catalog-discovery-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.catalog-discovery-heading h3 {
+  margin: 3px 0 8px;
+  font-size: clamp(24px, 4vw, 34px);
+  line-height: 1.05;
+}
+
+.album-search .catalog-discovery-heading p {
+  max-width: 640px;
+  margin: 0;
+  color: var(--arena-muted);
+}
+
+.catalog-coming-soon {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid rgba(245, 196, 81, 0.42);
+  border-radius: 999px;
+  background: rgba(245, 196, 81, 0.08);
+  color: #f4d77d;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.catalog-discovery-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin: 24px 0 16px;
+}
+
+.catalog-discovery-search input {
+  min-width: 0;
+  padding: 13px 16px;
+  border: 1px solid var(--arena-border);
+  border-radius: 8px;
+  background: rgba(6, 6, 12, 0.72);
+  color: #ffffff;
+  font: inherit;
+}
+
+.catalog-discovery-search input:focus {
+  outline: none;
+  border-color: var(--arena-accent);
+  box-shadow: 0 0 0 3px var(--arena-accent-soft);
+}
+
+.catalog-discovery-search button,
+.catalog-state button {
+  padding: 11px 18px;
+  border: 1px solid rgba(167, 139, 250, 0.42);
+  border-radius: 8px;
+  background: var(--arena-accent);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.catalog-category-filter {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.catalog-category-filter button {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border: 1px solid #343044;
+  border-radius: 999px;
+  background: #11101a;
+  color: var(--arena-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.catalog-category-filter button.is-active {
+  border-color: rgba(167, 139, 250, 0.6);
+  background: rgba(124, 92, 255, 0.2);
+  color: #ffffff;
+}
+
+.catalog-result-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--arena-muted);
+  font-size: 13px;
+}
+
+.catalog-result-summary strong {
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.catalog-discovery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.catalog-discovery-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #312d41;
+  border-radius: 8px;
+  background: #11101a;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.catalog-discovery-card:not(.is-loading):hover {
+  transform: translateY(-3px);
+  border-color: var(--catalog-accent-end, var(--arena-accent));
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.35);
+}
+
+.catalog-artwork {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 10;
+  place-items: center;
+  overflow: hidden;
+  background:
+    linear-gradient(140deg, var(--catalog-accent-start, #261744), var(--catalog-accent-end, #7c5cff));
+}
+
+.catalog-artwork::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), transparent 46%);
+  content: "";
+}
+
+.catalog-artwork img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.catalog-artwork > span {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 40px;
+  font-weight: 900;
+}
+
+.catalog-card-copy {
+  flex: 1;
+  padding: 15px 15px 12px;
+}
+
+.catalog-card-type {
+  color: var(--catalog-accent-end, #a78bfa);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.catalog-card-copy h4 {
+  margin: 5px 0 7px;
+  color: #ffffff;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.album-search .catalog-card-copy p {
+  display: -webkit-box;
+  margin: 0 0 10px;
+  overflow: hidden;
+  color: var(--arena-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.catalog-card-copy small {
+  color: #817b91;
+  font-size: 11px;
+}
+
+.catalog-locked-action {
+  margin: 0 15px 15px;
+  padding: 9px 12px;
+  border: 1px solid #373246;
+  border-radius: 8px;
+  background: #171522;
+  color: #777184;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: not-allowed;
+}
+
+.catalog-discovery-card.is-loading {
+  min-height: 280px;
+  padding-bottom: 18px;
+}
+
+.catalog-discovery-card.is-loading .catalog-artwork {
+  background: #201d2b;
+}
+
+.catalog-discovery-card.is-loading .skeleton-line {
+  margin-right: 15px;
+  margin-left: 15px;
+}
+
+.catalog-state {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  min-height: 170px;
+  padding: 28px;
+  align-content: center;
+  border: 1px dashed #383348;
+  border-radius: 8px;
+  background: rgba(9, 9, 15, 0.55);
+  color: var(--arena-muted);
+}
+
+.catalog-state strong {
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.catalog-state-error {
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
+.catalog-discovery-loading {
+  width: min(100%, 1040px);
+  margin: 28px auto 0;
+}
+
+.catalog-state button {
+  margin-top: 6px;
+}
+
+.catalog-load-more {
+  display: block;
+  margin: 20px auto 0;
+}
+
+@media (max-width: 800px) {
+  .catalog-discovery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .catalog-discovery {
+    padding: 18px;
+  }
+
+  .catalog-discovery-heading {
+    flex-direction: column;
+  }
+
+  .catalog-discovery-search {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-discovery-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .album-card {
   position: relative;
   background: var(--arena-surface);

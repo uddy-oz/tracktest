@@ -34,6 +34,7 @@ StanZer is a React 19 and TypeScript application built with Vite.
 - `src/App.tsx` owns the lightweight route/view state, protected auth destinations, session-level progression refreshes, and route-level code splitting.
 - `src/Components` contains the Home, Single Player, Multiplayer, profile, leaderboard, badge, and authentication interfaces.
 - `src/lib` contains iTunes access, Supabase clients, Arena room operations, local/cloud stats, profile helpers, badge rules, sounds, and player identity calculations.
+- `src/lib/catalog.ts` defines a provider-neutral discovery contract for albums, artists, playlists, tracks, rights/availability metadata, and immutable future multiplayer question snapshots. The included adapter serves mock metadata only and cannot start gameplay or audio.
 - `api` contains the Vercel serverless proxies used for production iTunes requests.
 - `supabase` contains the base schema and additive SQL migrations for profiles, stats, leaderboards, Arena rooms, RLS, room lifecycle, multiplayer progression, and Party Mode.
 - `localStorage` remains the signed-out Solo fallback; authenticated progression uses Supabase as the cross-device source of truth.
@@ -90,6 +91,14 @@ VITE_YOUTUBE_API_KEY=your-api-key
 ```
 
 Never place a Supabase service-role key or another private secret in a `VITE_` variable.
+
+The unfinished Artist and Playlist discovery preview is disabled by default. To review its mock-only interface locally, add:
+
+```env
+VITE_ENABLE_CATALOG_DISCOVERY=true
+```
+
+This flag exposes discovery cards only. It does not call Apple Music, fetch tracks, play audio, create quiz questions, or enable a production game mode.
 
 ### Supabase Auth URLs
 
@@ -163,6 +172,8 @@ Targeted lifecycle checks cover stale round identity and SQL phase guards. Full 
 ```bash
 npm.cmd run test:arena-rounds
 npm.cmd run test:arena-sql
+npm.cmd run test:catalog
+npm.cmd run test:music-search
 npm.cmd run build
 npm.cmd run lint
 ```
@@ -207,6 +218,9 @@ StanZer keeps its React/Vite/CSS stack and does not copy a third-party interface
 - Multiplayer depends on network access to Supabase. Server timestamps reduce drift, but UI updates are not frame-perfect on high-latency connections.
 - Guest multiplayer requires Supabase Anonymous Sign-Ins. CAPTCHA/Turnstile and a trusted scheduled stale-guest cleanup should be configured before broad public promotion.
 - Championship tournament gameplay is not implemented.
+- Artist and Playlist quiz gameplay is not implemented. The optional discovery preview uses fictional/mock catalog metadata and artwork treatments, remains disabled by default, and has no playback path.
+- The provider-neutral catalog interface is ready for a future authenticated adapter, but catalog metadata, artwork, preview, streaming, caching, and multiplayer synchronization rights must be confirmed in writing with the selected provider before production use. Provider credentials must stay on a trusted server rather than in `VITE_` variables.
+- Existing iTunes preview-based album gameplay has licensing exposure that still requires qualified legal review and, where required, direct permission or a commercial music license. A publicly reachable preview URL alone should not be treated as authorization for interactive or synchronized quiz use.
 - The repository does not yet include automated multi-client browser integration tests. The current ESLint configuration also reports pre-existing effect/dependency findings in timing-sensitive Solo and multiplayer code; those should be resolved alongside broader regression tests rather than by changing hook dependencies blindly.
 - Email confirmation and password recovery depend on correct Supabase redirect URL and SMTP configuration.
 - Route-level chunks reduce the initial bundle below Vite's advisory threshold, but the shared base bundle remains a future optimization target.
