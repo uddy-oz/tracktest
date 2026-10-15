@@ -415,6 +415,7 @@ function ArenaPage({
   const [partyClockOffsetMs, setPartyClockOffsetMs] = useState(0);
   const [isArenaAudioUnlocked, setIsArenaAudioUnlocked] = useState(false);
   const [lobbyAudioMessage, setLobbyAudioMessage] = useState("");
+  const [isAudioDebugExpanded, setIsAudioDebugExpanded] = useState(false);
   const [audioDebugSnapshot, setAudioDebugSnapshot] =
     useState<ArenaAudioDiagnosticSnapshot | null>(null);
   const [competitiveReadinessDebug, setCompetitiveReadinessDebug] =
@@ -3901,6 +3902,10 @@ function ArenaPage({
       return;
     }
 
+    if (!window.confirm("Forfeit this game? Your current match will end.")) {
+      return;
+    }
+
     leavingRoomIdRef.current = activeRoom.id;
     setIsLeavingRoom(true);
     const result = await forfeitDuelRoom(activeRoom.id);
@@ -6324,57 +6329,72 @@ function ArenaPage({
         aria-hidden="true"
       />
       {isArenaDebugEnabled() && activeRoom && (
-        <aside className="arena-audio-debug" aria-label="Arena audio diagnostics">
-          <strong>Audio debug</strong>
-          <span>Unlocked: {isArenaAudioUnlocked ? "yes" : "no"}</span>
-          <span>Round: {gameQuestionIndex + 1}</span>
-          <span>Server: {isPartyMode ? activeRoom.partyQuestionPhase : activeRoom.competitiveRoundPhase}</span>
-          <span>Event: {audioDebugSnapshot?.event || "waiting"}</span>
-          <span>Source: {audioDebugSnapshot?.sourceReceived ? "received" : "missing"}</span>
-          <span>Metadata: {(audioDebugSnapshot?.readyState || 0) >= 1 ? "yes" : "no"}</span>
-          <span>Can play: {(audioDebugSnapshot?.readyState || 0) >= 3 ? "yes" : "no"}</span>
-          <span>Network: {audioDebugSnapshot?.networkState ?? "-"}</span>
-          <span>Host: {audioDebugSnapshot?.previewHost || "-"}</span>
-          <span>Error: {audioDebugSnapshot?.errorMessage || "none"}</span>
-          {isCompetitiveMode && (
-            <div className="arena-readiness-debug">
-              <strong>
-                Audio readiness {currentCompetitiveReadinessDebug?.readyCount ?? activeRoom.competitiveReadyCount}/
-                {currentCompetitiveReadinessDebug?.requiredCount ?? activeRoom.competitiveRequiredReadyCount}
-              </strong>
-              {currentCompetitiveReadinessDebug?.players.map((player) => {
-                  const isCurrentPlayer = player.userId === session?.user.id;
-                  const localMediaReady = isCurrentPlayer
-                    ? arenaAudioController.isRoundMediaReady(
-                        activeQuestionRunKey,
-                        currentDuelQuestion?.correctTrack.previewUrl || ""
-                      )
-                    : player.serverAckReady;
+        <aside
+          className={`arena-audio-debug ${isAudioDebugExpanded ? "is-expanded" : ""}`}
+          aria-label="Arena audio diagnostics"
+        >
+          <button
+            type="button"
+            className="arena-audio-debug-toggle"
+            aria-expanded={isAudioDebugExpanded}
+            onClick={() => setIsAudioDebugExpanded((isExpanded) => !isExpanded)}
+          >
+            <span>Audio debug</span>
+            <span aria-hidden="true">{isAudioDebugExpanded ? "Close" : "Open"}</span>
+          </button>
+          {isAudioDebugExpanded && (
+            <div className="arena-audio-debug-details">
+              <span>Unlocked: {isArenaAudioUnlocked ? "yes" : "no"}</span>
+              <span>Round: {gameQuestionIndex + 1}</span>
+              <span>Server: {isPartyMode ? activeRoom.partyQuestionPhase : activeRoom.competitiveRoundPhase}</span>
+              <span>Event: {audioDebugSnapshot?.event || "waiting"}</span>
+              <span>Source: {audioDebugSnapshot?.sourceReceived ? "received" : "missing"}</span>
+              <span>Metadata: {(audioDebugSnapshot?.readyState || 0) >= 1 ? "yes" : "no"}</span>
+              <span>Can play: {(audioDebugSnapshot?.readyState || 0) >= 3 ? "yes" : "no"}</span>
+              <span>Network: {audioDebugSnapshot?.networkState ?? "-"}</span>
+              <span>Host: {audioDebugSnapshot?.previewHost || "-"}</span>
+              <span>Error: {audioDebugSnapshot?.errorMessage || "none"}</span>
+              {isCompetitiveMode && (
+                <div className="arena-readiness-debug">
+                  <strong>
+                    Audio readiness {currentCompetitiveReadinessDebug?.readyCount ?? activeRoom.competitiveReadyCount}/
+                    {currentCompetitiveReadinessDebug?.requiredCount ?? activeRoom.competitiveRequiredReadyCount}
+                  </strong>
+                  {currentCompetitiveReadinessDebug?.players.map((player) => {
+                    const isCurrentPlayer = player.userId === session?.user.id;
+                    const localMediaReady = isCurrentPlayer
+                      ? arenaAudioController.isRoundMediaReady(
+                          activeQuestionRunKey,
+                          currentDuelQuestion?.correctTrack.previewUrl || ""
+                        )
+                      : player.serverAckReady;
 
-                  return (
-                    <div
-                      key={player.membershipId}
-                      className="arena-readiness-player"
-                    >
-                      <b>{player.displayName}</b>
-                      <small>
-                        {player.userId.slice(0, 8)} · {player.membershipId.slice(0, 8)}
-                      </small>
-                      <span>
-                        {localMediaReady
-                          ? "MEDIA READY"
-                          : isCurrentPlayer
-                            ? "MEDIA PENDING"
-                            : "MEDIA STATUS UNKNOWN"}
-                      </span>
-                      <span>
-                        {player.serverAckReady
-                          ? "SERVER ACK READY"
-                          : "WAITING FOR SERVER ACK"}
-                      </span>
-                    </div>
-                  );
-                })}
+                    return (
+                      <div
+                        key={player.membershipId}
+                        className="arena-readiness-player"
+                      >
+                        <b>{player.displayName}</b>
+                        <small>
+                          {player.userId.slice(0, 8)} · {player.membershipId.slice(0, 8)}
+                        </small>
+                        <span>
+                          {localMediaReady
+                            ? "MEDIA READY"
+                            : isCurrentPlayer
+                              ? "MEDIA PENDING"
+                              : "MEDIA STATUS UNKNOWN"}
+                        </span>
+                        <span>
+                          {player.serverAckReady
+                            ? "SERVER ACK READY"
+                            : "WAITING FOR SERVER ACK"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </aside>
