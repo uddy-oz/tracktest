@@ -160,6 +160,11 @@ function HomePage({
     <main className="home-dashboard">
       <section className="home-hero-panel">
         <div>
+          <div className="home-hero-pulse" aria-hidden="true">
+            {Array.from({ length: 18 }, (_, index) => (
+              <span key={index} />
+            ))}
+          </div>
           <p className="eyebrow">StanZer</p>
           <h1>Prove you're a superfan.</h1>
           <p>
@@ -203,7 +208,10 @@ function HomePage({
             </span>
             <span>
               Daily Streak
-              <strong>{stats.overall.currentDailyStreak} days</strong>
+              <strong>
+                {stats.overall.currentDailyStreak}{" "}
+                {stats.overall.currentDailyStreak === 1 ? "day" : "days"}
+              </strong>
             </span>
             <span>
               Best Score

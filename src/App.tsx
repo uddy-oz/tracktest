@@ -46,8 +46,16 @@ const ProfilePage = lazy(() => import("./Components/ProfilePage"));
 const ArenaPage = lazy(() => import("./Components/ArenaPage"));
 
 type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
+type AppTheme = "dark" | "light";
 
 const AUTH_RETURN_STORAGE_KEY = "stanzer.auth.returnPath";
+const THEME_STORAGE_KEY = "stanzer.theme";
+
+function getInitialTheme(): AppTheme {
+  return window.localStorage.getItem(THEME_STORAGE_KEY) === "light"
+    ? "light"
+    : "dark";
+}
 
 function hasCompleteUsername(profile: UserProfile | null) {
   return Boolean(profile?.username && validateUsername(profile.username).ok);
@@ -161,6 +169,7 @@ function App() {
   const [arenaNavigationNotice, setArenaNavigationNotice] = useState("");
   const [progressionRevision, setProgressionRevision] = useState(0);
   const [isGuestNamePromptOpen, setIsGuestNamePromptOpen] = useState(false);
+  const [theme, setTheme] = useState<AppTheme>(getInitialTheme);
   const arenaRecoveryGenerationRef = useRef(0);
   const guestSessionStartInFlightRef = useRef(false);
 
@@ -281,6 +290,17 @@ function App() {
     },
     [session?.user.id]
   );
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+
+    const themeColor = document.querySelector<HTMLMetaElement>(
+      'meta[name="theme-color"]'
+    );
+    themeColor?.setAttribute("content", theme === "dark" ? "#070b14" : "#f3f6fb");
+  }, [theme]);
 
   useEffect(() => {
     if (!supabase) {
@@ -831,6 +851,12 @@ function App() {
         identityBadges={identityBadges}
         isGuest={isGuestSession}
         activeView={activeView}
+        theme={theme}
+        onToggleTheme={() =>
+          setTheme((currentTheme) =>
+            currentTheme === "dark" ? "light" : "dark"
+          )
+        }
       />
 
       <Suspense fallback={<RouteLoadingState />}>
