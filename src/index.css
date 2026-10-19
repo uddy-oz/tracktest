@@ -10377,3 +10377,114 @@ select:focus,
     forced-color-adjust: auto;
   }
 }
+
+/* Active gameplay countdown sizing */
+
+.quiz-live .game-state,
+.arena-game-modal .game-state {
+  box-sizing: border-box;
+  min-height: clamp(164px, 18.5vh, 184px);
+  height: clamp(164px, 18.5vh, 184px);
+  max-height: none;
+  padding-block: 9px;
+  flex: 0 0 clamp(164px, 18.5vh, 184px);
+  overflow: hidden;
+}
+
+.quiz-live .timer-ring,
+.arena-game-modal .timer-ring {
+  width: clamp(120px, 14vh, 140px);
+  height: clamp(120px, 14vh, 140px);
+  margin: 2px auto 5px;
+  flex: 0 0 auto;
+}
+
+.quiz-live .timer-ring span,
+.arena-game-modal .timer-ring span {
+  font-size: clamp(44px, 6vh, 58px);
+  font-weight: 800;
+}
+
+.quiz-live .game-state-label,
+.arena-game-modal .game-state-label {
+  margin-bottom: 3px;
+  flex: 0 0 auto;
+  line-height: 1.15;
+}
+
+.quiz-live .game-state-detail,
+.arena-game-modal .game-state-detail {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+  line-height: 1.25;
+}
+
+.quiz-live .start-countdown,
+.arena-game-modal .start-countdown {
+  font-size: clamp(68px, 10vh, 96px);
+  line-height: 0.95;
+}
+
+.arena-game-modal .duel-room-screen.duel-game-screen {
+  grid-template-rows: auto auto minmax(164px, 184px) auto minmax(144px, auto);
+}
+
+@media (max-width: 768px) {
+  .quiz-live .game-state,
+  .arena-game-modal .game-state {
+    min-height: clamp(152px, 19vh, 170px);
+    height: clamp(152px, 19vh, 170px);
+    flex-basis: clamp(152px, 19vh, 170px);
+    padding-block: 8px;
+  }
+
+  .quiz-live .timer-ring,
+  .arena-game-modal .timer-ring {
+    width: clamp(104px, 14vh, 122px);
+    height: clamp(104px, 14vh, 122px);
+  }
+
+  .quiz-live .timer-ring span,
+  .arena-game-modal .timer-ring span {
+    font-size: clamp(40px, 5.8vh, 50px);
+  }
+
+  .quiz-live .start-countdown,
+  .arena-game-modal .start-countdown {
+    font-size: clamp(58px, 9vh, 76px);
+  }
+
+  .arena-game-modal .duel-room-screen.duel-game-screen {
+    grid-template-rows: auto auto auto minmax(152px, 170px) auto minmax(132px, auto);
+  }
+}
+
+@media (max-height: 680px) {
+  .quiz-live .game-state,
+  .arena-game-modal .game-state {
+    min-height: 148px;
+    height: 148px;
+    flex-basis: 148px;
+    padding-block: 6px;
+  }
+
+  .quiz-live .timer-ring,
+  .arena-game-modal .timer-ring {
+    width: 100px;
+    height: 100px;
+  }
+
+  .quiz-live .timer-ring span,
+  .arena-game-modal .timer-ring span {
+    font-size: 40px;
+  }
+
+  .quiz-live .start-countdown,
+  .arena-game-modal .start-countdown {
+    font-size: 58px;
+  }
+
+  .arena-game-modal .duel-room-screen.duel-game-screen {
+    grid-template-rows: auto auto auto minmax(148px, 148px) auto minmax(116px, auto);
+  }
+}
