@@ -6477,6 +6477,31 @@ function ArenaPage({
         </section>
       )}
 
+      <form className="arena-code-entry" onSubmit={handleJoinWithCode}>
+        <div>
+          <p className="eyebrow">Have an invite?</p>
+          <h2>Join with Code</h2>
+        </div>
+        <input
+          type="text"
+          placeholder="Room code"
+          value={roomCodeInput}
+          aria-label="Enter private room code"
+          onChange={(event) =>
+            setRoomCodeInput(normalizeArenaInviteCode(event.target.value))
+          }
+        />
+        <button type="submit" disabled={isInviteLoading}>
+          {isInviteLoading ? "Checking..." : "Join Room"}
+        </button>
+      </form>
+
+      <div className="arena-create-heading">
+        <p className="eyebrow">Create a room</p>
+        <h2>Choose a game mode</h2>
+        <p>Pick a format, choose an album, and invite your players.</p>
+      </div>
+
       <div className="arena-mode-grid">
         {arenaModes.map((mode) => {
           const isDuel = mode.title === "Duel";
@@ -6531,25 +6556,6 @@ function ArenaPage({
           );
         })}
       </div>
-
-      <form className="arena-code-entry" onSubmit={handleJoinWithCode}>
-        <div>
-          <p className="eyebrow">Private Room</p>
-          <h2>Join with Code</h2>
-        </div>
-        <input
-          type="text"
-          placeholder="Enter private room code"
-          value={roomCodeInput}
-          aria-label="Enter private room code"
-          onChange={(event) =>
-            setRoomCodeInput(normalizeArenaInviteCode(event.target.value))
-          }
-        />
-        <button type="submit" disabled={isInviteLoading}>
-          {isInviteLoading ? "Checking..." : "Join with Code"}
-        </button>
-      </form>
 
       {visibleMessage && !activeRoom && !activeArenaMode && (
         <p className="arena-message" role="status">

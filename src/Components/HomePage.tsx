@@ -172,11 +172,21 @@ function HomePage({
             albums, build your solo record, and challenge your friends.
           </p>
           <div className="hero-buttons">
-            <button type="button" onClick={onSinglePlayer}>
-              Start Single Player
+            <button
+              type="button"
+              className="home-decision-button home-decision-solo"
+              onClick={onSinglePlayer}
+            >
+              <strong>Start Single Player</strong>
+              <small>Album quizzes, stats, and badges</small>
             </button>
-            <button type="button" className="secondary-button" onClick={onMultiplayer}>
-              Enter Multiplayer
+            <button
+              type="button"
+              className="secondary-button home-decision-button home-decision-multiplayer"
+              onClick={onMultiplayer}
+            >
+              <strong>Enter Multiplayer</strong>
+              <small>Duels, groups, and Party Mode</small>
             </button>
           </div>
         </div>
@@ -234,26 +244,6 @@ function HomePage({
           {arenaMessage && <p className="arena-message">{arenaMessage}</p>}
         </section>
       )}
-
-      <section className="home-mode-grid">
-        <article className="home-mode-card home-mode-solo">
-          <span>Solo Career</span>
-          <h2>Single Player</h2>
-          <p>Play album quizzes, build stats, and unlock badges.</p>
-          <button type="button" onClick={onSinglePlayer}>
-            Start Single Player
-          </button>
-        </article>
-
-        <article className="home-mode-card home-mode-arena">
-          <span>Head to Head</span>
-          <h2>Multiplayer / Arena</h2>
-          <p>Challenge your friends in live Duels, Group Lobbies, and Party Mode.</p>
-          <button type="button" onClick={onMultiplayer}>
-            Enter Multiplayer
-          </button>
-        </article>
-      </section>
 
       <section className="home-dashboard-grid">
         <article className="home-panel">

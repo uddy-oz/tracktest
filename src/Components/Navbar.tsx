@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { getProfileDisplayLabel, type UserProfile } from "../lib/profiles";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
@@ -41,6 +41,7 @@ function Navbar({
   activeView,
 }: NavbarProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const accountLabel = isGuest
     ? profile?.displayName || "Guest Player"
     : profile?.username
@@ -55,6 +56,19 @@ function Navbar({
     action();
   }
 
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setIsMenuOpen(false);
+      menuButtonRef.current?.focus();
+    }
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [isMenuOpen]);
+
   return (
     <nav className="navbar" aria-label="Primary navigation">
       <div className="nav-shell">
@@ -68,6 +82,7 @@ function Navbar({
         </button>
 
         <button
+          ref={menuButtonRef}
           type="button"
           className={`nav-menu-button ${isMenuOpen ? "is-open" : ""}`}
           aria-expanded={isMenuOpen}
@@ -87,6 +102,7 @@ function Navbar({
         <button
           type="button"
           className={`nav-link-button ${activeView === "home" ? "active" : ""}`}
+          aria-current={activeView === "home" ? "page" : undefined}
           onClick={() => navigate(onShowHome)}
         >
           Home
@@ -94,6 +110,7 @@ function Navbar({
         <button
           type="button"
           className={`nav-link-button ${activeView === "play" ? "active" : ""}`}
+          aria-current={activeView === "play" ? "page" : undefined}
           onClick={() => navigate(onShowPlay)}
         >
           Single Player
@@ -103,6 +120,7 @@ function Navbar({
           className={`nav-link-button ${
             activeView === "leaderboard" ? "active" : ""
           }`}
+          aria-current={activeView === "leaderboard" ? "page" : undefined}
           onClick={() => navigate(onShowLeaderboard)}
         >
           Leaderboard
@@ -112,6 +130,7 @@ function Navbar({
           className={`nav-link-button ${
             activeView === "multiplayer" ? "active" : ""
           }`}
+          aria-current={activeView === "multiplayer" ? "page" : undefined}
           onClick={() => navigate(onShowMultiplayer)}
         >
           Multiplayer
@@ -124,6 +143,7 @@ function Navbar({
               className={`nav-link-button account-button ${
                 activeView === "profile" ? "active" : ""
               }`}
+              aria-current={activeView === "profile" ? "page" : undefined}
               onClick={() =>
                 navigate(
                   isGuest
@@ -145,6 +165,7 @@ function Navbar({
               className={`nav-link-button ${
                 activeView === "auth" ? "active" : ""
               }`}
+              aria-current={activeView === "auth" ? "page" : undefined}
               onClick={() => navigate(isGuest ? onShowAuth : onShowSettings)}
             >
               {isGuest ? "Create account" : "Settings"}
@@ -161,6 +182,7 @@ function Navbar({
           <button
             type="button"
             className="nav-login-button"
+            aria-current={activeView === "auth" ? "page" : undefined}
             onClick={() => navigate(onShowAuth)}
           >
             Login

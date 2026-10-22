@@ -20,6 +20,7 @@
     "test:music-search": "node --experimental-strip-types --test tools/music-search.test.ts",
     "test:theme": "node --experimental-strip-types --test tools/theme-contrast.test.ts",
     "test:accessibility": "node --experimental-strip-types --test tools/accessibility-regression.test.ts",
+    "test:mobile-ux": "node --experimental-strip-types --test tools/mobile-ux-regression.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

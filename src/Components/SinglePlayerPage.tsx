@@ -92,10 +92,10 @@ function SinglePlayerPage({
       <section className="single-player-hero">
         <div>
           <p className="eyebrow">StanZer Solo</p>
-          <h1>Pick your battlefield</h1>
+          <h1>Find your next album</h1>
           <p>
-            Search an album, start a synced countdown, and build your solo
-            record one five-second clip at a time.
+            Search albums or explore an artist, then start your next
+            five-second challenge.
           </p>
         </div>
 
