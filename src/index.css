@@ -7097,6 +7097,510 @@ button:active:not(:disabled) {
   }
 }
 
+/* Design audit phase 3: competitive experience. */
+
+.leaderboard-page,
+.profile-page {
+  --competitive-gold: #f4c95d;
+  --competitive-silver: #aeb9ca;
+  --competitive-bronze: #c8834d;
+  box-sizing: border-box;
+  overflow-x: clip;
+}
+
+.competitive-header {
+  width: min(100%, 1180px);
+  max-width: 1180px;
+  margin-bottom: 18px;
+  padding: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 22px;
+  align-items: end;
+  border: 1px solid var(--ui-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--brand-primary) 15%, transparent), transparent 38%),
+    var(--ui-surface);
+  box-shadow: var(--shadow-soft);
+  text-align: left;
+  min-width: 0;
+}
+
+.competitive-header > *,
+.competitive-scope-tabs,
+.global-ranking-tabs,
+.competitive-scope-tabs button,
+.global-ranking-tabs button {
+  min-width: 0;
+}
+
+.competitive-header-copy h1 {
+  margin-bottom: 8px;
+  font-size: clamp(38px, 5vw, 58px);
+}
+
+.competitive-header-copy > p:last-child {
+  max-width: 620px;
+  margin: 0;
+  color: var(--ui-text-secondary);
+}
+
+.competitive-header .cloud-sync-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.competitive-scope-tabs,
+.global-ranking-tabs {
+  width: fit-content;
+  min-width: 0;
+  margin: 0;
+  padding: 4px;
+  border-radius: 12px;
+}
+
+.competitive-scope-tabs button,
+.global-ranking-tabs button {
+  min-height: 44px;
+  padding: 9px 16px;
+}
+
+.global-ranking-tabs {
+  width: min(100%, 1180px);
+  margin: 0 auto 12px;
+  justify-content: flex-start;
+}
+
+.multiplayer-rankings {
+  width: min(100%, 1180px);
+  margin-inline: auto;
+  gap: 12px;
+}
+
+.multiplayer-category-control {
+  width: min(100%, 460px);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.multiplayer-category-control label {
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.multiplayer-category-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 36px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 42%, var(--ui-border));
+  border-radius: 9px;
+  color: var(--ui-text);
+  background-color: var(--ui-surface-raised);
+  font: inherit;
+  font-weight: 750;
+}
+
+.multiplayer-category-select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand-primary) 38%, transparent);
+  outline-offset: 2px;
+}
+
+.multiplayer-leaderboard-panel {
+  position: relative;
+  overflow: hidden;
+  border-top: 0;
+}
+
+.multiplayer-leaderboard-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--mode-duel), var(--brand-primary), var(--mode-group));
+}
+
+.global-leaderboard-sections .leaderboard-list-row,
+.multiplayer-leaderboard-panel .leaderboard-list-row,
+.leaderboard-modal .leaderboard-list-row {
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.global-leaderboard-sections .leaderboard-list-row:hover,
+.multiplayer-leaderboard-panel .leaderboard-list-row:hover,
+.leaderboard-modal .leaderboard-list-row:hover {
+  transform: translateX(3px);
+  border-color: color-mix(in srgb, var(--brand-primary) 42%, var(--ui-border));
+}
+
+.global-leaderboard-sections .rank-first,
+.multiplayer-leaderboard-panel .rank-first,
+.leaderboard-modal .rank-first {
+  border-color: color-mix(in srgb, var(--competitive-gold) 72%, var(--ui-border));
+  background:
+    radial-gradient(circle at 6% 50%, color-mix(in srgb, var(--competitive-gold) 21%, transparent), transparent 24%),
+    linear-gradient(105deg, color-mix(in srgb, var(--competitive-gold) 13%, var(--ui-surface)), var(--ui-surface-raised));
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--competitive-gold) 12%, transparent);
+}
+
+.global-leaderboard-sections .rank-second,
+.multiplayer-leaderboard-panel .rank-second,
+.leaderboard-modal .rank-second {
+  border-color: color-mix(in srgb, var(--competitive-silver) 60%, var(--ui-border));
+  background: linear-gradient(105deg, color-mix(in srgb, var(--competitive-silver) 12%, var(--ui-surface)), var(--ui-surface-raised));
+}
+
+.global-leaderboard-sections .rank-third,
+.multiplayer-leaderboard-panel .rank-third,
+.leaderboard-modal .rank-third {
+  border-color: color-mix(in srgb, var(--competitive-bronze) 62%, var(--ui-border));
+  background: linear-gradient(105deg, color-mix(in srgb, var(--competitive-bronze) 12%, var(--ui-surface)), var(--ui-surface-raised));
+}
+
+.global-leaderboard-sections :is(.rank-first, .rank-second, .rank-third) .rank-number,
+.multiplayer-leaderboard-panel :is(.rank-first, .rank-second, .rank-third) .rank-number,
+.leaderboard-modal :is(.rank-first, .rank-second, .rank-third) .rank-number {
+  width: 36px;
+  height: 36px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.45), 0 6px 16px rgba(0, 0, 0, 0.18);
+  font-size: 15px;
+}
+
+.multiplayer-leaderboard-panel .rank-first,
+.leaderboard-modal .rank-first {
+  min-height: 78px;
+}
+
+.leaderboard-current-user {
+  isolation: isolate;
+  border-color: var(--mode-group) !important;
+  box-shadow:
+    inset 4px 0 var(--mode-group),
+    0 0 0 1px color-mix(in srgb, var(--mode-group) 34%, transparent),
+    0 12px 30px color-mix(in srgb, var(--mode-group) 11%, transparent) !important;
+}
+
+.leaderboard-current-user::after {
+  top: 7px;
+  right: 8px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--mode-group) 42%, transparent);
+  color: var(--ui-group-text);
+  background: color-mix(in srgb, var(--mode-group) 14%, var(--ui-surface));
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.profile-overview-section {
+  width: min(100%, 1100px);
+}
+
+.profile-overview-section .profile-stats-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-overview-section .stat-card {
+  min-height: 106px;
+  padding: 16px;
+}
+
+.profile-overview-section .stat-card strong {
+  font-size: clamp(22px, 2.5vw, 30px);
+}
+
+.multiplayer-profile-section {
+  padding: 20px;
+  border: 1px solid var(--ui-border);
+  border-top: 3px solid var(--mode-duel);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--mode-duel) 7%, transparent), transparent 50%),
+    var(--ui-surface);
+}
+
+.profile-showcase {
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-showcase::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--competitive-gold), var(--brand-primary), var(--mode-group));
+}
+
+.profile-showcase-grid .badge-card {
+  min-height: 310px;
+}
+
+.profile-secondary-records {
+  width: min(100%, 1100px);
+  margin: 0 auto;
+}
+
+.profile-secondary-records > summary {
+  min-height: 64px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  list-style: none;
+  text-align: left;
+}
+
+.profile-secondary-records > summary::-webkit-details-marker {
+  display: none;
+}
+
+.profile-secondary-records > summary > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.profile-secondary-records > summary strong {
+  font-size: 18px;
+}
+
+.profile-secondary-records > summary small {
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+}
+
+.profile-disclosure-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--brand-primary);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.profile-disclosure-label::after {
+  content: "+";
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 42%, var(--ui-border));
+  border-radius: 50%;
+}
+
+.profile-secondary-records[open] .profile-disclosure-label::after {
+  content: "−";
+}
+
+.profile-secondary-records[open] > summary {
+  border-color: color-mix(in srgb, var(--brand-primary) 42%, var(--ui-border));
+}
+
+.profile-sections,
+.profile-recent-results {
+  width: 100%;
+}
+
+.badge-state {
+  width: fit-content;
+  margin: -5px auto 13px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--badge-accent) 48%, var(--ui-border));
+  border-radius: 999px;
+  color: var(--badge-accent);
+  background: var(--badge-accent-soft);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.badge-locked .badge-state {
+  color: var(--ui-text-secondary);
+  background: var(--ui-surface-muted);
+}
+
+.badge-card-clickable:hover .badge-icon,
+.badge-card-clickable:focus-visible .badge-icon {
+  transform: scale(1.04);
+}
+
+.badge-icon {
+  transition: transform 180ms ease;
+}
+
+@media (max-width: 900px) {
+  .profile-overview-section .profile-stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .competitive-header {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .competitive-scope-tabs,
+  .global-ranking-tabs {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .competitive-scope-tabs button,
+  .global-ranking-tabs button {
+    width: 100%;
+  }
+
+  .multiplayer-category-control {
+    width: 100%;
+  }
+
+  .profile-showcase-grid {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 3px 3px 14px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .profile-showcase-grid .badge-card {
+    flex: 0 0 min(82vw, 320px);
+    min-height: 290px;
+    scroll-snap-align: start;
+  }
+
+  .profile-badge-collection .profile-showcase-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .profile-badge-collection .badge-card {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .leaderboard-page,
+  .profile-page {
+    padding-inline: 14px;
+  }
+
+  .competitive-header-copy h1 {
+    font-size: 36px;
+  }
+
+  .competitive-header .cloud-sync-message {
+    display: none;
+  }
+
+  .competitive-scope-tabs button,
+  .global-ranking-tabs button {
+    padding-inline: 8px;
+    white-space: normal;
+  }
+
+  .multiplayer-category-control {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .multiplayer-leaderboard-panel,
+  .global-leaderboard-sections .leaderboard-panel {
+    padding: 14px;
+  }
+
+  .multiplayer-leaderboard-panel .leaderboard-list-row,
+  .leaderboard-modal .leaderboard-list-row,
+  .global-leaderboard-sections .leaderboard-list-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 8px 10px;
+  }
+
+  .multiplayer-leaderboard-panel .competitive-rank-value,
+  .leaderboard-modal .competitive-rank-value,
+  .global-leaderboard-sections .leaderboard-list-row > span:not(.rank-number) {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .profile-overview-section .profile-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .profile-overview-section .stat-card {
+    min-height: 92px;
+    padding: 13px;
+  }
+
+  .profile-overview-section .stat-card span {
+    font-size: 12px;
+  }
+
+  .profile-overview-section .stat-card strong {
+    font-size: 22px;
+  }
+
+  .profile-secondary-records > summary {
+    align-items: flex-start;
+  }
+
+  .profile-disclosure-label {
+    font-size: 0;
+  }
+
+  .profile-disclosure-label::after {
+    font-size: 14px;
+  }
+
+  .profile-badge-collection .profile-showcase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-leaderboard-sections .leaderboard-list-row,
+  .multiplayer-leaderboard-panel .leaderboard-list-row,
+  .leaderboard-modal .leaderboard-list-row,
+  .badge-card-clickable,
+  .badge-icon {
+    transition: none;
+  }
+
+  .global-leaderboard-sections .leaderboard-list-row:hover,
+  .multiplayer-leaderboard-panel .leaderboard-list-row:hover,
+  .leaderboard-modal .leaderboard-list-row:hover,
+  .badge-card-clickable:hover .badge-icon,
+  .badge-card-clickable:focus-visible .badge-icon {
+    transform: none;
+  }
+}
+
 @media (max-width: 768px) {
   .navbar {
     position: sticky;

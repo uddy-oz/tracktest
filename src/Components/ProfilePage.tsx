@@ -690,6 +690,15 @@ function ProfilePage({
         </section>
       )}
 
+      <details className="profile-secondary-records" open={!isPublicProfile}>
+        <summary>
+          <span>
+            <strong>Career records</strong>
+            <small>Artist mastery, album records, and recent runs</small>
+          </span>
+          <span className="profile-disclosure-label">View details</span>
+        </summary>
+
       <div className="leaderboard-sections profile-sections">
         <div className="leaderboard-panel">
           <div className="profile-panel-heading">
@@ -792,6 +801,7 @@ function ProfilePage({
           </p>
         )}
       </div>
+      </details>
 
       {selectedBadge && (
         <div

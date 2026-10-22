@@ -30,7 +30,6 @@ import {
 } from "../lib/multiplayerLeaderboard";
 
 type LeaderboardProps = {
-  onPlay: () => void;
   session: Session | null;
   onOpenProfile: (username: string) => void;
   progressionRevision?: number;
@@ -129,7 +128,6 @@ function LimitNote({
 }
 
 function Leaderboard({
-  onPlay,
   session,
   onOpenProfile,
   progressionRevision = 0,
@@ -217,13 +215,38 @@ function Leaderboard({
 
   return (
     <section className="leaderboard-page">
-      <div className="leaderboard-header">
-        <p className="eyebrow">StanZer</p>
-        <h1>{activeTab === "global" ? "Global Arena" : "Your Local Stats"}</h1>
-        <p>
-          Public Arena rankings use cloud quiz results and profile names. Emails
-          are never shown here.
-        </p>
+      <div className="leaderboard-header competitive-header">
+        <div className="competitive-header-copy">
+          <p className="eyebrow">StanZer Competitive</p>
+          <h1>{activeTab === "global" ? "Global Arena" : "Your Stats"}</h1>
+          <p>
+            {activeTab === "global"
+              ? "See who is setting the pace across StanZer."
+              : "Your career record, achievements, and recent form."}
+          </p>
+        </div>
+
+        <div className="leaderboard-tabs competitive-scope-tabs" role="tablist" aria-label="Leaderboard scope">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "global"}
+            className={activeTab === "global" ? "active" : ""}
+            onClick={() => setActiveTab("global")}
+          >
+            Global Arena
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "myStats"}
+            className={activeTab === "myStats" ? "active" : ""}
+            onClick={() => setActiveTab("myStats")}
+          >
+            My Stats
+          </button>
+        </div>
+
         <p className="cloud-sync-message">
           {isAnonymousUser(session?.user)
             ? "Guest session. Create an account to save stats, badges, wins, and leaderboard progress."
@@ -232,26 +255,6 @@ function Leaderboard({
             : "Log in to save your stats across devices. Local stats are stored on this browser."}
         </p>
 
-        <div className="leaderboard-tabs" role="tablist">
-          <button
-            type="button"
-            className={activeTab === "global" ? "active" : ""}
-            onClick={() => setActiveTab("global")}
-          >
-            Global Arena
-          </button>
-          <button
-            type="button"
-            className={activeTab === "myStats" ? "active" : ""}
-            onClick={() => setActiveTab("myStats")}
-          >
-            My Stats
-          </button>
-        </div>
-
-        <button type="button" onClick={onPlay}>
-          Back Home
-        </button>
       </div>
 
       {activeTab === "global" ? (
@@ -316,9 +319,11 @@ function GlobalArena({
 
   return (
     <>
-      <div className="leaderboard-tabs global-ranking-tabs" role="tablist">
+      <div className="leaderboard-tabs global-ranking-tabs" role="tablist" aria-label="Ranking mode">
         <button
           type="button"
+          role="tab"
+          aria-selected={rankingMode === "multiplayer"}
           className={rankingMode === "multiplayer" ? "active" : ""}
           onClick={() => setRankingMode("multiplayer")}
         >
@@ -326,6 +331,8 @@ function GlobalArena({
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={rankingMode === "solo"}
           className={rankingMode === "solo" ? "active" : ""}
           onClick={() => setRankingMode("solo")}
         >
@@ -654,17 +661,22 @@ function MultiplayerRankings({
 
   return (
     <section className="multiplayer-rankings">
-      <div className="multiplayer-category-tabs" role="tablist">
-        {MULTIPLAYER_LEADERBOARD_CATEGORIES.map((item) => (
-          <button
-            type="button"
-            className={category === item ? "active" : ""}
-            onClick={() => setCategory(item)}
-            key={item}
-          >
-            {MULTIPLAYER_CATEGORY_LABELS[item]}
-          </button>
-        ))}
+      <div className="multiplayer-category-control">
+        <label htmlFor="multiplayer-ranking-category">Ranking category</label>
+        <select
+          id="multiplayer-ranking-category"
+          className="multiplayer-category-select"
+          value={category}
+          onChange={(event) =>
+            setCategory(event.target.value as MultiplayerLeaderboardCategory)
+          }
+        >
+          {MULTIPLAYER_LEADERBOARD_CATEGORIES.map((item) => (
+            <option value={item} key={item}>
+              {MULTIPLAYER_CATEGORY_LABELS[item]}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="leaderboard-panel multiplayer-leaderboard-panel">

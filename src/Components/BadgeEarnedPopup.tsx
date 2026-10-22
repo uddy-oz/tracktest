@@ -52,7 +52,9 @@ function BadgeEarnedPopup({ badge, onDone }: BadgeEarnedPopupProps) {
   return (
     <aside
       className={`badge-earned-popup badge-${badge.accent} badge-tier-${badge.tier.toLowerCase()}`}
+      role="status"
       aria-live="polite"
+      aria-atomic="true"
     >
       <div className={`badge-earned-popup-icon badge-icon-${badge.icon}`}>
         <span>{iconSymbols[badge.icon]}</span>

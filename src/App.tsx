@@ -910,7 +910,6 @@ function App() {
 
       {!mustCompleteUsername && activeView === "leaderboard" && (
         <Leaderboard
-          onPlay={showHome}
           session={session}
           onOpenProfile={showPublicProfile}
           progressionRevision={progressionRevision}

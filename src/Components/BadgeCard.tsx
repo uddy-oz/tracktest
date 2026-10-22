@@ -42,6 +42,11 @@ function BadgeCard({ badge, onSelect }: BadgeCardProps) {
         badge.unlocked ? "badge-unlocked" : "badge-locked"
       } ${onSelect ? "badge-card-clickable" : ""}`}
       role={onSelect ? "button" : undefined}
+      aria-label={
+        onSelect
+          ? `${badge.title}, ${badge.tier}, ${badge.unlocked ? "unlocked" : "locked"}. Open details.`
+          : undefined
+      }
       tabIndex={onSelect ? 0 : undefined}
       onClick={() => onSelect?.(badge)}
       onKeyDown={(event) => {
@@ -63,6 +68,10 @@ function BadgeCard({ badge, onSelect }: BadgeCardProps) {
       <div className={`badge-icon badge-icon-${badge.icon}`} aria-hidden="true">
         <span>{iconSymbols[badge.icon]}</span>
       </div>
+
+      <span className="badge-state" aria-hidden="true">
+        {badge.unlocked ? "Unlocked" : "Locked"}
+      </span>
 
       <div className="badge-copy">
         <h3>{badge.title}</h3>
