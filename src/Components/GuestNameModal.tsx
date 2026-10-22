@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   GUEST_DISPLAY_NAME_MAX_LENGTH,
   validateGuestDisplayName,
 } from "../lib/authIdentity";
+import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 
 type GuestNameModalProps = {
   open: boolean;
@@ -21,22 +22,12 @@ function GuestNameModal({
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !canDismiss) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [canDismiss, onClose, open]);
+  const dialogRef = useAccessibleDialog<HTMLElement>({
+    open,
+    onClose,
+    closeOnEscape: canDismiss,
+    initialFocusRef: inputRef,
+  });
 
   if (!open) return null;
 
@@ -65,6 +56,7 @@ function GuestNameModal({
       }}
     >
       <section
+        ref={dialogRef}
         className="guest-name-modal"
         role="dialog"
         aria-modal="true"

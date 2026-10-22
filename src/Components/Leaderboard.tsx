@@ -17,6 +17,7 @@ import {
 import { clearTrackTestStats, getTrackTestStats } from "../lib/stats";
 import { createEmptyTrackTestStats } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
+import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 import {
   fetchMultiplayerLeaderboardPage,
   fetchMultiplayerLeaderboardSummary,
@@ -581,6 +582,10 @@ function MultiplayerRankings({
   const [isFullOpen, setIsFullOpen] = useState(false);
   const [isFullLoading, setIsFullLoading] = useState(false);
   const [fullOffset, setFullOffset] = useState(0);
+  const fullLeaderboardDialogRef = useAccessibleDialog<HTMLElement>({
+    open: isFullOpen,
+    onClose: () => setIsFullOpen(false),
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -713,6 +718,7 @@ function MultiplayerRankings({
           onClick={() => setIsFullOpen(false)}
         >
           <section
+            ref={fullLeaderboardDialogRef}
             className="leaderboard-modal"
             role="dialog"
             aria-modal="true"

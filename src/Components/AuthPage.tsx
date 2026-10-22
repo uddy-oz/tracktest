@@ -15,6 +15,7 @@ import { resetCurrentUserProgress } from "../lib/accountProgress";
 import { clearLocalFeaturedBadgeIds } from "../lib/featuredBadges";
 import { clearTrackTestStats } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
+import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 
 export type AuthPageMode =
   | "login"
@@ -917,6 +918,12 @@ function AccountSettings({
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [resetNotice, setResetNotice] = useState<Notice | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const resetInputRef = useRef<HTMLInputElement>(null);
+  const resetDialogRef = useAccessibleDialog<HTMLElement>({
+    open: showResetConfirmation,
+    closeOnEscape: false,
+    initialFocusRef: resetInputRef,
+  });
 
   async function handleProgressReset() {
     if (resetConfirmation !== "RESET") return;
@@ -1151,6 +1158,7 @@ function AccountSettings({
       {showResetConfirmation && (
         <div className="settings-reset-backdrop" role="presentation">
           <section
+            ref={resetDialogRef}
             className="settings-reset-dialog"
             role="dialog"
             aria-modal="true"
@@ -1161,11 +1169,11 @@ function AccountSettings({
             <p>This cannot be undone. Type <strong>RESET</strong> to confirm.</p>
             <label htmlFor="reset-progress-confirmation">Confirmation</label>
             <input
+              ref={resetInputRef}
               id="reset-progress-confirmation"
               value={resetConfirmation}
               onChange={(event) => setResetConfirmation(event.target.value)}
               autoComplete="off"
-              autoFocus
             />
             <div className="settings-reset-actions">
               <button

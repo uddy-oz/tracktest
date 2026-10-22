@@ -26,6 +26,7 @@ import {
 import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
 import GuestBadge from "./GuestBadge";
+import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 
 type ProfilePageProps = {
   session: Session | null;
@@ -146,6 +147,10 @@ function ProfilePage({
   const [isBadgeCollectionVisible, setIsBadgeCollectionVisible] = useState(false);
   const [selectedBadge, setSelectedBadge] = useState<ArenaBadge | null>(null);
   const isPublicProfile = Boolean(publicUsername);
+  const badgeDialogRef = useAccessibleDialog<HTMLElement>({
+    open: Boolean(selectedBadge),
+    onClose: () => setSelectedBadge(null),
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -795,6 +800,7 @@ function ProfilePage({
           onClick={() => setSelectedBadge(null)}
         >
           <section
+            ref={badgeDialogRef}
             className={`badge-detail-modal badge-${selectedBadge.accent}`}
             role="dialog"
             aria-modal="true"

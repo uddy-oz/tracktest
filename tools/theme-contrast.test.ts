@@ -69,6 +69,10 @@ const requiredPairs: Array<[string, string]> = [
   ["--ui-bronze-text", "--ui-bronze-surface"],
   ["--ui-platinum-text", "--ui-platinum-surface"],
   ["--ui-legendary-text", "--ui-legendary-surface"],
+  ["--ui-duel-text", "--ui-surface"],
+  ["--ui-group-text", "--ui-surface"],
+  ["--ui-party-text", "--ui-surface"],
+  ["--ui-championship-text", "--ui-surface"],
 ];
 
 for (const [themeName, tokens] of [

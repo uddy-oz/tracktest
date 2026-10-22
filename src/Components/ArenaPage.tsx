@@ -94,6 +94,7 @@ import {
   MIN_ARENA_TRACKS as MIN_QUESTIONS,
   prepareArenaLobbyStart,
 } from "../lib/arenaLobbyStart";
+import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 
 const arenaModes = [
   {
@@ -386,6 +387,42 @@ function ArenaPage({
   );
   const [isPresenceSynced, setIsPresenceSynced] = useState(false);
   const startRequestInFlightRef = useRef(false);
+  const isArenaDialogOpen = Boolean(
+    activeRoom ||
+      activeArenaMode ||
+      pendingInvite ||
+      pendingPublicRoom ||
+      inviteError ||
+      isInviteLoading
+  );
+  const canDismissArenaDialog = Boolean(
+    !activeRoom && !pendingInvite && !inviteError
+  );
+  const isConfirmationDialogOpen = Boolean(
+    albumPlaybackError || (isConfirmingEndLobby && activeRoom)
+  );
+  const arenaDialogRef = useAccessibleDialog<HTMLDivElement>({
+    open: isArenaDialogOpen && !isConfirmationDialogOpen,
+    closeOnEscape: canDismissArenaDialog,
+    focusDialog: true,
+    onClose: () => {
+      if (!canDismissArenaDialog) return;
+      setActiveArenaMode(null);
+      setSelectedArenaTheme(null);
+      setPendingPublicRoom(null);
+      setSelectedAlbum(null);
+      setAlbums([]);
+      setMessage("");
+    },
+  });
+  const albumErrorDialogRef = useAccessibleDialog<HTMLDivElement>({
+    open: albumPlaybackError,
+    closeOnEscape: false,
+  });
+  const endLobbyDialogRef = useAccessibleDialog<HTMLDivElement>({
+    open: isConfirmingEndLobby && Boolean(activeRoom),
+    closeOnEscape: false,
+  });
 
   const [duelScore, setDuelScore] = useState(0);
   const [duelCorrectAnswers, setDuelCorrectAnswers] = useState(0);
@@ -6526,11 +6563,13 @@ function ArenaPage({
         inviteError ||
         isInviteLoading) && (
         <div
+          ref={arenaDialogRef}
           className={`arena-mode-overlay ${
             activeRoom?.status === "active" ? "arena-game-overlay" : ""
           } ${shouldShowAlbumDock ? "arena-overlay-has-dock" : ""}`}
           role="dialog"
           aria-modal="true"
+          aria-label={activeRoom ? ARENA_MODE_SETTINGS[activeRoom.mode].roomTitle : "Multiplayer room setup"}
           onMouseDown={(event) => {
             if (
               event.target === event.currentTarget &&
@@ -6579,10 +6618,16 @@ function ArenaPage({
       {shouldShowAlbumDock && renderSelectedAlbumStartBar()}
 
       {albumPlaybackError && (
-        <div className="arena-confirm-overlay" role="dialog" aria-modal="true">
+        <div
+          ref={albumErrorDialogRef}
+          className="arena-confirm-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="album-unavailable-title"
+        >
           <div className="arena-confirm-dialog">
             <p className="eyebrow">Album unavailable</p>
-            <h2>This album can't be played</h2>
+            <h2 id="album-unavailable-title">This album can't be played</h2>
             <p>
               StanZer needs at least {MIN_QUESTIONS} playable previews for a
               fair shared match. Choose another album and try again.
@@ -6602,10 +6647,16 @@ function ArenaPage({
       )}
 
       {isConfirmingEndLobby && activeRoom && (
-        <div className="arena-confirm-overlay" role="dialog" aria-modal="true">
+        <div
+          ref={endLobbyDialogRef}
+          className="arena-confirm-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="end-lobby-title"
+        >
           <div className="arena-confirm-dialog">
             <p className="eyebrow">Host control</p>
-            <h2>End this lobby for everyone?</h2>
+            <h2 id="end-lobby-title">End this lobby for everyone?</h2>
             <p>
               The room will close and every player will return to Multiplayer.
               This cannot be undone.
