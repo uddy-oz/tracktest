@@ -11,7 +11,7 @@ import {
   type CatalogPlaylist,
   type CatalogRequestContext,
   type CatalogTrack,
-} from "./catalog";
+} from "./catalog.ts";
 
 const MOCK_PROVIDER = "stanzer_mock";
 
@@ -235,6 +235,10 @@ export const mockCatalogAdapter: CatalogAdapter = Object.freeze({
   async getArtistTracks(_artistId, page: CatalogPageRequest = {}, context) {
     assertNotAborted(context);
     return paginateCatalogItems(emptyTracks, page);
+  },
+  async getArtistAlbums(_artistId, page: CatalogPageRequest = {}, context) {
+    assertNotAborted(context);
+    return paginateCatalogItems([], page);
   },
   async getPlaylistTracks(_playlistId, page: CatalogPageRequest = {}, context) {
     assertNotAborted(context);

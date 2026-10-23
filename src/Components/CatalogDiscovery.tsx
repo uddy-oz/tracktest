@@ -9,10 +9,17 @@ import {
 } from "react";
 import type {
   CatalogAdapter,
+  CatalogAlbum,
   CatalogArtist,
   CatalogPage,
   CatalogPlaylist,
+  CatalogTrack,
 } from "../lib/catalog";
+import {
+  createAppleMusicCatalogAdapter,
+  withCatalogConfigurationFallback,
+} from "../lib/appleMusicCatalogAdapter";
+import { isAppleMusicCatalogEnabled } from "../lib/catalogFeatureFlags";
 import { mockCatalogAdapter } from "../lib/mockCatalogAdapter";
 
 type DiscoveryMode = "artists" | "playlists";
@@ -29,6 +36,10 @@ type LoadItemsOptions = {
 };
 
 const DISCOVERY_PAGE_SIZE = 6;
+const DETAIL_PAGE_SIZE = 12;
+const defaultAdapter = isAppleMusicCatalogEnabled
+  ? withCatalogConfigurationFallback(createAppleMusicCatalogAdapter())
+  : mockCatalogAdapter;
 
 function isPlaylist(item: DiscoveryItem): item is CatalogPlaylist {
   return item.catalogId.kind === "playlist";
@@ -44,7 +55,7 @@ function getArtworkStyle(item: DiscoveryItem) {
 
 function CatalogDiscovery({
   mode,
-  adapter = mockCatalogAdapter,
+  adapter = defaultAdapter,
 }: CatalogDiscoveryProps) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -55,14 +66,24 @@ function CatalogDiscovery({
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [selectedItem, setSelectedItem] = useState<DiscoveryItem | null>(null);
+  const [detailTracks, setDetailTracks] = useState<readonly CatalogTrack[]>([]);
+  const [detailAlbums, setDetailAlbums] = useState<readonly CatalogAlbum[]>([]);
+  const [detailTotal, setDetailTotal] = useState(0);
+  const [detailNextCursor, setDetailNextCursor] = useState<string | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const requestSequenceRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const detailSequenceRef = useRef(0);
+  const detailAbortControllerRef = useRef<AbortController | null>(null);
 
   const categories = useMemo(() => adapter.listCategories(), [adapter]);
 
   const loadItems = useCallback(
     async ({ append = false, cursor = null }: LoadItemsOptions = {}) => {
       abortControllerRef.current?.abort();
+      detailAbortControllerRef.current?.abort();
       const controller = new AbortController();
       const sequence = ++requestSequenceRef.current;
       abortControllerRef.current = controller;
@@ -72,6 +93,7 @@ function CatalogDiscovery({
       } else {
         setIsLoading(true);
         setItems([]);
+        setSelectedItem(null);
       }
       setError("");
 
@@ -132,6 +154,79 @@ function CatalogDiscovery({
     setActiveCategory(categoryId);
   }
 
+  const loadDetails = useCallback(
+    async (item: DiscoveryItem, cursor: string | null = null, append = false) => {
+      detailAbortControllerRef.current?.abort();
+      const controller = new AbortController();
+      const sequence = ++detailSequenceRef.current;
+      detailAbortControllerRef.current = controller;
+      setSelectedItem(item);
+      setIsDetailLoading(true);
+      setDetailError("");
+      if (!append) {
+        setDetailTracks([]);
+        setDetailAlbums([]);
+      }
+
+      try {
+        if (isPlaylist(item)) {
+          const tracks = await adapter.getPlaylistTracks(item.catalogId, {
+            cursor,
+            limit: DETAIL_PAGE_SIZE,
+          }, { signal: controller.signal });
+          if (sequence !== detailSequenceRef.current) return;
+          setDetailTracks((current) =>
+            append ? [...current, ...tracks.items] : tracks.items
+          );
+          setDetailTotal(tracks.total);
+          setDetailNextCursor(tracks.nextCursor);
+        } else {
+          const [tracks, albums] = await Promise.all([
+            adapter.getArtistTracks(item.catalogId, {
+              cursor,
+              limit: DETAIL_PAGE_SIZE,
+            }, { signal: controller.signal }),
+            append
+              ? Promise.resolve(null)
+              : adapter.getArtistAlbums(
+                  item.catalogId,
+                  { limit: 6 },
+                  { signal: controller.signal }
+                ),
+          ]);
+          if (sequence !== detailSequenceRef.current) return;
+          setDetailTracks((current) =>
+            append ? [...current, ...tracks.items] : tracks.items
+          );
+          if (albums) setDetailAlbums(albums.items);
+          setDetailTotal(tracks.total);
+          setDetailNextCursor(tracks.nextCursor);
+        }
+      } catch (detailLoadError) {
+        if (
+          detailLoadError instanceof DOMException &&
+          detailLoadError.name === "AbortError"
+        ) {
+          return;
+        }
+        console.error("Catalog details failed:", detailLoadError);
+        if (sequence === detailSequenceRef.current) {
+          setDetailError("Details are temporarily unavailable. Try again.");
+        }
+      } finally {
+        if (sequence === detailSequenceRef.current) setIsDetailLoading(false);
+      }
+    },
+    [adapter]
+  );
+
+  function formatDuration(durationMs: number | null) {
+    if (durationMs === null) return "";
+    const minutes = Math.floor(durationMs / 60_000);
+    const seconds = Math.floor((durationMs % 60_000) / 1_000);
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
   const title = mode === "artists" ? "Choose an artist" : "Choose a playlist";
   const description =
     mode === "artists"
@@ -148,6 +243,12 @@ function CatalogDiscovery({
         </div>
         <span className="catalog-coming-soon">Gameplay coming soon</span>
       </div>
+
+      <p className="catalog-provider-note">
+        {adapter.metadataRightsStatus === "mock"
+          ? "Preview catalog data. Connect Apple Music server credentials to test real metadata."
+          : "Apple Music metadata is used when configured; mock data remains available otherwise. Audio and gameplay are disabled."}
+      </p>
 
       <form className="catalog-discovery-search" onSubmit={handleSearch}>
         <label htmlFor={`catalog-${mode}-search`} className="sr-only">
@@ -261,8 +362,13 @@ function CatalogDiscovery({
                     </p>
                   )}
                 </div>
-                <button type="button" className="catalog-locked-action" disabled>
-                  Coming soon
+                <button
+                  type="button"
+                  className="catalog-detail-action"
+                  onClick={() => void loadDetails(item)}
+                  aria-expanded={selectedItem?.catalogId.id === item.catalogId.id}
+                >
+                  {isPlaylist(item) ? "View tracks" : "View catalog"}
                 </button>
               </article>
             ))}
@@ -277,6 +383,109 @@ function CatalogDiscovery({
             >
               {isLoadingMore ? "Loading..." : "View more"}
             </button>
+          )}
+
+          {selectedItem && (
+            <section className="catalog-detail-panel" aria-live="polite">
+              <div className="catalog-detail-heading">
+                <div>
+                  <span className="catalog-card-type">
+                    {isPlaylist(selectedItem) ? "Playlist tracks" : "Artist catalog"}
+                  </span>
+                  <h4>{selectedItem.name}</h4>
+                  <p>
+                    {isDetailLoading && detailTracks.length === 0
+                      ? "Loading catalog details..."
+                      : `${detailTracks.length} of ${detailTotal} tracks shown`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="catalog-detail-close"
+                  onClick={() => setSelectedItem(null)}
+                  aria-label="Close catalog details"
+                >
+                  Close
+                </button>
+              </div>
+
+              {detailError && (
+                <div className="catalog-state catalog-state-error" role="alert">
+                  <strong>Could not load details.</strong>
+                  <span>{detailError}</span>
+                  <button type="button" onClick={() => void loadDetails(selectedItem)}>
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {!detailError && !isDetailLoading && detailTracks.length === 0 && (
+                <div className="catalog-state">
+                  <strong>No track metadata available.</strong>
+                  <span>This source is still discovery-only.</span>
+                </div>
+              )}
+
+              {detailTracks.length > 0 && (
+                <ol className="catalog-track-list">
+                  {detailTracks.map((track, index) => (
+                    <li key={`${track.catalogId.provider}:${track.catalogId.id}`}>
+                      <span className="catalog-track-number">{index + 1}</span>
+                      <span className="catalog-track-copy">
+                        <strong>{track.name}</strong>
+                        <small>{track.artistName}</small>
+                      </span>
+                      <span className="catalog-track-duration">
+                        {formatDuration(track.durationMs)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {detailNextCursor && (
+                <button
+                  type="button"
+                  className="view-more-albums catalog-load-more"
+                  disabled={isDetailLoading}
+                  onClick={() =>
+                    void loadDetails(selectedItem, detailNextCursor, true)
+                  }
+                >
+                  {isDetailLoading ? "Loading..." : "View more tracks"}
+                </button>
+              )}
+
+              {!isPlaylist(selectedItem) && detailAlbums.length > 0 && (
+                <div className="catalog-collection-section">
+                  <h5>Collections</h5>
+                  <div className="catalog-collection-grid">
+                    {detailAlbums.map((album) => (
+                      <article key={`${album.catalogId.provider}:${album.catalogId.id}`}>
+                        {album.artwork.url ? (
+                          <img
+                            src={album.artwork.url}
+                            alt={`${album.name} artwork`}
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <span aria-hidden>{album.name.slice(0, 2).toUpperCase()}</span>
+                        )}
+                        <strong>{album.name}</strong>
+                        <small>
+                          {album.releaseDate?.slice(0, 4) || "Release date unavailable"}
+                        </small>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="catalog-rights-note">
+                Discovery only. StanZer does not download, cache, or play audio from this source.
+              </p>
+            </section>
           )}
         </>
       )}

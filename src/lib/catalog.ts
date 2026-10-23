@@ -113,6 +113,11 @@ export type CatalogAdapter = Readonly<{
     page?: CatalogPageRequest,
     context?: CatalogRequestContext
   ) => Promise<CatalogPage<CatalogTrack>>;
+  getArtistAlbums: (
+    artistId: CatalogIdentifier,
+    page?: CatalogPageRequest,
+    context?: CatalogRequestContext
+  ) => Promise<CatalogPage<CatalogAlbum>>;
   getPlaylistTracks: (
     playlistId: CatalogIdentifier,
     page?: CatalogPageRequest,
@@ -162,6 +167,33 @@ type CatalogPlaylistInput = Readonly<{
   curatorName?: string | null;
   categoryIds?: readonly string[] | null;
   trackCount?: number | null;
+  artwork?: Partial<CatalogArtwork> | null;
+  availability?: Partial<SourceAvailability> | null;
+  externalUrl?: string | null;
+}>;
+
+type CatalogAlbumInput = Readonly<{
+  catalogId: CatalogIdentifier;
+  name?: string | null;
+  artistIds?: readonly CatalogIdentifier[] | null;
+  artistName?: string | null;
+  releaseDate?: string | null;
+  trackCount?: number | null;
+  isSingle?: boolean | null;
+  artwork?: Partial<CatalogArtwork> | null;
+  availability?: Partial<SourceAvailability> | null;
+  externalUrl?: string | null;
+}>;
+
+type CatalogTrackInput = Readonly<{
+  catalogId: CatalogIdentifier;
+  name?: string | null;
+  artistIds?: readonly CatalogIdentifier[] | null;
+  artistName?: string | null;
+  albumId?: CatalogIdentifier | null;
+  durationMs?: number | null;
+  isrc?: string | null;
+  explicit?: boolean | null;
   artwork?: Partial<CatalogArtwork> | null;
   availability?: Partial<SourceAvailability> | null;
   externalUrl?: string | null;
@@ -241,6 +273,59 @@ export function normalizeCatalogPlaylistMetadata(
       typeof input.trackCount === "number" && input.trackCount >= 0
         ? input.trackCount
         : null,
+    artwork: normalizeArtwork(input.artwork, `${name} artwork`),
+    availability: normalizeAvailability(input.availability),
+    externalUrl: cleanOptionalText(input.externalUrl),
+  });
+}
+
+export function normalizeCatalogAlbumMetadata(
+  input: CatalogAlbumInput
+): CatalogAlbum {
+  const name = cleanOptionalText(input.name) || "Untitled album";
+
+  return Object.freeze({
+    catalogId: Object.freeze({ ...input.catalogId }),
+    name,
+    artistIds: Object.freeze(
+      (input.artistIds || []).map((identifier) =>
+        Object.freeze({ ...identifier })
+      )
+    ),
+    artistName: cleanOptionalText(input.artistName) || "Unknown artist",
+    releaseDate: cleanOptionalText(input.releaseDate),
+    trackCount:
+      typeof input.trackCount === "number" && input.trackCount >= 0
+        ? input.trackCount
+        : null,
+    isSingle: Boolean(input.isSingle),
+    artwork: normalizeArtwork(input.artwork, `${name} artwork`),
+    availability: normalizeAvailability(input.availability),
+    externalUrl: cleanOptionalText(input.externalUrl),
+  });
+}
+
+export function normalizeCatalogTrackMetadata(
+  input: CatalogTrackInput
+): CatalogTrack {
+  const name = cleanOptionalText(input.name) || "Untitled track";
+
+  return Object.freeze({
+    catalogId: Object.freeze({ ...input.catalogId }),
+    name,
+    artistIds: Object.freeze(
+      (input.artistIds || []).map((identifier) =>
+        Object.freeze({ ...identifier })
+      )
+    ),
+    artistName: cleanOptionalText(input.artistName) || "Unknown artist",
+    albumId: input.albumId ? Object.freeze({ ...input.albumId }) : null,
+    durationMs:
+      typeof input.durationMs === "number" && input.durationMs >= 0
+        ? input.durationMs
+        : null,
+    isrc: cleanOptionalText(input.isrc),
+    explicit: Boolean(input.explicit),
     artwork: normalizeArtwork(input.artwork, `${name} artwork`),
     availability: normalizeAvailability(input.availability),
     externalUrl: cleanOptionalText(input.externalUrl),

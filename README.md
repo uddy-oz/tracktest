@@ -34,7 +34,7 @@ StanZer is a React 19 and TypeScript application built with Vite.
 - `src/App.tsx` owns the lightweight route/view state, protected auth destinations, session-level progression refreshes, and route-level code splitting.
 - `src/Components` contains the Home, Single Player, Multiplayer, profile, leaderboard, badge, and authentication interfaces.
 - `src/lib` contains iTunes access, Supabase clients, Arena room operations, local/cloud stats, profile helpers, badge rules, sounds, and player identity calculations.
-- `src/lib/catalog.ts` defines a provider-neutral discovery contract for albums, artists, playlists, tracks, rights/availability metadata, and immutable future multiplayer question snapshots. The included adapter serves mock metadata only and cannot start gameplay or audio.
+- `src/lib/catalog.ts` defines a provider-neutral discovery contract for albums, artists, playlists, tracks, rights/availability metadata, and immutable future multiplayer question snapshots. `src/lib/appleMusicCatalogAdapter.ts` implements that contract through a same-origin metadata proxy and falls back to the mock adapter when server credentials are absent. Neither adapter can start gameplay or audio.
 - `api` contains the Vercel serverless proxies used for production iTunes requests.
 - `supabase` contains the base schema and additive SQL migrations for profiles, stats, leaderboards, Arena rooms, RLS, room lifecycle, multiplayer progression, and Party Mode.
 - `localStorage` remains the signed-out Solo fallback; authenticated progression uses Supabase as the cross-device source of truth.
@@ -92,13 +92,47 @@ VITE_YOUTUBE_API_KEY=your-api-key
 
 Never place a Supabase service-role key or another private secret in a `VITE_` variable.
 
-The unfinished Artist and Playlist discovery preview is disabled by default. To review its mock-only interface locally, add:
+The unfinished Artist and Playlist discovery interface is disabled by default. To review it with mock metadata locally, add:
 
 ```env
 VITE_ENABLE_CATALOG_DISCOVERY=true
 ```
 
-This flag exposes discovery cards only. It does not call Apple Music, fetch tracks, play audio, create quiz questions, or enable a production game mode.
+This flag exposes discovery cards only. It does not play audio, create quiz questions, or enable a production game mode.
+
+### Apple Music Catalog Metadata
+
+Real Artist and Playlist discovery is optional and remains disabled unless a second browser flag and server credentials are configured. Apple requires an Apple Developer Program membership, a Media ID, and a Media Services private key for Apple Music API developer tokens.
+
+Set these server-only values in Vercel or the local server environment:
+
+```env
+APPLE_MUSIC_TEAM_ID=your-apple-team-id
+APPLE_MUSIC_KEY_ID=your-media-services-key-id
+APPLE_MUSIC_PRIVATE_KEY_BASE64=base64-encoded-p8-private-key
+APPLE_MUSIC_STOREFRONT=us
+```
+
+Then explicitly enable the browser-side discovery adapter:
+
+```env
+VITE_ENABLE_CATALOG_DISCOVERY=true
+VITE_ENABLE_APPLE_MUSIC_CATALOG=true
+```
+
+`APPLE_MUSIC_PRIVATE_KEY` may be used instead of its base64 form on platforms that safely preserve multiline values. A pre-generated `APPLE_MUSIC_DEVELOPER_TOKEN` is also accepted as a server-only fallback, but server-side signing with the key variables is preferred. Never prefix the Team ID, Key ID, private key, or developer token with `VITE_`; only `VITE_` variables are exposed to browser code.
+
+The `/api/apple-music-catalog` function generates and caches a short-lived ES256 developer token, validates storefronts and resource IDs, bounds pagination, strips HTML from editorial copy, and returns normalized metadata without preview/audio fields. Responses use short CDN cache windows for permitted catalog metadata. If credentials are absent, the client uses the existing mock adapter. Upstream authorization and network errors remain visible instead of being silently disguised as mock results.
+
+Real discovery currently supports storefront-aware artist and playlist search, editorial/genre/era categories, playlist tracks, artist top songs, artist album collections, pagination, artwork, descriptions, and unavailable states. Discovery remains a metadata-only preview pending written confirmation of provider terms and the music rights required for interactive quiz use.
+
+Use `vercel dev` when testing the real adapter locally so the serverless catalog route is available. Plain `npm run dev` continues to show the mock fallback even when the Apple flag is enabled.
+
+Official setup references:
+
+- [Create a media identifier and private key](https://developer.apple.com/help/account/capabilities/create-a-media-identifier-and-private-key)
+- [Generate Apple Music developer tokens](https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens)
+- [Apple Music API](https://developer.apple.com/documentation/applemusicapi/)
 
 ### Supabase Auth URLs
 
@@ -173,6 +207,7 @@ Targeted lifecycle checks cover stale round identity and SQL phase guards. Full 
 npm.cmd run test:arena-rounds
 npm.cmd run test:arena-sql
 npm.cmd run test:catalog
+npm.cmd run test:apple-catalog
 npm.cmd run test:music-search
 npm.cmd run build
 npm.cmd run lint
@@ -218,8 +253,8 @@ StanZer keeps its React/Vite/CSS stack and does not copy a third-party interface
 - Multiplayer depends on network access to Supabase. Server timestamps reduce drift, but UI updates are not frame-perfect on high-latency connections.
 - Guest multiplayer requires Supabase Anonymous Sign-Ins. CAPTCHA/Turnstile and a trusted scheduled stale-guest cleanup should be configured before broad public promotion.
 - Championship tournament gameplay is not implemented.
-- Artist and Playlist quiz gameplay is not implemented. The optional discovery preview uses fictional/mock catalog metadata and artwork treatments, remains disabled by default, and has no playback path.
-- The provider-neutral catalog interface is ready for a future authenticated adapter, but catalog metadata, artwork, preview, streaming, caching, and multiplayer synchronization rights must be confirmed in writing with the selected provider before production use. Provider credentials must stay on a trusted server rather than in `VITE_` variables.
+- Artist and Playlist quiz gameplay is not implemented. The optional discovery interface remains disabled by default and has no playback path. It uses Apple Music catalog metadata only when server credentials and both feature flags are present; otherwise it falls back to fictional mock data.
+- The provider-neutral catalog interface now has an Apple Music metadata adapter, but catalog metadata, artwork, streaming, caching, and multiplayer synchronization rights must still be confirmed in writing before production gameplay. Apple credentials stay on the server and must never be placed in `VITE_` variables.
 - Existing iTunes preview-based album gameplay has licensing exposure that still requires qualified legal review and, where required, direct permission or a commercial music license. A publicly reachable preview URL alone should not be treated as authorization for interactive or synchronized quiz use.
 - The repository does not yet include automated multi-client browser integration tests. The current ESLint configuration also reports pre-existing effect/dependency findings in timing-sensitive Solo and multiplayer code; those should be resolved alongside broader regression tests rather than by changing hook dependencies blindly.
 - Email confirmation and password recovery depend on correct Supabase redirect URL and SMTP configuration.

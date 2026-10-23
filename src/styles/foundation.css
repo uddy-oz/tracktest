@@ -730,6 +730,173 @@ input:focus-visible,
 .catalog-result-summary,
 .catalog-state span { color: var(--content-secondary); }
 
+.catalog-provider-note,
+.catalog-rights-note {
+  margin: 12px 0 0;
+  color: var(--content-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.catalog-detail-action,
+.catalog-detail-close {
+  min-height: 42px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-control);
+  background: var(--surface-strong);
+  color: var(--content-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.catalog-detail-action {
+  margin: 0 15px 15px;
+  padding: 9px 12px;
+}
+
+.catalog-detail-action:hover,
+.catalog-detail-action:focus-visible,
+.catalog-detail-close:hover,
+.catalog-detail-close:focus-visible {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 18%, transparent);
+}
+
+.catalog-detail-panel {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-card);
+  background: var(--page-elevated);
+}
+
+.catalog-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.catalog-detail-heading h4 {
+  margin: 5px 0 4px;
+  color: var(--content-primary);
+  font-size: clamp(22px, 4vw, 30px);
+}
+
+.album-search .catalog-detail-heading p {
+  margin: 0;
+  color: var(--content-secondary);
+  font-size: 13px;
+}
+
+.catalog-detail-close {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+}
+
+.catalog-track-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.catalog-track-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.catalog-track-number,
+.catalog-track-duration,
+.catalog-track-copy small {
+  color: var(--content-secondary);
+  font-size: 12px;
+}
+
+.catalog-track-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.catalog-track-copy strong {
+  overflow: hidden;
+  color: var(--content-primary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-collection-section {
+  margin-top: 24px;
+}
+
+.catalog-collection-section h5 {
+  margin: 0 0 12px;
+  color: var(--content-primary);
+  font-size: 16px;
+}
+
+.catalog-collection-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.catalog-collection-grid article {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--content-secondary);
+}
+
+.catalog-collection-grid img,
+.catalog-collection-grid article > span {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface-strong);
+}
+
+.catalog-collection-grid article > span {
+  display: grid;
+  place-items: center;
+  color: var(--content-primary);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.catalog-collection-grid strong {
+  overflow: hidden;
+  color: var(--content-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-collection-grid small { font-size: 11px; }
+
+@media (max-width: 800px) {
+  .catalog-collection-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .catalog-detail-panel { padding: 16px; }
+  .catalog-detail-heading { align-items: center; }
+  .catalog-track-list li { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .catalog-collection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* Multiplayer landing and room discovery. Live game and results stay untouched. */
 .arena-page { padding-top: 112px; }
 
