@@ -271,6 +271,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
                       src={album.imageUrl}
                       alt={`${album.title} cover`}
                       loading="lazy"
+                      decoding="async"
                     />
                   </span>
                 )}
@@ -303,7 +304,13 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
             {artists.map((artist) => (
               <article className="artist-search-card" key={artist.id}>
                 {artist.imageUrl ? (
-                  <img src={artist.imageUrl} alt="" aria-hidden loading="lazy" />
+                  <img
+                    src={artist.imageUrl}
+                    alt=""
+                    aria-hidden
+                    loading="lazy"
+                    decoding="async"
+                  />
                 ) : (
                   <span className="artist-image-fallback" aria-hidden>
                     {artist.name.slice(0, 1).toUpperCase()}
@@ -347,7 +354,12 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       {selectedAlbum && (
         <div className="start-bar">
           {selectedAlbum.imageUrl && (
-            <img src={selectedAlbum.imageUrl} alt="" aria-hidden />
+            <img
+              src={selectedAlbum.imageUrl}
+              alt=""
+              aria-hidden
+              decoding="async"
+            />
           )}
 
           <div className="start-bar-info">

@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { readApplicationCss } from "./css-test-utils.ts";
 
 type ThemeTokens = Record<string, string>;
 
-const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(resolve(currentDirectory, "../src/index.css"), "utf8");
+const css = readApplicationCss();
 const semanticLayer = css.slice(css.indexOf("/* Semantic application theme layer */"));
 
 function parseTokens(block: string): ThemeTokens {

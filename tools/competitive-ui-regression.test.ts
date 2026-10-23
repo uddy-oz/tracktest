@@ -1,15 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-
-const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(currentDirectory, "..");
-
-function readProjectFile(path: string) {
-  return readFileSync(resolve(projectRoot, path), "utf8");
-}
+import { readApplicationCss, readProjectFile } from "./css-test-utils.ts";
 
 test("competitive navigation uses compact accessible controls", () => {
   const source = readProjectFile("src/Components/Leaderboard.tsx");
@@ -43,7 +34,7 @@ test("badge cards expose collectible state and accessible detail labels", () => 
 });
 
 test("phase three styles include podium, mobile profile, and reduced motion rules", () => {
-  const css = readProjectFile("src/index.css");
+  const css = readApplicationCss();
   const phaseThree = css.slice(
     css.indexOf("/* Design audit phase 3: competitive experience. */")
   );

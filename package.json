@@ -22,6 +22,7 @@
     "test:accessibility": "node --experimental-strip-types --test tools/accessibility-regression.test.ts",
     "test:mobile-ux": "node --experimental-strip-types --test tools/mobile-ux-regression.test.ts",
     "test:competitive-ui": "node --experimental-strip-types --test tools/competitive-ui-regression.test.ts",
+    "test:frontend": "node --experimental-strip-types --test tools/frontend-maintainability.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

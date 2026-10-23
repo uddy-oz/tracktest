@@ -230,7 +230,12 @@ function CatalogDiscovery({
               >
                 <div className="catalog-artwork" aria-hidden>
                   {item.artwork.url ? (
-                    <img src={item.artwork.url} alt="" loading="lazy" />
+                    <img
+                      src={item.artwork.url}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                    />
                   ) : (
                     <span>{item.name.slice(0, 2).toUpperCase()}</span>
                   )}

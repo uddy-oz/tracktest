@@ -4933,6 +4933,7 @@ function ArenaPage({
                       src={album.imageUrl}
                       alt={`${album.title} cover`}
                       loading="lazy"
+                      decoding="async"
                     />
                   )}
                   <span>
@@ -6248,6 +6249,7 @@ function ArenaPage({
                         src={album.imageUrl}
                         alt={`${album.title} cover`}
                         loading="lazy"
+                        decoding="async"
                       />
                     )}
                     <span>
@@ -6311,7 +6313,13 @@ function ArenaPage({
                 return (
                   <article className="duel-room-card" key={room.id}>
                     {room.artworkUrl && (
-                      <img src={room.artworkUrl} alt="" aria-hidden />
+                      <img
+                        src={room.artworkUrl}
+                        alt=""
+                        aria-hidden
+                        loading="lazy"
+                        decoding="async"
+                      />
                     )}
                     <div>
                       <strong>{room.albumName}</strong>

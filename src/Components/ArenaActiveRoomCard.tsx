@@ -51,7 +51,9 @@ function ArenaActiveRoomCard({
 
   return (
     <article className={`arena-active-room-card ${compact ? "compact" : ""}`}>
-      {room.artworkUrl && <img src={room.artworkUrl} alt="" aria-hidden />}
+      {room.artworkUrl && (
+        <img src={room.artworkUrl} alt="" aria-hidden decoding="async" />
+      )}
       <div className="arena-active-room-main">
         <p className="eyebrow">Active {getModeLabel(room)} Room</p>
         <h2>{room.albumName}</h2>

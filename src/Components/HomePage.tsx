@@ -121,14 +121,22 @@ function HomePage({
     };
   }, [progressionRevision, session?.user]);
 
-  const badges = useMemo(() => getArenaBadges(stats), [stats]);
-  const playerBadges =
-    identityBadges || getCompactPlayerBadges(stats, badges);
-  const featuredBadges = badges
-    .filter((badge) => badge.unlocked)
-    .slice(0, 3);
-  const dailyGoals = getDailyGoalFoundation(stats).slice(0, 3);
-  const recentResults = stats.quizResults.slice(0, 3);
+  const {
+    playerBadges,
+    featuredBadges,
+    dailyGoals,
+    recentResults,
+  } = useMemo(() => {
+    const badges = getArenaBadges(stats);
+
+    return {
+      playerBadges:
+        identityBadges || getCompactPlayerBadges(stats, badges),
+      featuredBadges: badges.filter((badge) => badge.unlocked).slice(0, 3),
+      dailyGoals: getDailyGoalFoundation(stats).slice(0, 3),
+      recentResults: stats.quizResults.slice(0, 3),
+    };
+  }, [identityBadges, stats]);
   const recoverableArenaRoom = isArenaRoomRecoverableForUser(
     activeArenaRoom,
     session?.user.id

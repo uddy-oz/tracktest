@@ -73,9 +73,16 @@ function SinglePlayerPage({
     };
   }, [session?.user]);
 
-  const badges = useMemo(() => getArenaBadges(stats), [stats]);
-  const tier = calculatePlayerTier(badges, stats).tier;
-  const playerBadges = identityBadges || getCompactPlayerBadges(stats, badges);
+  const { tier, playerBadges, recentResults } = useMemo(() => {
+    const badges = getArenaBadges(stats);
+
+    return {
+      tier: calculatePlayerTier(badges, stats).tier,
+      playerBadges:
+        identityBadges || getCompactPlayerBadges(stats, badges),
+      recentResults: stats.quizResults.slice(0, 3),
+    };
+  }, [identityBadges, stats]);
   const displayName = session
     ? getProfileDisplayLabel(profile, session.user.email)
     : "Guest Player";
@@ -85,8 +92,6 @@ function SinglePlayerPage({
     : profile?.username
       ? `@${profile.username}`
       : "Local run";
-  const recentResults = stats.quizResults.slice(0, 3);
-
   return (
     <main className="single-player-page">
       <section className="single-player-hero">

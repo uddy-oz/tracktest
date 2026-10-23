@@ -1,15 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-
-const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(currentDirectory, "..");
-
-function readProjectFile(path: string) {
-  return readFileSync(resolve(projectRoot, path), "utf8");
-}
+import { readApplicationCss, readProjectFile } from "./css-test-utils.ts";
 
 test("Home presents one clear pair of game-mode actions", () => {
   const source = readProjectFile("src/Components/HomePage.tsx");
@@ -32,7 +23,7 @@ test("Multiplayer exposes invite joining before room creation modes", () => {
 });
 
 test("mobile layout prioritizes search and keeps room modes compact", () => {
-  const css = readProjectFile("src/index.css");
+  const css = readApplicationCss();
   const phaseTwo = css.slice(
     css.indexOf("/* Design audit phase 2: mobile-first discovery")
   );

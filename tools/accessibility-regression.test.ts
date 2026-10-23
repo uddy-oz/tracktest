@@ -1,16 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { getTrappedFocusIndex } from "../src/lib/dialogAccessibility.ts";
-
-const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(currentDirectory, "..");
-
-function readProjectFile(path: string) {
-  return readFileSync(resolve(projectRoot, path), "utf8");
-}
+import { readApplicationCss, readProjectFile } from "./css-test-utils.ts";
 
 test("dialog focus wraps in both directions", () => {
   assert.equal(getTrappedFocusIndex(-1, 3, "forward"), 0);
@@ -39,7 +30,7 @@ test("all custom dialog owners use the shared accessibility behavior", () => {
 });
 
 test("mobile gameplay statistics use bounded grids without horizontal scrolling", () => {
-  const css = readProjectFile("src/index.css");
+  const css = readApplicationCss();
   const auditLayer = css.slice(
     css.indexOf("/* Design audit phase 1: accessible mode text")
   );
@@ -60,7 +51,7 @@ test("mobile gameplay statistics use bounded grids without horizontal scrolling"
 });
 
 test("countdown and answer sizing remain prominent after the stats fix", () => {
-  const css = readProjectFile("src/index.css");
+  const css = readApplicationCss();
   const countdownLayer = css.slice(css.indexOf("/* Active gameplay countdown sizing */"));
 
   assert.match(countdownLayer, /width:\s*clamp\(120px,\s*14vh,\s*140px\)/);
