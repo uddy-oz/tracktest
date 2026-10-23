@@ -94,3 +94,37 @@ for (const [themeName, tokens] of [
     }
   });
 }
+
+test("light Home badges use semantic text and tier colors", () => {
+  assert.match(
+    semanticLayer,
+    /:root\[data-theme="light"\]\s+\.home-badge-pill strong\s*\{[^}]*color:\s*var\(--ui-text\)/s
+  );
+  assert.match(
+    semanticLayer,
+    /:root\[data-theme="light"\]\s+\.home-badge-pill small\s*\{[^}]*color:\s*var\(--badge-accent,\s*var\(--ui-text-secondary\)\)/s
+  );
+});
+
+test("light multiplayer return controls define every interaction state", () => {
+  for (const state of ["", ":hover:not\\(:disabled\\)", ":focus-visible", ":disabled"]) {
+    assert.match(
+      semanticLayer,
+      new RegExp(
+        `:root\\[data-theme="light"\\] \\.arena-modal-close${state}[^\\{]*\\{[^}]*color:\\s*var\\(--ui-`,
+        "s"
+      )
+    );
+  }
+});
+
+test("account badges stay grouped until the mobile menu breakpoint", () => {
+  assert.match(
+    semanticLayer,
+    /\.account-button \.player-identity-badges\s*\{[^}]*flex-wrap:\s*nowrap/s
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 940px\)\s*\{[\s\S]*?\.nav-menu-button\s*\{[\s\S]*?display:\s*grid/s
+  );
+});
