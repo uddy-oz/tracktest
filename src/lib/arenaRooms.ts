@@ -352,10 +352,6 @@ export function getFriendlyArenaError(error: string | null | undefined) {
   return error;
 }
 
-function generateInviteCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-
 export function isGuestArenaPlayer(
   player: Pick<ArenaRoomPlayer, "displayName" | "username">
 ) {
@@ -588,24 +584,23 @@ export async function createDuelRoom({
     };
   }
 
-  const { data: roomData, error: roomError } = await supabase
-    .from("arena_rooms")
-    .insert({
-      host_user_id: user.id,
-      mode,
-      status: "waiting",
-      album_id: album.id,
-      album_name: album.title,
-      artist_name: album.artist,
-      artwork_url: album.imageUrl,
-      max_players: maxPlayers,
-      is_private: isPrivate,
-      invite_code: isPrivate ? generateInviteCode() : null,
-    })
-    .select("*")
-    .single();
+  const { displayName, username } = getPlayerDisplay(profile, user);
+  const { data: roomId, error: roomError } = await supabase.rpc(
+    "create_arena_room",
+    {
+      room_mode: mode,
+      selected_album_id: album.id,
+      selected_album_name: album.title,
+      selected_artist_name: album.artist,
+      selected_artwork_url: album.imageUrl,
+      requested_max_players: maxPlayers,
+      room_is_private: isPrivate,
+      player_display_name: displayName,
+      player_username: username,
+    }
+  );
 
-  if (roomError || !roomData) {
+  if (roomError || !roomId) {
     const activeRoom = await fetchCurrentDuelRoom(user);
 
     if (activeRoom.room) {
@@ -621,63 +616,7 @@ export async function createDuelRoom({
     };
   }
 
-  const room = mapRoomRow(roomData as ArenaRoomRow);
-  const { displayName, username } = getPlayerDisplay(profile, user);
-  if (room.isPrivate && room.inviteCode) {
-    // Direct membership inserts only allow public rooms. The invite RPC already
-    // validates private membership, including the host, under its row lock.
-    const { error } = await supabase.rpc("join_arena_room_by_invite", {
-      target_invite_code: room.inviteCode,
-      player_display_name: displayName,
-      player_username: username,
-    });
-    const result = await fetchArenaRoom(room.id);
-    const hostJoined = result.room?.players.some(
-      (player) => player.userId === user.id && !player.leftAt
-    );
-    if (error || !hostJoined) {
-      await supabase
-        .from("arena_rooms")
-        .update({ status: "cancelled", finished_at: new Date().toISOString() })
-        .eq("id", room.id)
-        .eq("host_user_id", user.id);
-      return {
-        room: null,
-        error:
-          getFriendlyArenaError(error?.message) ||
-          result.error ||
-          "Room created, but host membership could not be confirmed.",
-      };
-    }
-    return { room: result.room, error: null };
-  }
-  const { data: playerData, error: playerError } = await supabase
-    .from("arena_room_players")
-    .insert({
-      room_id: room.id,
-      user_id: user.id,
-      display_name: displayName,
-      username,
-    })
-    .select("*")
-    .single();
-
-  if (playerError || !playerData) {
-    return {
-      room,
-      error:
-        getFriendlyArenaError(playerError?.message) ||
-        "Room created, but host could not join.",
-    };
-  }
-
-  return {
-    room: {
-      ...room,
-      players: [mapPlayerRow(playerData as ArenaRoomPlayerRow)],
-    },
-    error: null,
-  };
+  return fetchArenaRoom(String(roomId));
 }
 
 export async function joinDuelRoom({
@@ -737,47 +676,23 @@ export async function joinDuelRoom({
     targetRoom.players,
     user.id
   );
-  const { data: rejoinedPlayers, error: rejoinError } = await supabase
-    .from("arena_room_players")
-    .update({
-      display_name: displayName,
-      username,
-      left_at: null,
-      forfeited_at: null,
-      lobby_ready: false,
-      is_ready: false,
-      presence_status: "connected",
-      presence_updated_at: new Date().toISOString(),
-      result_status: "active",
-    })
-    .eq("room_id", targetRoom.id)
-    .eq("user_id", user.id)
-    .select("id");
-
-  if (rejoinError) {
-    return { room: null, error: getFriendlyArenaError(rejoinError.message) };
-  }
-
-  if (rejoinedPlayers && rejoinedPlayers.length > 0) {
-    return fetchArenaRoom(targetRoom.id);
-  }
-
-  const { error } = await supabase.from("arena_room_players").insert({
-    room_id: targetRoom.id,
-    user_id: user.id,
-    display_name: displayName,
-    username,
-  });
-
-  if (error) {
-    if (error.message.toLowerCase().includes("duplicate")) {
-      return fetchArenaRoom(targetRoom.id);
+  const { data: joinedRoomId, error } = await supabase.rpc(
+    "join_public_arena_room",
+    {
+      target_room_id: targetRoom.id,
+      player_display_name: displayName,
+      player_username: username,
     }
+  );
 
-    return { room: null, error: getFriendlyArenaError(error.message) };
+  if (error || !joinedRoomId) {
+    return {
+      room: null,
+      error: getFriendlyArenaError(error?.message) || "Could not join this room.",
+    };
   }
 
-  return fetchArenaRoom(targetRoom.id);
+  return fetchArenaRoom(String(joinedRoomId));
 }
 
 export async function fetchArenaInvite(inviteCode: string) {
@@ -930,11 +845,13 @@ export async function joinArenaRoomByInvite({
     return joinedRoom;
   }
 
-  const { error: displayNameError } = await supabase
-    .from("arena_room_players")
-    .update({ display_name: uniqueDisplay.displayName })
-    .eq("room_id", joinedRoom.room.id)
-    .eq("user_id", user.id);
+  const { error: displayNameError } = await supabase.rpc(
+    "set_arena_guest_display_name",
+    {
+      target_room_id: joinedRoom.room.id,
+      player_display_name: uniqueDisplay.displayName,
+    }
+  );
 
   return displayNameError
     ? joinedRoom
@@ -1441,39 +1358,6 @@ export async function reportCompetitiveAudioFailure({
   };
 }
 
-export async function updateDuelPlayerProgress({
-  roomId,
-  user,
-  currentScore,
-  currentCorrectAnswers,
-  currentQuestionIndex,
-  currentStreak,
-}: {
-  roomId: string;
-  user: User;
-  currentScore: number;
-  currentCorrectAnswers: number;
-  currentQuestionIndex: number;
-  currentStreak: number;
-}) {
-  if (!supabase) {
-    return { error: "Supabase is not configured yet." };
-  }
-
-  const { error } = await supabase
-    .from("arena_room_players")
-    .update({
-      current_score: currentScore,
-      current_correct_answers: currentCorrectAnswers,
-      current_question_index: currentQuestionIndex,
-      current_streak: currentStreak,
-    })
-    .eq("room_id", roomId)
-    .eq("user_id", user.id);
-
-  return { error: getFriendlyArenaError(error?.message) || null };
-}
-
 export async function setPartyAudioState({
   roomId,
   roundNumber,
@@ -1641,45 +1525,6 @@ export async function skipPartyQuestion(
   }
 
   return fetchArenaRoom(roomId);
-}
-
-export async function saveDuelPlayerResult({
-  roomId,
-  user,
-  finalScore,
-  correctAnswers,
-  totalQuestions,
-  averageAnswerTime,
-}: {
-  roomId: string;
-  user: User;
-  finalScore: number;
-  correctAnswers: number;
-  totalQuestions: number;
-  averageAnswerTime: number;
-}) {
-  if (!supabase) {
-    return { error: "Supabase is not configured yet." };
-  }
-
-  const { error } = await supabase
-    .from("arena_room_players")
-    .update({
-      final_score: finalScore,
-      correct_answers: correctAnswers,
-      total_questions: totalQuestions,
-      average_answer_time: averageAnswerTime,
-      current_score: finalScore,
-      current_correct_answers: correctAnswers,
-      current_question_index: totalQuestions,
-      current_streak: 0,
-      finished_at: new Date().toISOString(),
-      result_status: "completed",
-    })
-    .eq("room_id", roomId)
-    .eq("user_id", user.id);
-
-  return { error: getFriendlyArenaError(error?.message) || null };
 }
 
 export async function finishDuelRoom(roomId: string) {
