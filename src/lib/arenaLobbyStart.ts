@@ -106,17 +106,22 @@ export function getArenaHostStartEligibility(
 
 type RoomResult = { room: ArenaRoom | null; error: string | null };
 type QuestionSet = {
-  questions: DuelQuizQuestion[];
+  questionSetId?: string;
+  questions: Array<Pick<DuelQuizQuestion, "questionSetId">>;
   targetQuestionCount: number;
 };
 type StartDependencies = {
   fetchRoom: (roomId: string) => Promise<RoomResult>;
-  loadTracks: (albumId: string) => Promise<SpotifyTrack[]>;
-  buildQuestions: (tracks: SpotifyTrack[], mode: ArenaRoomMode) => QuestionSet;
-  beforeActivate: (questions: DuelQuizQuestion[]) => Promise<void>;
+  loadTracks?: (albumId: string) => Promise<SpotifyTrack[]>;
+  buildQuestions?: (tracks: SpotifyTrack[], mode: ArenaRoomMode) => QuestionSet;
+  prepareTrustedQuestions?: (room: ArenaRoom) => Promise<{
+    questionSet: QuestionSet | null;
+    error: string | null;
+  }>;
+  beforeActivate: (questions: QuestionSet["questions"]) => Promise<void>;
   activateRoom: (
     roomId: string,
-    questions: DuelQuizQuestion[],
+    questions: QuestionSet["questions"],
     mode: ArenaRoomMode,
     context: Record<string, unknown>,
     targetQuestionCount: number
@@ -156,15 +161,27 @@ export async function prepareArenaLobbyStart(
     if (!eligibility.canStart) throw new Error(eligibility.reason);
 
     stage = "load-album";
-    let questions = room.quizQuestions;
+    let questions: QuestionSet["questions"] = room.quizQuestions;
     let targetQuestionCount =
       room.competitiveTargetQuestionCount || room.quizQuestions.length;
     if (!questions.length) {
-      const tracks = (await dependencies.loadTracks(room.albumId)).filter((track) => Boolean(track.previewUrl));
-      dependencies.log("LOBBY_START_ALBUM", { ...context, playableTrackCount: tracks.length });
-      const albumError = getArenaAlbumError(tracks.length);
-      if (albumError) throw new Error(albumError);
-      const questionSet = dependencies.buildQuestions(tracks, room.mode);
+      let questionSet: QuestionSet;
+      if (dependencies.prepareTrustedQuestions) {
+        const prepared = await dependencies.prepareTrustedQuestions(room);
+        if (!prepared.questionSet || prepared.error) {
+          throw new Error(prepared.error || "Trusted question preparation failed.");
+        }
+        questionSet = prepared.questionSet;
+      } else {
+        if (!dependencies.loadTracks || !dependencies.buildQuestions) {
+          throw new Error("Trusted question preparation is unavailable.");
+        }
+        const tracks = (await dependencies.loadTracks(room.albumId)).filter((track) => Boolean(track.previewUrl));
+        dependencies.log("LOBBY_START_ALBUM", { ...context, playableTrackCount: tracks.length });
+        const albumError = getArenaAlbumError(tracks.length);
+        if (albumError) throw new Error(albumError);
+        questionSet = dependencies.buildQuestions(tracks, room.mode);
+      }
       questions = questionSet.questions;
       targetQuestionCount = questionSet.targetQuestionCount;
     }

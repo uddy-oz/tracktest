@@ -49,6 +49,14 @@ const arenaSecurityPermissionProbe = readFileSync(
   new URL("../supabase/tests/20261026_multiplayer_authority_permissions.sql", import.meta.url),
   "utf8"
 );
+const secureArenaQuestions = readFileSync(
+  new URL("../supabase/20261026_secure_arena_questions.sql", import.meta.url),
+  "utf8"
+);
+const secureArenaQuestionsProbe = readFileSync(
+  new URL("../supabase/tests/20261026_secure_arena_questions.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -448,5 +456,55 @@ assert.match(
   /pg_catalog\.pg_policies[\s\S]*p\.cmd in \('INSERT', 'UPDATE', 'ALL'\)/,
   "staging probe must detect any remaining mutating RLS policies"
 );
+
+assert.match(secureArenaQuestions, /^begin;/i, "answer secrecy migration must be transactional");
+assert.match(secureArenaQuestions, /commit;\s*$/i, "answer secrecy migration must commit transactionally");
+assert.match(secureArenaQuestions, /create schema if not exists arena_private/i);
+assert.match(secureArenaQuestions, /revoke all on schema arena_private from public, anon, authenticated, service_role/i);
+assert.match(secureArenaQuestions, /grant execute on function public\.stage_arena_question_set[\s\S]*to service_role/i);
+assert.match(secureArenaQuestions, /Room-row locking makes preparation idempotent[\s\S]*existing_set_id is not null then return existing_set_id/i);
+assert.match(secureArenaQuestions, /create or replace function public\.activate_arena_question_set/i);
+assert.match(secureArenaQuestions, /create or replace function public\.get_arena_question_audio/i);
+assert.match(secureArenaQuestions, /create or replace function public\.acknowledge_competitive_audio_ready_v2[\s\S]*arena_private\.question_keys/i);
+assert.match(secureArenaQuestions, /create or replace function public\.report_competitive_audio_failure[\s\S]*arena_private\.question_keys/i);
+assert.match(secureArenaQuestions, /create or replace function public\.start_prepared_party_question[\s\S]*arena_private\.question_keys/i);
+assert.match(secureArenaQuestions, /before insert or update\s+on public\.arena_rooms/i);
+assert.match(secureArenaQuestions, /revoke all on table public\.arena_party_answers from public, anon, authenticated/i);
+assert.doesNotMatch(secureArenaQuestions, /competitive_selected_answer\s*=\s*target_answer/i);
+const audioFailureBodyStart = secureArenaQuestions.indexOf(
+  "create or replace function public.report_competitive_audio_failure"
+);
+const audioFailureBody = secureArenaQuestions.slice(
+  audioFailureBodyStart,
+  secureArenaQuestions.indexOf("$$;", audioFailureBodyStart) + 3
+);
+assert.doesNotMatch(audioFailureBody, /apply_competitive_audio_skip\s*\(/,
+  "one participant's audio report must not force a shared skip");
+assert.match(audioFailureBody, /pendingUntilDeadline/,
+  "audio reports must defer recovery to the bounded authoritative timeline");
+const partyAnswerBodyStart = secureArenaQuestions.indexOf(
+  "create or replace function public.submit_party_answer"
+);
+const partyAnswerBody = secureArenaQuestions.slice(
+  partyAnswerBodyStart,
+  secureArenaQuestions.indexOf("$$;", partyAnswerBodyStart) + 3
+);
+assert.match(partyAnswerBody, /target_answer is null or btrim\(target_answer\) = ''/,
+  "null Party answers must not count as submissions");
+assert.doesNotMatch(partyAnswerBody, /current_score\s*=|current_correct_answers\s*=/,
+  "Party totals must not be published before the shared reveal");
+assert.match(secureArenaQuestionsProbe, /Party score became visible before all players answered/);
+for (const fn of ["submit_competitive_arena_answer", "submit_party_answer"]) {
+  const start = secureArenaQuestions.indexOf(`create or replace function public.${fn}`);
+  const body = secureArenaQuestions.slice(start, secureArenaQuestions.indexOf("$$;", start) + 3);
+  assert.ok(start >= 0, `${fn} must be replaced by the secure migration`);
+  assert.doesNotMatch(body, /'correctAnswer'|'correctOptionId'/i, `${fn} responses must not reveal answer keys`);
+}
+assert.match(secureArenaQuestionsProbe, /direct.*score|score write permission/i);
+assert.match(secureArenaQuestionsProbe, /Party participant retrieved host-only music audio/i);
+assert.match(secureArenaQuestionsProbe, /countdown/);
+assert.match(secureArenaQuestionsProbe, /Party revealed before every active participant answered/);
+assert.match(secureArenaQuestionsProbe, /Repeated question staging replaced the original set/);
+assert.match(secureArenaQuestionsProbe, /answer_result \? 'correctAnswer'/);
 
 console.log("Arena SQL lifecycle and authority guards passed.");

@@ -162,6 +162,37 @@ The server-authoritative Duel and Group Lobby flow additionally requires:
 - `supabase/20260916_competitive_round_authority.sql`
 - `supabase/20260921_competitive_audio_readiness.sql`
 
+Secure answer-key staging for Duel, Group Lobby, and Party Mode additionally requires:
+
+- `supabase/20261026_secure_arena_questions.sql`
+
+Configure these values in the Vercel server environment before enabling the
+secure multiplayer start flow. `SUPABASE_SERVICE_ROLE_KEY` is a server secret:
+never add it to `.env.example`, a `VITE_` variable, browser code, or client
+requests. The browser continues to use only the public URL and anon key.
+
+```env
+SUPABASE_URL=your-project-url
+SUPABASE_ANON_KEY=your-public-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+`/api/prepare-arena-questions` verifies the caller and room host, fetches and
+validates the selected album catalog response server-side, and stages a safe
+question snapshot through a service-role-only RPC. Answer keys and preview
+sources stay in the restricted `arena_private` schema. Clients receive opaque
+choice IDs; an answer becomes visible in the room only when the authoritative
+round enters its reveal phase. Party Mode keeps its host-only audio path.
+
+Apply this migration during a coordinated release window after old active
+games have drained. It refuses to replace any active legacy game lacking a
+trusted staged set, and clears legacy client-authored question payloads from
+waiting and historical room rows. The migration revokes the old client-supplied
+question start RPCs, so the matching frontend and `/api/prepare-arena-questions`
+deployment must be available at the same time. Validate the migration and the
+`supabase/tests/20261026_secure_arena_questions.sql` probe on an isolated or
+staging database first; do not apply it to production as part of local testing.
+
 The audio-readiness migration makes the round countdown wait until every active
 competitive client has buffered and seeked the authoritative preview. If any
 client fails or the readiness deadline expires, Supabase skips that question

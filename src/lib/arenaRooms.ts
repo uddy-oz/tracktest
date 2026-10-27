@@ -1,5 +1,6 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
+import { calculateServerClockOffset } from "./arenaClock";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
 import {
@@ -46,11 +47,14 @@ export type DuelQuizTrack = {
 };
 
 export type DuelQuizQuestion = {
+  questionId?: string;
+  questionSetId?: string;
   correctTrack: DuelQuizTrack;
   options: DuelQuizTrack[];
-  correctAnswer: string;
   clipStartSeconds: number;
 };
+
+const arenaAudioSourceCache = new Map<string, string>();
 
 export type ArenaRoomPlayer = {
   id: string;
@@ -118,6 +122,8 @@ export type ArenaRoom = {
   competitiveAnswerEndsAt: string | null;
   competitiveRevealEndsAt: string | null;
   competitiveRoundWinnerUserId: string | null;
+  competitiveRevealedAnswer: string | null;
+  competitiveRevealedOptionId: string | null;
   competitiveWinningAnswerAt: string | null;
   competitiveWinningResponseTime: number | null;
   competitiveAudioPrepareStartedAt: string | null;
@@ -138,6 +144,8 @@ export type ArenaRoom = {
   partyAnswerStartsAt: string | null;
   partyAnswerEndsAt: string | null;
   partyRevealEndsAt: string | null;
+  partyRevealedAnswer: string | null;
+  partyRevealedOptionId: string | null;
   quizQuestions: DuelQuizQuestion[];
   players: ArenaRoomPlayer[];
 };
@@ -189,6 +197,8 @@ type ArenaRoomRow = {
   competitive_answer_ends_at?: string | null;
   competitive_reveal_ends_at?: string | null;
   competitive_round_winner_user_id?: string | null;
+  competitive_revealed_answer?: string | null;
+  competitive_revealed_option_id?: string | null;
   competitive_winning_answer_at?: string | null;
   competitive_winning_response_ms?: number | null;
   competitive_audio_prepare_started_at?: string | null;
@@ -209,6 +219,8 @@ type ArenaRoomRow = {
   party_answer_starts_at?: string | null;
   party_answer_ends_at?: string | null;
   party_reveal_ends_at?: string | null;
+  party_revealed_answer?: string | null;
+  party_revealed_option_id?: string | null;
   quiz_questions?: unknown;
 };
 
@@ -884,82 +896,136 @@ export async function fetchArenaRoom(roomId: string) {
     return { room, error: playersError.message };
   }
 
-  return {
-    room: {
-      ...room,
-      players: ensureUniqueGuestLobbyNames(
-        dedupeActivePlayers(
-          ((playersData || []) as ArenaRoomPlayerRow[]).map(mapPlayerRow)
-        )
-      ),
-    },
-    error: null,
+  const hydratedRoom: ArenaRoom = {
+    ...room,
+    players: ensureUniqueGuestLobbyNames(
+      dedupeActivePlayers(
+        ((playersData || []) as ArenaRoomPlayerRow[]).map(mapPlayerRow)
+      )
+    ),
   };
+  const { data: sessionResult } = await supabase.auth.getSession();
+  const userId = sessionResult.session?.user.id;
+  const isPartyHost = hydratedRoom.mode === "party_mode" &&
+    hydratedRoom.hostUserId === userId;
+  const questionIndex = hydratedRoom.mode === "party_mode"
+    ? hydratedRoom.partyQuestionIndex
+    : hydratedRoom.status === "starting"
+      ? 0
+      : hydratedRoom.competitiveQuestionIndex;
+  const canLoadAudio = hydratedRoom.status === "starting" ||
+    hydratedRoom.status === "active";
+  const canReadAudio = hydratedRoom.mode === "party_mode"
+    ? isPartyHost
+    : hydratedRoom.players.some((player) => player.userId === userId && !player.leftAt);
+  const currentQuestion = hydratedRoom.quizQuestions[questionIndex];
+
+  if (canLoadAudio && canReadAudio && currentQuestion?.questionId) {
+    const cacheKey = `${userId}:${hydratedRoom.id}:${hydratedRoom.roundNumber}:${currentQuestion.questionId}`;
+    let previewUrl = arenaAudioSourceCache.get(cacheKey);
+    if (!previewUrl) {
+      const { data: audioSource } = await supabase.rpc("get_arena_question_audio", {
+        target_room_id: hydratedRoom.id,
+        target_question_index: questionIndex,
+        target_question_id: currentQuestion.questionId,
+      });
+      const fetchedPreviewUrl = audioSource?.previewUrl;
+      if (typeof fetchedPreviewUrl === "string") {
+        previewUrl = fetchedPreviewUrl;
+        arenaAudioSourceCache.set(cacheKey, previewUrl);
+        if (arenaAudioSourceCache.size > 96) {
+          const oldestKey = arenaAudioSourceCache.keys().next().value;
+          if (oldestKey) arenaAudioSourceCache.delete(oldestKey);
+        }
+      }
+    }
+    if (previewUrl) {
+      hydratedRoom.quizQuestions[questionIndex] = {
+        ...currentQuestion,
+        correctTrack: { ...currentQuestion.correctTrack, previewUrl },
+      };
+      if (hydratedRoom.competitiveReserveQuestions.length > 0) {
+        hydratedRoom.competitiveReserveQuestions = hydratedRoom.competitiveReserveQuestions.map(
+          (reserveQuestion) => reserveQuestion.questionId === currentQuestion.questionId
+            ? { ...reserveQuestion, correctTrack: { ...reserveQuestion.correctTrack, previewUrl } }
+            : reserveQuestion
+        );
+      }
+    }
+  }
+
+  return { room: hydratedRoom, error: null };
+}
+
+export async function prepareTrustedArenaQuestionSet(roomId: string) {
+  if (!supabase) return { questionSet: null, error: "Supabase is not configured yet." };
+  const { data: sessionResult, error: sessionError } = await supabase.auth.getSession();
+  const accessToken = sessionResult.session?.access_token;
+  if (sessionError || !accessToken) {
+    return { questionSet: null, error: "Sign in again before starting this room." };
+  }
+
+  try {
+    const response = await fetch("/api/prepare-arena-questions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ roomId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        questionSet: null,
+        error: typeof payload.error === "string"
+          ? payload.error
+          : "Could not prepare trusted album questions.",
+      };
+    }
+    const questionSetId = payload.questionSetId;
+    const targetQuestionCount = Number(payload.targetQuestionCount);
+    if (typeof questionSetId !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(questionSetId)
+      || !Number.isInteger(targetQuestionCount)
+      || targetQuestionCount < 5 || targetQuestionCount > 12) {
+      return { questionSet: null, error: "The trusted question set response was invalid." };
+    }
+    return {
+      questionSet: {
+        questionSetId,
+        targetQuestionCount,
+        questions: [{ questionSetId }],
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      questionSet: null,
+      error: error instanceof Error ? error.message : "Could not reach the question service.",
+    };
+  }
 }
 
 export async function activateDuelRoom(
   roomId: string,
-  questions: DuelQuizQuestion[],
+  questions: Array<Pick<DuelQuizQuestion, "questionSetId">>,
   mode: ArenaRoomMode = "duel",
-  diagnosticContext: Record<string, unknown> = {},
-  targetQuestionCount = questions.length
+  diagnosticContext: Record<string, unknown> = {}
 ) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
-  if (mode === "party_mode") {
-    const { data, error } = await supabase.rpc("start_party_room", {
-      target_room_id: roomId,
-      target_questions: questions,
-    });
-    logArenaDiagnostic("LOBBY_START_RPC", {
-      ...diagnosticContext, roomId, mode, rpc: "start_party_room", response: data,
-      error: error ? { code: error.code, message: error.message } : null,
-    });
-
-    if (error) {
-      return { room: null, error: getFriendlyArenaError(error.message) };
-    }
-
-    return fetchArenaRoom(roomId);
+  const questionSetId = questions[0]?.questionSetId;
+  if (!questionSetId) {
+    return { room: null, error: "The trusted question set expired. Start again to prepare a new set." };
   }
-
-  let rpc = "prepare_competitive_arena_room_v2";
-  let { data, error } = await supabase.rpc(rpc, {
+  const rpc = "activate_arena_question_set";
+  const { data, error } = await supabase.rpc(rpc, {
     target_room_id: roomId,
-    target_questions: questions,
-    target_question_count: targetQuestionCount,
+    target_question_set_id: questionSetId,
   });
-
-  // Keep deployments playable while the reserve-round migration is being
-  // applied. The legacy RPC receives only primary questions so an older
-  // database can never turn reserve candidates into extra scored rounds.
-  if (error?.code === "PGRST202") {
-    logArenaDiagnostic("LOBBY_START_RPC", {
-      ...diagnosticContext, roomId, mode, rpc, response: data,
-      error: { code: error.code, message: error.message },
-    });
-    rpc = "prepare_competitive_arena_room";
-    ({ data, error } = await supabase.rpc(rpc, {
-      target_room_id: roomId,
-      target_questions: questions.slice(0, targetQuestionCount),
-    }));
-  }
-
-  // This second fallback supports deployments that predate the lobby audio
-  // gate while preserving the same primary-only behavior.
-  if (error?.code === "PGRST202") {
-    logArenaDiagnostic("LOBBY_START_RPC", {
-      ...diagnosticContext, roomId, mode, rpc, response: data,
-      error: { code: error.code, message: error.message },
-    });
-    rpc = "start_competitive_arena_room";
-    ({ data, error } = await supabase.rpc(rpc, {
-      target_room_id: roomId,
-      target_questions: questions.slice(0, targetQuestionCount),
-    }));
-  }
   logArenaDiagnostic("LOBBY_START_RPC", {
     ...diagnosticContext, roomId, mode, rpc, response: data,
     error: error ? { code: error.code, message: error.message } : null,
@@ -1048,7 +1114,8 @@ export async function fetchCompetitiveClockOffset(roomId: string) {
   });
   const requestFinishedAt = Date.now();
 
-  if (error || !data) {
+  const offsetMs = calculateServerClockOffset(data, requestStartedAt, requestFinishedAt);
+  if (error || offsetMs === null) {
     return {
       offsetMs: 0,
       error:
@@ -1057,11 +1124,8 @@ export async function fetchCompetitiveClockOffset(roomId: string) {
     };
   }
 
-  const serverTime = Date.parse(String(data));
-  const requestMidpoint = requestStartedAt + (requestFinishedAt - requestStartedAt) / 2;
-
   return {
-    offsetMs: Number.isFinite(serverTime) ? serverTime - requestMidpoint : 0,
+    offsetMs,
     error: null,
   };
 }
@@ -1469,7 +1533,6 @@ export type PartyAnswerResult = {
   duplicate?: boolean;
   isCorrect?: boolean;
   points?: number;
-  correctAnswer?: string;
   answerTimeSeconds?: number;
 };
 
@@ -1809,6 +1872,8 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     competitiveRevealEndsAt: row.competitive_reveal_ends_at || null,
     competitiveRoundWinnerUserId:
       row.competitive_round_winner_user_id || null,
+    competitiveRevealedAnswer: row.competitive_revealed_answer || null,
+    competitiveRevealedOptionId: row.competitive_revealed_option_id || null,
     competitiveWinningAnswerAt: row.competitive_winning_answer_at || null,
     competitiveWinningResponseTime:
       typeof row.competitive_winning_response_ms === "number"
@@ -1847,6 +1912,8 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     partyAnswerStartsAt: row.party_answer_starts_at || null,
     partyAnswerEndsAt: row.party_answer_ends_at || null,
     partyRevealEndsAt: row.party_reveal_ends_at || null,
+    partyRevealedAnswer: row.party_revealed_answer || null,
+    partyRevealedOptionId: row.party_revealed_option_id || null,
     quizQuestions: normalizeDuelQuestions(row.quiz_questions),
     players: [],
   };
@@ -1907,22 +1974,39 @@ function normalizeDuelQuestions(questions: unknown): DuelQuizQuestion[] {
   return questions
     .map((question) => {
       const rawQuestion = question as Partial<DuelQuizQuestion>;
-      const correctTrack = rawQuestion.correctTrack;
+      const correctTrack = rawQuestion.correctTrack || {
+        id: "",
+        name: "",
+        previewUrl: null,
+      };
       const options = rawQuestion.options;
 
-      if (!correctTrack || !Array.isArray(options)) {
+      if (!Array.isArray(options)) {
         return null;
       }
 
-      return {
-        correctTrack,
-        options,
-        correctAnswer: rawQuestion.correctAnswer || correctTrack.name,
+      const normalizedQuestion: DuelQuizQuestion = {
+        questionId: rawQuestion.questionId,
+        questionSetId: rawQuestion.questionSetId,
+        correctTrack: {
+          id: correctTrack.id || "",
+          name: "",
+          previewUrl: correctTrack.previewUrl || null,
+        },
+        options: options.map((option) => {
+          const track = option as Partial<DuelQuizTrack>;
+          return {
+            id: typeof track.id === "string" ? track.id : "",
+            name: typeof track.name === "string" ? track.name : "",
+            previewUrl: null,
+          };
+        }),
         clipStartSeconds:
           typeof rawQuestion.clipStartSeconds === "number"
             ? rawQuestion.clipStartSeconds
             : 8,
       };
+      return normalizedQuestion;
     })
     .filter((question): question is DuelQuizQuestion => Boolean(question));
 }
