@@ -76,6 +76,7 @@ import {
   canReportCompetitiveAudioFailure,
   getCompetitiveRoundKey,
 } from "../lib/arenaRoundLifecycle";
+import { isOlderArenaRoomSnapshot } from "../lib/arenaRoomSnapshots";
 import {
   canPreparePartyHostAudio,
   canStartPartyHostPlayback,
@@ -162,33 +163,6 @@ const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
 const ARENA_PRESENCE_HEARTBEAT_MS = 8000;
 const AUDIO_BLOCKED_SKIP_DELAY_MS = 3500;
 const ALBUM_SEARCH_DEBOUNCE_MS = 450;
-const ARENA_STATUS_ORDER: Record<string, number> = {
-  waiting: 0,
-  starting: 1,
-  active: 2,
-  finished: 3,
-  cancelled: 3,
-  expired: 3,
-  forfeited: 3,
-  ended: 3,
-};
-const COMPETITIVE_PHASE_ORDER = {
-  idle: 0,
-  preparing_audio: 1,
-  countdown: 2,
-  answering: 3,
-  reveal: 4,
-  finished: 5,
-} as const;
-const PARTY_PHASE_ORDER = {
-  idle: 0,
-  preparing_audio: 1,
-  countdown: 2,
-  awaiting_audio: 3,
-  answering: 4,
-  reveal: 5,
-  finished: 6,
-} as const;
 const LEGACY_ARENA_ROOM_STORAGE_KEYS = [
   "tracktest.activeArenaRoomId",
   "tracktestArenaRoomId",
@@ -228,42 +202,6 @@ function getCompetitiveAudioFailureMessage(reason?: string | null) {
   return "Audio unavailable on a player device. Question skipped for everyone.";
 }
 
-function isOlderArenaRoomSnapshot(next: ArenaRoom, current: ArenaRoom) {
-  if (next.id !== current.id) return false;
-  if (next.roundNumber !== current.roundNumber) {
-    return next.roundNumber < current.roundNumber;
-  }
-
-  const nextStatusOrder = ARENA_STATUS_ORDER[next.status] ?? 0;
-  const currentStatusOrder = ARENA_STATUS_ORDER[current.status] ?? 0;
-  if (nextStatusOrder !== currentStatusOrder) {
-    return nextStatusOrder < currentStatusOrder;
-  }
-
-  if (next.mode === "party_mode" && current.mode === "party_mode") {
-    if (next.partyQuestionIndex !== current.partyQuestionIndex) {
-      return next.partyQuestionIndex < current.partyQuestionIndex;
-    }
-
-    return (
-      PARTY_PHASE_ORDER[next.partyQuestionPhase] <
-      PARTY_PHASE_ORDER[current.partyQuestionPhase]
-    );
-  }
-
-  if (next.mode !== "party_mode" && current.mode !== "party_mode") {
-    if (next.competitiveQuestionIndex !== current.competitiveQuestionIndex) {
-      return next.competitiveQuestionIndex < current.competitiveQuestionIndex;
-    }
-
-    return (
-      COMPETITIVE_PHASE_ORDER[next.competitiveRoundPhase] <
-      COMPETITIVE_PHASE_ORDER[current.competitiveRoundPhase]
-    );
-  }
-
-  return false;
-}
 const ARENA_MODE_SETTINGS: Record<
   ArenaRoomMode,
   {
@@ -890,11 +828,7 @@ function ArenaPage({
 
       await heartbeatArenaRoomPresence(roomId);
       const roomSnapshot = activeRoomSnapshotRef.current;
-      if (
-        !roomSnapshot ||
-        roomSnapshot.id !== roomId ||
-        !["waiting", "starting"].includes(roomSnapshot.status)
-      ) {
+      if (!roomSnapshot || roomSnapshot.id !== roomId) {
         return;
       }
 

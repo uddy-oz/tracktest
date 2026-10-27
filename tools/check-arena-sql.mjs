@@ -57,6 +57,18 @@ const secureArenaQuestionsProbe = readFileSync(
   new URL("../supabase/tests/20261026_secure_arena_questions.sql", import.meta.url),
   "utf8"
 );
+const activeDisconnectRecovery = readFileSync(
+  new URL("../supabase/20261027_arena_active_disconnect_recovery.sql", import.meta.url),
+  "utf8"
+);
+const activeDisconnectProbe = readFileSync(
+  new URL("../supabase/tests/20261027_arena_active_disconnect_recovery.sql", import.meta.url),
+  "utf8"
+);
+const guestInviteDisplay = readFileSync(
+  new URL("../supabase/20261028_guest_host_invite_display.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -506,5 +518,30 @@ assert.match(secureArenaQuestionsProbe, /countdown/);
 assert.match(secureArenaQuestionsProbe, /Party revealed before every active participant answered/);
 assert.match(secureArenaQuestionsProbe, /Repeated question staging replaced the original set/);
 assert.match(secureArenaQuestionsProbe, /answer_result \? 'correctAnswer'/);
+
+assert.match(activeDisconnectRecovery, /^begin;/i, "active disconnect migration must be transactional");
+assert.match(activeDisconnectRecovery, /commit;\s*$/i, "active disconnect migration must commit transactionally");
+assert.match(activeDisconnectRecovery, /status in \('waiting', 'starting', 'active'\)/,
+  "presence reconciliation must include active matches");
+assert.match(activeDisconnectRecovery, /target_room\.mode = 'party_mode'[\s\S]*close_reason = 'host_disconnected'/,
+  "an absent Party host must cancel the room rather than transfer audio ownership");
+assert.match(activeDisconnectRecovery, /target_room\.mode = 'duel'[\s\S]*'win_by_forfeit'/,
+  "active Duel disconnects must resolve the connected player's win");
+assert.match(activeDisconnectRecovery, /target_room\.mode = 'group_lobby'[\s\S]*host_user_id = replacement_host_id/,
+  "Group Lobby must transfer host ownership to a connected participant");
+assert.match(activeDisconnectRecovery, /create or replace function public\.forfeit_arena_room[\s\S]*for update[\s\S]*leave_arena_room/,
+  "explicit forfeits must share the locked, idempotent leave lifecycle");
+assert.match(activeDisconnectRecovery, /revoke all on function public\.reconcile_arena_room_presence_internal\(uuid, timestamptz\)[\s\S]*from public, anon, authenticated/,
+  "the internal presence reconciler must not be client-callable");
+assert.match(activeDisconnectProbe, /Host departure did not resolve the Duel fairly/);
+assert.match(activeDisconnectProbe, /Repeated forfeit duplicated progression rows/);
+assert.match(activeDisconnectProbe, /Party did not close after host disconnect timeout/);
+assert.match(activeDisconnectProbe, /Group host handoff failed/);
+assert.match(guestInviteDisplay, /^begin;/i, "guest invite display migration must be transactional");
+assert.match(guestInviteDisplay, /commit;\s*$/i, "guest invite display migration must commit transactionally");
+assert.match(guestInviteDisplay, /set search_path = ''/, "invite SECURITY DEFINER must use an empty search path");
+assert.match(guestInviteDisplay, /host_player\.display_name/, "invite preview must prefer the host room membership name");
+assert.match(guestInviteDisplay, /revoke all on function public\.get_arena_invite\(text\) from public/i);
+assert.match(guestInviteDisplay, /grant execute on function public\.get_arena_invite\(text\) to authenticated, anon/i);
 
 console.log("Arena SQL lifecycle and authority guards passed.");
