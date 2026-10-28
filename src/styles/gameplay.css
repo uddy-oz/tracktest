@@ -36,14 +36,14 @@
 
 .quiz-live {
   width: 100%;
-  height: 100dvh;
-  min-height: 560px;
+  height: auto;
+  min-height: 100dvh;
   padding: calc(var(--nav-height) + 8px) clamp(14px, 3vw, 32px) 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: clamp(4px, 0.9vh, 10px);
-  overflow: hidden;
+  overflow: visible;
   color: var(--game-text);
   background: var(--page);
 }
@@ -106,7 +106,7 @@
 .quiz-live .quiz-end-run,
 .arena-game-modal .duel-room-actions .danger-button {
   min-width: 0;
-  min-height: 42px;
+  min-height: 44px;
   border-color: color-mix(in srgb, var(--game-danger) 58%, transparent);
   color: var(--game-danger);
   background: color-mix(in srgb, var(--game-danger-soft) 76%, var(--game-surface));
@@ -277,15 +277,96 @@
 }
 
 .arena-game-modal {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  margin-inline: auto;
+  overflow: visible;
   color: var(--game-text);
   background: var(--page);
 }
 
+.arena-mode-overlay.arena-game-overlay {
+  inset: var(--nav-height) 0 0;
+  display: block;
+  padding: 12px clamp(8px, 2vw, 24px) max(18px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overflow-x: clip;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--page);
+  backdrop-filter: none;
+}
+
 .arena-game-modal .duel-room-screen.duel-game-screen {
-  grid-template-rows: auto auto auto auto minmax(136px, auto);
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.4fr);
+  grid-template-rows: repeat(6, auto);
+  grid-template-areas:
+    "hero actions"
+    "status side"
+    "state side"
+    "clue side"
+    "audio side"
+    "answers side";
   align-content: start;
+  align-items: start;
+  overflow: visible;
   color: var(--game-text);
   background: var(--page);
+}
+
+.arena-game-modal .duel-room-hero {
+  padding-right: 0;
+  align-self: start;
+}
+
+.arena-game-modal .group-live-board {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  align-self: start;
+}
+
+.arena-game-modal .group-live-list {
+  max-height: min(52dvh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.arena-game-modal .audio-preview-wrapper {
+  grid-area: audio;
+  position: static;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.arena-game-modal .audio-preview-wrapper:empty {
+  display: none;
+}
+
+.arena-game-modal .audio-preview-wrapper .clip-button {
+  position: static;
+  inset: auto;
+  transform: none;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--game-border);
+  border-radius: var(--radius-control);
+  color: var(--game-text);
+  background: var(--game-control);
+  box-shadow: inset 0 1px var(--glass-border);
+  font-size: 14px;
+}
+
+.arena-game-modal .audio-preview-wrapper .clip-button:hover {
+  background: var(--game-control-hover);
 }
 
 .arena-game-modal .duel-room-hero,
@@ -332,16 +413,27 @@
   justify-content: center;
 }
 
+.arena-game-modal :is(.duel-h2h-card, .group-live-board, .game-state) {
+  border-color: color-mix(in srgb, var(--arena-mode-accent) 24%, var(--game-border));
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--arena-mode-accent) 6%, transparent), transparent 58%),
+    var(--game-surface);
+  box-shadow: inset 0 1px var(--glass-border);
+}
+
 .arena-game-modal .duel-room-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 18;
+  grid-area: actions;
+  position: static;
+  justify-self: end;
+  align-self: center;
+  margin: 0;
+  z-index: auto;
 }
 
 .arena-game-modal .duel-room-actions button {
-  min-height: 42px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 10px 14px;
   font-size: 12px;
 }
 
@@ -354,6 +446,41 @@
 .arena-confirm-dialog h2 {
   color: var(--game-text);
 }
+
+.duel-results-card .duel-player-card {
+  border-color: var(--game-border);
+  border-radius: var(--radius-card);
+  background: var(--game-surface-raised);
+}
+
+.duel-results-card .duel-winner-card {
+  border-color: var(--ui-gold-text);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mode-championship) 12%, transparent), transparent 72%), var(--game-surface-raised);
+}
+
+.duel-results-card .duel-player-card > span,
+.duel-results-card .duel-player-card small,
+.duel-results-card .competitive-outcome-banner p {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--game-text-secondary);
+}
+
+.duel-results-card .duel-player-card .guest-name-line strong,
+.duel-results-card .duel-player-card p {
+  color: var(--game-text);
+}
+
+.duel-results-card .competitive-match-summary > div {
+  border: 1px solid var(--game-border);
+  border-radius: var(--radius-card);
+  color: var(--game-text);
+  background: var(--game-surface-raised);
+}
+
+.duel-results-card.victory .competitive-outcome-banner h2 { color: var(--ui-success-text); }
+.duel-results-card.defeat .competitive-outcome-banner h2 { color: var(--ui-danger-text); }
+.duel-results-card.draw .competitive-outcome-banner h2 { color: var(--ui-warning-text); }
 
 .arena-confirm-dialog > p:not(.eyebrow) {
   color: var(--game-text-secondary);
@@ -440,7 +567,7 @@
 
 @media (min-width: 769px) {
   .arena-game-modal .duel-room-screen.duel-game-screen {
-    grid-template-rows: auto auto auto auto minmax(144px, auto);
+    grid-template-rows: repeat(6, auto);
     align-content: start;
   }
 
@@ -457,7 +584,7 @@
 
 @media (max-width: 768px) {
   .quiz-live {
-    min-height: 520px;
+    min-height: 100dvh;
     padding: calc(var(--nav-height) + 6px) 10px max(8px, env(safe-area-inset-bottom));
     gap: 5px;
   }
@@ -531,23 +658,31 @@
   }
 
   .arena-game-modal .duel-room-screen.duel-game-screen {
-    grid-template-rows: auto auto auto minmax(84px, auto) auto minmax(132px, auto);
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: repeat(7, auto);
+    grid-template-areas:
+      "hero actions"
+      "side side"
+      "status status"
+      "state state"
+      "clue clue"
+      "audio audio"
+      "answers answers";
     align-content: start;
   }
 
   .arena-game-modal .duel-room-hero {
-    padding-right: 106px;
+    padding-right: 0;
   }
 
   .arena-game-modal .duel-room-actions {
-    top: 7px;
-    right: 7px;
+    align-self: start;
   }
 
   .arena-game-modal .duel-room-actions button {
-    min-height: 40px;
-    padding: 7px 9px;
-    font-size: 10px;
+    min-height: 44px;
+    padding: 10px;
+    font-size: 12px;
   }
 
   .arena-game-modal .quiz-status {
@@ -570,7 +705,11 @@
   }
 
   .arena-game-modal .group-live-board {
-    max-height: 104px;
+    max-height: none;
+  }
+
+  .arena-game-modal .group-live-list {
+    max-height: 112px;
   }
 
   .arena-audio-debug {

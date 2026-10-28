@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getAlbumDisplayTitle } from "../lib/albumDisplay";
 import type { User } from "@supabase/supabase-js";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
@@ -1083,7 +1084,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
             </strong>
           </p>
           <p>
-            Album: <strong>{selectedAlbum.title}</strong>
+            Album: <strong>{getAlbumDisplayTitle(selectedAlbum.title)}</strong>
           </p>
           <p>
             Artist: <strong>{selectedAlbum.artist}</strong>
@@ -1126,7 +1127,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         <img
           className="quiz-album-cover"
           src={selectedAlbum.imageUrl}
-          alt={`${selectedAlbum.title} cover`}
+          alt={`${getAlbumDisplayTitle(selectedAlbum.title)} cover`}
         />
       )}
 
@@ -1276,7 +1277,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
       <p className="quiz-clue">
         Question {currentQuestionIndex + 1} of {questions.length}: Pick the
-        correct track from <strong>{selectedAlbum.title}</strong>.
+        correct track from <strong>{getAlbumDisplayTitle(selectedAlbum.title)}</strong>.
       </p>
 
       <div className="audio-preview-wrapper">

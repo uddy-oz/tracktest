@@ -43,7 +43,7 @@ export type ArenaAudioStartRequest = {
 
 export type ArenaAudioPlayResult =
   | { status: "playing" }
-  | { status: "failed"; message: string }
+  | { status: "failed"; message: string; autoplayBlocked?: boolean }
   | { status: "expired"; message: string }
   | { status: "stale" };
 
@@ -854,6 +854,7 @@ export class ArenaAudioController {
     const operationId = ++this.operationId;
     this.stopTimers();
     this.activePlayback = null;
+    let autoplayBlocked = false;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (!this.isCurrent(operationId, request.roundKey, round.previewUrl)) {
@@ -885,11 +886,15 @@ export class ArenaAudioController {
       if (result.status === "expired") {
         return result;
       }
+      if (result.status === "failed" && result.autoplayBlocked) {
+        autoplayBlocked = true;
+      }
     }
 
     return {
       status: "failed",
       message: "The preview did not become playable after one retry.",
+      autoplayBlocked,
     };
   }
 
@@ -1110,9 +1115,13 @@ export class ArenaAudioController {
         return { status: "stale" };
       }
 
+      if (details.name === "NotAllowedError") {
+        this.mediaUnlocked = false;
+      }
       return {
         status: "failed",
         message: `${details.name}: ${details.message}`,
+        autoplayBlocked: details.name === "NotAllowedError",
       };
     }
   }
