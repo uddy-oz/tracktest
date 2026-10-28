@@ -28,6 +28,7 @@ import {
   joinDuelRoom,
   leaveArenaRoom,
   normalizeArenaInviteCode,
+  prepareTrustedArenaQuestionSet,
   requestArenaRematch,
   reportCompetitiveAudioFailure,
   reconcileArenaRoomPresence,
@@ -47,7 +48,6 @@ import {
   type ArenaRoomMode,
   type ArenaRoomPlayer,
   type CompetitiveAudioReadinessState,
-  type DuelQuizQuestion,
 } from "../lib/arenaRooms";
 import type { UserProfile } from "../lib/profiles";
 import { supabase } from "../lib/supabaseClient";
@@ -61,7 +61,6 @@ import {
   prefetchSpotifyAlbumTracks,
   searchSpotifyAlbums,
   type SpotifyAlbum,
-  type SpotifyTrack,
 } from "../lib/spotifyApi";
 import { sounds } from "../lib/sounds";
 import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
@@ -77,6 +76,7 @@ import {
   canReportCompetitiveAudioFailure,
   getCompetitiveRoundKey,
 } from "../lib/arenaRoundLifecycle";
+import { isOlderArenaRoomSnapshot } from "../lib/arenaRoomSnapshots";
 import {
   canPreparePartyHostAudio,
   canStartPartyHostPlayback,
@@ -146,6 +146,7 @@ type DuelResult = {
   isCorrect: boolean;
   points: number;
   correctAnswer: string;
+  correctOptionId?: string;
   wasAudioSkipped?: boolean;
   outcome?: "winner" | "wrong" | "opponent" | "timeout" | "skipped";
 };
@@ -162,34 +163,6 @@ const DUEL_OPEN_ROOM_REFRESH_MS = 12000;
 const ARENA_PRESENCE_HEARTBEAT_MS = 8000;
 const AUDIO_BLOCKED_SKIP_DELAY_MS = 3500;
 const ALBUM_SEARCH_DEBOUNCE_MS = 450;
-const COMPETITIVE_RESERVE_QUESTIONS = 4;
-const ARENA_STATUS_ORDER: Record<string, number> = {
-  waiting: 0,
-  starting: 1,
-  active: 2,
-  finished: 3,
-  cancelled: 3,
-  expired: 3,
-  forfeited: 3,
-  ended: 3,
-};
-const COMPETITIVE_PHASE_ORDER = {
-  idle: 0,
-  preparing_audio: 1,
-  countdown: 2,
-  answering: 3,
-  reveal: 4,
-  finished: 5,
-} as const;
-const PARTY_PHASE_ORDER = {
-  idle: 0,
-  preparing_audio: 1,
-  countdown: 2,
-  awaiting_audio: 3,
-  answering: 4,
-  reveal: 5,
-  finished: 6,
-} as const;
 const LEGACY_ARENA_ROOM_STORAGE_KEYS = [
   "tracktest.activeArenaRoomId",
   "tracktestArenaRoomId",
@@ -229,42 +202,6 @@ function getCompetitiveAudioFailureMessage(reason?: string | null) {
   return "Audio unavailable on a player device. Question skipped for everyone.";
 }
 
-function isOlderArenaRoomSnapshot(next: ArenaRoom, current: ArenaRoom) {
-  if (next.id !== current.id) return false;
-  if (next.roundNumber !== current.roundNumber) {
-    return next.roundNumber < current.roundNumber;
-  }
-
-  const nextStatusOrder = ARENA_STATUS_ORDER[next.status] ?? 0;
-  const currentStatusOrder = ARENA_STATUS_ORDER[current.status] ?? 0;
-  if (nextStatusOrder !== currentStatusOrder) {
-    return nextStatusOrder < currentStatusOrder;
-  }
-
-  if (next.mode === "party_mode" && current.mode === "party_mode") {
-    if (next.partyQuestionIndex !== current.partyQuestionIndex) {
-      return next.partyQuestionIndex < current.partyQuestionIndex;
-    }
-
-    return (
-      PARTY_PHASE_ORDER[next.partyQuestionPhase] <
-      PARTY_PHASE_ORDER[current.partyQuestionPhase]
-    );
-  }
-
-  if (next.mode !== "party_mode" && current.mode !== "party_mode") {
-    if (next.competitiveQuestionIndex !== current.competitiveQuestionIndex) {
-      return next.competitiveQuestionIndex < current.competitiveQuestionIndex;
-    }
-
-    return (
-      COMPETITIVE_PHASE_ORDER[next.competitiveRoundPhase] <
-      COMPETITIVE_PHASE_ORDER[current.competitiveRoundPhase]
-    );
-  }
-
-  return false;
-}
 const ARENA_MODE_SETTINGS: Record<
   ArenaRoomMode,
   {
@@ -301,7 +238,6 @@ const ARENA_MODE_SETTINGS: Record<
     minPlayersToStart: 2,
   },
 };
-const MAX_QUESTIONS = 12;
 const RING_RADIUS = 54;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
@@ -892,11 +828,7 @@ function ArenaPage({
 
       await heartbeatArenaRoomPresence(roomId);
       const roomSnapshot = activeRoomSnapshotRef.current;
-      if (
-        !roomSnapshot ||
-        roomSnapshot.id !== roomId ||
-        !["waiting", "starting"].includes(roomSnapshot.status)
-      ) {
+      if (!roomSnapshot || roomSnapshot.id !== roomId) {
         return;
       }
 
@@ -1598,14 +1530,11 @@ function ArenaPage({
       setDuelCorrectAnswers(player.roundsWon);
       setDuelStreak(player.currentStreak);
 
-      if (playerAnsweredThisRound && player.competitiveSelectedAnswer) {
-        duelSelectedAnswerRef.current = player.competitiveSelectedAnswer;
-        setDuelSelectedAnswer(player.competitiveSelectedAnswer);
-        setDuelLastResult({
-          isCorrect: Boolean(player.competitiveAnswerWasCorrect),
-          points: player.competitiveAnswerWasCorrect ? 1 : 0,
-          correctAnswer: currentDuelQuestion?.correctAnswer || "",
-        });
+      if (playerAnsweredThisRound) {
+        // The submitted option is intentionally not persisted in the public
+        // player snapshot. The answered index is enough to restore the lock.
+        duelPhaseRef.current = "partyAnswerLocked";
+        setDuelPhase("partyAnswerLocked");
       }
     }
 
@@ -1690,9 +1619,7 @@ function ArenaPage({
         const didCurrentPlayerWin = Boolean(
           winner && winner.userId === session?.user.id
         );
-        const didCurrentPlayerAnswerWrong = Boolean(
-          playerAnsweredThisRound && player?.competitiveAnswerWasCorrect === false
-        );
+        const didCurrentPlayerAnswerWrong = Boolean(playerAnsweredThisRound);
         const outcome: DuelResult["outcome"] = activeRoom.competitiveAudioFailed
           ? "skipped"
           : didCurrentPlayerWin
@@ -1712,7 +1639,8 @@ function ArenaPage({
         setDuelLastResult({
           isCorrect: didCurrentPlayerWin,
           points: didCurrentPlayerWin ? 1 : 0,
-          correctAnswer: currentDuelQuestion?.correctAnswer || "",
+          correctAnswer: activeRoom.competitiveRevealedAnswer || "",
+          correctOptionId: activeRoom.competitiveRevealedOptionId || undefined,
           wasAudioSkipped: activeRoom.competitiveAudioFailed,
           outcome,
         });
@@ -1794,7 +1722,8 @@ function ArenaPage({
     currentArenaPlayer?.competitiveAnsweredQuestionIndex,
     currentArenaPlayer?.competitiveSelectedAnswer,
     currentArenaPlayer?.competitiveAnswerWasCorrect,
-    currentDuelQuestion?.correctAnswer,
+    activeRoom?.competitiveRevealedAnswer,
+    activeRoom?.competitiveRevealedOptionId,
     isCompetitiveMode,
     session?.user.id,
   ]);
@@ -2420,71 +2349,6 @@ function ArenaPage({
     });
   }, [activeRoom?.id, activeRoom?.roundNumber, activeRoom?.status, arenaAudioController]);
 
-  function shuffleArray<T>(array: T[]) {
-    return [...array].sort(() => Math.random() - 0.5);
-  }
-
-  function getQuestionCount(totalPlayableTracks: number) {
-    return Math.min(
-      MAX_QUESTIONS,
-      Math.max(MIN_QUESTIONS, Math.floor(totalPlayableTracks / 2) + 1)
-    );
-  }
-
-  function getRandomClipStart(duration: number) {
-    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 30;
-    const latestStart = Math.max(0, safeDuration - CLIP_LENGTH_SECONDS);
-    const preferredStart = 6;
-    const preferredEnd = Math.min(22, latestStart);
-
-    // iTunes previews do not include lyric/title timestamps. Starting later in
-    // the preview reduces obvious title giveaways, but cannot guarantee the
-    // title or hook will be avoided.
-    if (preferredEnd >= preferredStart) {
-      return preferredStart + Math.random() * (preferredEnd - preferredStart);
-    }
-
-    if (latestStart > 1) {
-      return 1 + Math.random() * (latestStart - 1);
-    }
-
-    return 0;
-  }
-
-  function buildDuelQuestions(
-    tracks: SpotifyTrack[],
-    mode: ArenaRoomMode
-  ): { questions: DuelQuizQuestion[]; targetQuestionCount: number } {
-    const playableTracks = tracks.filter((track) => Boolean(track.previewUrl));
-    const targetQuestionCount = getQuestionCount(playableTracks.length);
-    const reserveCount =
-      mode === "party_mode"
-        ? 0
-        : Math.min(
-            COMPETITIVE_RESERVE_QUESTIONS,
-            playableTracks.length - targetQuestionCount
-          );
-    const quizTracks = shuffleArray(playableTracks).slice(
-      0,
-      targetQuestionCount + reserveCount
-    );
-
-    const questions = quizTracks.map((correctTrack) => {
-      const wrongOptions = shuffleArray(
-        playableTracks.filter((track) => track.id !== correctTrack.id)
-      ).slice(0, 3);
-
-      return {
-        correctTrack,
-        options: shuffleArray([correctTrack, ...wrongOptions]),
-        correctAnswer: correctTrack.name,
-        clipStartSeconds: getRandomClipStart(30),
-      };
-    });
-
-    return { questions, targetQuestionCount };
-  }
-
   function getStreakRewardLabel(currentStreak: number) {
     if (currentStreak >= 10) {
       return "Legendary Streak";
@@ -2602,6 +2466,17 @@ function ArenaPage({
     }
 
     if (
+      activeQuestionRunKeyRef.current === expectedRoundKey &&
+      result?.accepted === true &&
+      result.pendingUntilDeadline === true
+    ) {
+      stopDuelClip(false, expectedRoundKey, "competitive-audio-retry-pending");
+      setDuelAudioFallbackMessage(
+        "Audio could not start. Retry once while the room checks recovery."
+      );
+      duelPhaseRef.current = "audioBlocked";
+      setDuelPhase("audioBlocked");
+    } else if (
       activeQuestionRunKeyRef.current === expectedRoundKey &&
       result?.accepted === true
     ) {
@@ -3233,8 +3108,8 @@ function ArenaPage({
 
     const isCorrect = Boolean(result.isCorrect);
     const points = result.points || 0;
-    const correctAnswer =
-      result.correctAnswer || currentDuelQuestion.correctAnswer;
+    const correctAnswer = activeRoom.partyRevealedAnswer || "";
+    const correctOptionId = activeRoom.partyRevealedOptionId || undefined;
     const answerTime = result.answerTimeSeconds || 0;
     const nextStreak = isCorrect ? duelStreak + 1 : 0;
 
@@ -3242,12 +3117,12 @@ function ArenaPage({
     setDuelCorrectAnswers((currentTotal) => currentTotal + (isCorrect ? 1 : 0));
     setDuelAnswerTimes((currentTimes) => [...currentTimes, answerTime]);
     setDuelStreak(nextStreak);
-    setDuelLastResult({ isCorrect, points, correctAnswer });
+    setDuelLastResult({ isCorrect, points, correctAnswer, correctOptionId });
     setDuelFlash(isCorrect ? "good" : "bad");
     setDuelRevealMessage(
       isCorrect
         ? getStreakRewardLabel(nextStreak) || "Answer locked"
-        : `Correct answer: ${correctAnswer}`
+        : "Answer locked. Waiting for the reveal."
     );
 
     if (isCorrect) {
@@ -3297,7 +3172,6 @@ function ArenaPage({
     const submissionRoundId = activeRoom.competitiveRoundId;
     const submissionQuestionIndex = activeRoom.competitiveQuestionIndex;
     const submissionRoundNumber = activeRoom.roundNumber;
-    const submittedCorrectAnswer = currentDuelQuestion.correctAnswer;
     const isCurrentSubmissionRound = () =>
       Boolean(submissionRoundKey) &&
       activeQuestionRunKeyRef.current === submissionRoundKey;
@@ -3368,7 +3242,8 @@ function ArenaPage({
     setDuelLastResult({
       isCorrect,
       points: result.roundWon ? 1 : 0,
-      correctAnswer: submittedCorrectAnswer,
+      correctAnswer: refreshed.room?.competitiveRevealedAnswer || "",
+      correctOptionId: refreshed.room?.competitiveRevealedOptionId || undefined,
       wasAudioSkipped: reason === "audioUnavailable",
       outcome: reason === "audioUnavailable"
         ? "skipped"
@@ -4149,13 +4024,8 @@ function ArenaPage({
       const mediaUnlock = arenaAudioController.unlockFromUserGesture();
       const result = await prepareArenaLobbyStart(roomToStart.id, session.user, {
         fetchRoom: fetchArenaRoom,
-        loadTracks: getSpotifyAlbumTracks,
-        buildQuestions: buildDuelQuestions,
-        beforeActivate: async (questions) => {
-          arenaAudioController.warmPreview(
-            questions[0]?.correctTrack.previewUrl || "",
-            0
-          );
+        prepareTrustedQuestions: (room) => prepareTrustedArenaQuestionSet(room.id),
+        beforeActivate: async () => {
           const audioUnlocked = await mediaUnlock;
           setIsArenaAudioUnlocked(audioUnlocked);
           if (roomToStart.mode === "party_mode" && !audioUnlocked) {
@@ -5158,7 +5028,7 @@ function ArenaPage({
             <p className="reveal-answer">
               Correct answer:{" "}
               <strong>
-                {duelLastResult?.correctAnswer || currentDuelQuestion?.correctAnswer}
+                {duelLastResult?.correctAnswer || activeRoom?.competitiveRevealedAnswer || activeRoom?.partyRevealedAnswer}
               </strong>
             </p>
           )}
@@ -5265,7 +5135,7 @@ function ArenaPage({
             <p className="reveal-answer">
               Correct answer:{" "}
               <strong>
-                {duelLastResult?.correctAnswer || currentDuelQuestion?.correctAnswer}
+                {duelLastResult?.correctAnswer || activeRoom?.competitiveRevealedAnswer || activeRoom?.partyRevealedAnswer}
               </strong>
             </p>
           )}
@@ -5884,16 +5754,26 @@ function ArenaPage({
                   <button
                     type="button"
                     className={`song-button ${
-                      duelSelectedAnswer === option.name ? "selected-song" : ""
+                      duelSelectedAnswer === option.id ? "selected-song" : ""
                     } ${
-                      ((isActivePartyMode && duelSelectedAnswer) ||
-                        (!isActivePartyMode && duelPhase === "reveal")) &&
-                      option.name === question.correctAnswer
+                      (isActivePartyMode
+                        ? Boolean(activeRoom.partyRevealedOptionId) || Boolean(duelSelectedAnswer)
+                        : duelPhase === "reveal") &&
+                      (option.id === (isActivePartyMode
+                        ? activeRoom.partyRevealedOptionId
+                        : activeRoom.competitiveRevealedOptionId) ||
+                        (option.id === duelSelectedAnswer && duelLastResult?.isCorrect))
                         ? "correct-song"
                         : ""
                     } ${
-                      duelSelectedAnswer === option.name &&
-                      option.name !== question.correctAnswer
+                      duelSelectedAnswer === option.id &&
+                      (duelLastResult?.isCorrect === false ||
+                        Boolean(isActivePartyMode
+                          ? activeRoom.partyRevealedOptionId
+                          : duelPhase === "reveal") &&
+                          option.id !== (isActivePartyMode
+                            ? activeRoom.partyRevealedOptionId
+                            : activeRoom.competitiveRevealedOptionId))
                         ? "wrong-song"
                         : ""
                     }`}
@@ -5901,8 +5781,8 @@ function ArenaPage({
                     disabled={duelPhase !== "answering" || Boolean(duelSelectedAnswer)}
                     onClick={() =>
                       isActivePartyMode
-                        ? void recordPartyAnswer(option.name)
-                        : void recordDuelAnswer(option.name)
+                        ? void recordPartyAnswer(option.id)
+                        : void recordDuelAnswer(option.id)
                     }
                   >
                     {option.name}

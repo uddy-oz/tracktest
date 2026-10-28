@@ -192,7 +192,7 @@ export function withCatalogConfigurationFallback(
   primary: CatalogAdapter,
   fallback: CatalogAdapter = mockCatalogAdapter
 ): CatalogAdapter {
-  function useFallback<T>(primaryRequest: () => Promise<T>, fallbackRequest: () => Promise<T>) {
+  function requestWithFallback<T>(primaryRequest: () => Promise<T>, fallbackRequest: () => Promise<T>) {
     return primaryRequest().catch((error) => {
       if (error instanceof CatalogConfigurationError) return fallbackRequest();
       throw error;
@@ -203,33 +203,33 @@ export function withCatalogConfigurationFallback(
     ...primary,
     displayName: `${primary.displayName} (mock fallback available)`,
     searchArtists: (query, page, context) =>
-      useFallback(
+      requestWithFallback(
         () => primary.searchArtists(query, page, context),
         () => fallback.searchArtists(query, page, context)
       ),
     searchPlaylists: (query, category, page, context) =>
-      useFallback(
+      requestWithFallback(
         () => primary.searchPlaylists(query, category, page, context),
         () => fallback.searchPlaylists(query, category, page, context)
       ),
     getArtistTracks: (id, page, context) =>
       id.provider === fallback.provider
         ? fallback.getArtistTracks(id, page, context)
-        : useFallback(
+        : requestWithFallback(
             () => primary.getArtistTracks(id, page, context),
             () => fallback.getArtistTracks(id, page, context)
           ),
     getArtistAlbums: (id, page, context) =>
       id.provider === fallback.provider
         ? fallback.getArtistAlbums(id, page, context)
-        : useFallback(
+        : requestWithFallback(
             () => primary.getArtistAlbums(id, page, context),
             () => fallback.getArtistAlbums(id, page, context)
           ),
     getPlaylistTracks: (id, page, context) =>
       id.provider === fallback.provider
         ? fallback.getPlaylistTracks(id, page, context)
-        : useFallback(
+        : requestWithFallback(
             () => primary.getPlaylistTracks(id, page, context),
             () => fallback.getPlaylistTracks(id, page, context)
           ),

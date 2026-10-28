@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   classifyArenaAudioFailure,
@@ -108,4 +109,15 @@ test("a disconnected client reaches reserve recovery within the four-second serv
   const legacyDeadlineMs = stagedAtMs + 12_000;
   const fastFailDeadlineMs = Math.min(legacyDeadlineMs, stagedAtMs + 4_000);
   assert.equal(fastFailDeadlineMs - stagedAtMs, 4_000);
+});
+
+test("a client audio failure waits for the authoritative recovery deadline", () => {
+  const arenaPage = readFileSync(new URL("../src/Components/ArenaPage.tsx", import.meta.url), "utf8");
+  assert.match(arenaPage, /result\.pendingUntilDeadline === true/);
+  assert.match(arenaPage, /competitive-audio-retry-pending/);
+  assert.doesNotMatch(
+    arenaPage,
+    /pendingUntilDeadline[\s\S]{0,300}noteVisibleSkip\(\)/,
+    "a pending response must not be rendered as an immediate shared skip"
+  );
 });

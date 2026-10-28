@@ -37,6 +37,38 @@ const multiplayerProgression = readFileSync(
   new URL("../supabase/20261007_multiplayer_progression_and_leaderboards.sql", import.meta.url),
   "utf8"
 );
+const multiplayerAuthoritySecurity = readFileSync(
+  new URL("../supabase/20261026_multiplayer_authority_and_atomic_membership.sql", import.meta.url),
+  "utf8"
+);
+const arenaRoomsClient = readFileSync(
+  new URL("../src/lib/arenaRooms.ts", import.meta.url),
+  "utf8"
+);
+const arenaSecurityPermissionProbe = readFileSync(
+  new URL("../supabase/tests/20261026_multiplayer_authority_permissions.sql", import.meta.url),
+  "utf8"
+);
+const secureArenaQuestions = readFileSync(
+  new URL("../supabase/20261026_secure_arena_questions.sql", import.meta.url),
+  "utf8"
+);
+const secureArenaQuestionsProbe = readFileSync(
+  new URL("../supabase/tests/20261026_secure_arena_questions.sql", import.meta.url),
+  "utf8"
+);
+const activeDisconnectRecovery = readFileSync(
+  new URL("../supabase/20261027_arena_active_disconnect_recovery.sql", import.meta.url),
+  "utf8"
+);
+const activeDisconnectProbe = readFileSync(
+  new URL("../supabase/tests/20261027_arena_active_disconnect_recovery.sql", import.meta.url),
+  "utf8"
+);
+const guestInviteDisplay = readFileSync(
+  new URL("../supabase/20261028_guest_host_invite_display.sql", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /^begin;/i, "migration must begin transactionally");
 assert.match(migration, /commit;\s*$/i, "migration must commit transactionally");
@@ -361,4 +393,155 @@ assert.doesNotMatch(
   "public competitive rankings must never expose email addresses"
 );
 
-console.log("Arena SQL lifecycle guards passed (70 assertions).");
+assert.match(
+  multiplayerAuthoritySecurity,
+  /^begin;/i,
+  "authority hardening must run transactionally"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /commit;\s*$/i,
+  "authority hardening must commit transactionally"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /revoke insert, update, delete, truncate on table public\.arena_rooms\s+from public, anon, authenticated/i,
+  "clients must not mutate room rows directly"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /revoke insert, update, delete, truncate on table public\.arena_room_players\s+from public, anon, authenticated/i,
+  "clients must not mutate player or score rows directly"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /revoke all \(%i\) on table %s from public, anon, authenticated/i,
+  "historical column-level mutation grants must also be removed"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /create or replace function public\.create_arena_room[\s\S]*?insert into public\.arena_rooms[\s\S]*?insert into public\.arena_room_players/i,
+  "room and host membership must be created in one server transaction"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /create or replace function public\.join_arena_room_internal[\s\S]*?pg_advisory_xact_lock[\s\S]*?for update[\s\S]*?active_count >= target_room\.max_players/i,
+  "membership joins must serialize per user, lock the room, and enforce capacity"
+);
+assert.match(
+  multiplayerAuthoritySecurity,
+  /create or replace function public\.set_arena_guest_display_name[\s\S]*?caller_is_anonymous[\s\S]*?set display_name = clean_display_name/i,
+  "guest display correction must be anonymous-only and isolated from gameplay columns"
+);
+assert.doesNotMatch(
+  arenaRoomsClient,
+  /\.from\("arena_(?:rooms|room_players)"\)\s*\.(?:insert|update|upsert|delete)\(/,
+  "frontend must not directly mutate protected room tables"
+);
+assert.match(
+  arenaRoomsClient,
+  /rpc\(\s*"create_arena_room"/,
+  "frontend creation must use the atomic server operation"
+);
+assert.match(
+  arenaRoomsClient,
+  /rpc\(\s*"join_public_arena_room"/,
+  "public joins must use the atomic server operation"
+);
+assert.doesNotMatch(
+  multiplayerAuthoritySecurity,
+  /correct_answer|quiz_questions\s*=/i,
+  "PR 1 must not alter the separately tracked shared-answer secrecy issue"
+);
+assert.match(
+  arenaSecurityPermissionProbe,
+  /has_table_privilege\('authenticated',[\s\S]*'UPDATE'\)/,
+  "staging probe must verify effective authenticated table privileges"
+);
+assert.match(
+  arenaSecurityPermissionProbe,
+  /has_column_privilege\('authenticated',[\s\S]*'UPDATE'\)/,
+  "staging probe must verify effective column-level privileges"
+);
+assert.match(
+  arenaSecurityPermissionProbe,
+  /pg_catalog\.pg_policies[\s\S]*p\.cmd in \('INSERT', 'UPDATE', 'ALL'\)/,
+  "staging probe must detect any remaining mutating RLS policies"
+);
+
+assert.match(secureArenaQuestions, /^begin;/i, "answer secrecy migration must be transactional");
+assert.match(secureArenaQuestions, /commit;\s*$/i, "answer secrecy migration must commit transactionally");
+assert.match(secureArenaQuestions, /create schema if not exists arena_private/i);
+assert.match(secureArenaQuestions, /revoke all on schema arena_private from public, anon, authenticated, service_role/i);
+assert.match(secureArenaQuestions, /grant execute on function public\.stage_arena_question_set[\s\S]*to service_role/i);
+assert.match(secureArenaQuestions, /Room-row locking makes preparation idempotent[\s\S]*existing_set_id is not null then return existing_set_id/i);
+assert.match(secureArenaQuestions, /create or replace function public\.activate_arena_question_set/i);
+assert.match(secureArenaQuestions, /create or replace function public\.get_arena_question_audio/i);
+assert.match(secureArenaQuestions, /create or replace function public\.acknowledge_competitive_audio_ready_v2[\s\S]*arena_private\.question_keys/i);
+assert.match(secureArenaQuestions, /create or replace function public\.report_competitive_audio_failure[\s\S]*arena_private\.question_keys/i);
+assert.match(secureArenaQuestions, /create or replace function public\.start_prepared_party_question[\s\S]*arena_private\.question_keys/i);
+assert.match(secureArenaQuestions, /before insert or update\s+on public\.arena_rooms/i);
+assert.match(secureArenaQuestions, /revoke all on table public\.arena_party_answers from public, anon, authenticated/i);
+assert.doesNotMatch(secureArenaQuestions, /competitive_selected_answer\s*=\s*target_answer/i);
+const audioFailureBodyStart = secureArenaQuestions.indexOf(
+  "create or replace function public.report_competitive_audio_failure"
+);
+const audioFailureBody = secureArenaQuestions.slice(
+  audioFailureBodyStart,
+  secureArenaQuestions.indexOf("$$;", audioFailureBodyStart) + 3
+);
+assert.doesNotMatch(audioFailureBody, /apply_competitive_audio_skip\s*\(/,
+  "one participant's audio report must not force a shared skip");
+assert.match(audioFailureBody, /pendingUntilDeadline/,
+  "audio reports must defer recovery to the bounded authoritative timeline");
+const partyAnswerBodyStart = secureArenaQuestions.indexOf(
+  "create or replace function public.submit_party_answer"
+);
+const partyAnswerBody = secureArenaQuestions.slice(
+  partyAnswerBodyStart,
+  secureArenaQuestions.indexOf("$$;", partyAnswerBodyStart) + 3
+);
+assert.match(partyAnswerBody, /target_answer is null or btrim\(target_answer\) = ''/,
+  "null Party answers must not count as submissions");
+assert.doesNotMatch(partyAnswerBody, /current_score\s*=|current_correct_answers\s*=/,
+  "Party totals must not be published before the shared reveal");
+assert.match(secureArenaQuestionsProbe, /Party score became visible before all players answered/);
+for (const fn of ["submit_competitive_arena_answer", "submit_party_answer"]) {
+  const start = secureArenaQuestions.indexOf(`create or replace function public.${fn}`);
+  const body = secureArenaQuestions.slice(start, secureArenaQuestions.indexOf("$$;", start) + 3);
+  assert.ok(start >= 0, `${fn} must be replaced by the secure migration`);
+  assert.doesNotMatch(body, /'correctAnswer'|'correctOptionId'/i, `${fn} responses must not reveal answer keys`);
+}
+assert.match(secureArenaQuestionsProbe, /direct.*score|score write permission/i);
+assert.match(secureArenaQuestionsProbe, /Party participant retrieved host-only music audio/i);
+assert.match(secureArenaQuestionsProbe, /countdown/);
+assert.match(secureArenaQuestionsProbe, /Party revealed before every active participant answered/);
+assert.match(secureArenaQuestionsProbe, /Repeated question staging replaced the original set/);
+assert.match(secureArenaQuestionsProbe, /answer_result \? 'correctAnswer'/);
+
+assert.match(activeDisconnectRecovery, /^begin;/i, "active disconnect migration must be transactional");
+assert.match(activeDisconnectRecovery, /commit;\s*$/i, "active disconnect migration must commit transactionally");
+assert.match(activeDisconnectRecovery, /status in \('waiting', 'starting', 'active'\)/,
+  "presence reconciliation must include active matches");
+assert.match(activeDisconnectRecovery, /target_room\.mode = 'party_mode'[\s\S]*close_reason = 'host_disconnected'/,
+  "an absent Party host must cancel the room rather than transfer audio ownership");
+assert.match(activeDisconnectRecovery, /target_room\.mode = 'duel'[\s\S]*'win_by_forfeit'/,
+  "active Duel disconnects must resolve the connected player's win");
+assert.match(activeDisconnectRecovery, /target_room\.mode = 'group_lobby'[\s\S]*host_user_id = replacement_host_id/,
+  "Group Lobby must transfer host ownership to a connected participant");
+assert.match(activeDisconnectRecovery, /create or replace function public\.forfeit_arena_room[\s\S]*for update[\s\S]*leave_arena_room/,
+  "explicit forfeits must share the locked, idempotent leave lifecycle");
+assert.match(activeDisconnectRecovery, /revoke all on function public\.reconcile_arena_room_presence_internal\(uuid, timestamptz\)[\s\S]*from public, anon, authenticated/,
+  "the internal presence reconciler must not be client-callable");
+assert.match(activeDisconnectProbe, /Host departure did not resolve the Duel fairly/);
+assert.match(activeDisconnectProbe, /Repeated forfeit duplicated progression rows/);
+assert.match(activeDisconnectProbe, /Party did not close after host disconnect timeout/);
+assert.match(activeDisconnectProbe, /Group host handoff failed/);
+assert.match(guestInviteDisplay, /^begin;/i, "guest invite display migration must be transactional");
+assert.match(guestInviteDisplay, /commit;\s*$/i, "guest invite display migration must commit transactionally");
+assert.match(guestInviteDisplay, /set search_path = ''/, "invite SECURITY DEFINER must use an empty search path");
+assert.match(guestInviteDisplay, /host_player\.display_name/, "invite preview must prefer the host room membership name");
+assert.match(guestInviteDisplay, /revoke all on function public\.get_arena_invite\(text\) from public/i);
+assert.match(guestInviteDisplay, /grant execute on function public\.get_arena_invite\(text\) to authenticated, anon/i);
+
+console.log("Arena SQL lifecycle and authority guards passed.");
