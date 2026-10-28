@@ -2899,7 +2899,9 @@ function ArenaPage({
           skipDuelQuestionForAudio();
         } else {
           enterDuelAudioFallback(
-            "Host audio needs one tap. The shared game clock is still running."
+            playResult.status === "failed" && playResult.autoplayBlocked
+              ? "Your browser blocked the audio. Tap to enable sound and try again."
+              : "Host audio needs one tap. The shared game clock is still running."
           );
         }
         return;
@@ -3019,7 +3021,9 @@ function ArenaPage({
         duelPhaseRef.current = "audioBlocked";
         setDuelPhase("audioBlocked");
         setDuelAudioFallbackMessage(
-          "Audio unavailable on this device. The shared round continues."
+          playResult.status === "failed" && playResult.autoplayBlocked
+            ? "Your browser blocked the audio. Tap to enable sound and try again."
+            : "Audio unavailable on this device. The shared round continues."
         );
         clearDuelAudioFallbackTimer();
         duelAudioFallbackTimerRef.current = window.setTimeout(() => {
@@ -5581,7 +5585,7 @@ function ArenaPage({
               </div>
             </div>
 
-            <div className="duel-room-actions">
+            <div className="duel-room-actions gameplay-actions" role="group" aria-label="Game controls">
               <button
                 type="button"
                 className="secondary-button danger-button"
@@ -5686,7 +5690,9 @@ function ArenaPage({
               </button>
             </div>
 
-            <div className="game-state">{renderDuelGameState()}</div>
+            <div className="game-state" role={duelPhase === "audioBlocked" ? "status" : undefined}>
+              {renderDuelGameState()}
+            </div>
 
             <p className="quiz-clue">
               {isActivePartyMode && isHost ? (
@@ -5719,24 +5725,34 @@ function ArenaPage({
                   type="button"
                   className="clip-button"
                   onClick={() => {
-                    if (
-                      isActivePartyMode &&
-                      activeRoom.partyQuestionPhase === "preparing_audio"
-                    ) {
-                      void preparePartyHostQuestion(true, {
-                        roomId: activeRoom.id,
-                        matchGeneration: activeRoom.roundNumber,
-                        questionIndex: activeRoom.partyQuestionIndex,
-                      });
-                      return;
-                    }
-                    void startDuelAnswerRound(true);
+                    // Invoke the existing unlock directly in the click gesture.
+                    const roundKey = activeQuestionRunKeyRef.current;
+                    sounds.prime();
+                    void arenaAudioController.unlockFromUserGesture().then((unlocked) => {
+                      if (activeQuestionRunKeyRef.current !== roundKey) return;
+                      setIsArenaAudioUnlocked(unlocked);
+                      if (!unlocked) {
+                        setDuelAudioFallbackMessage(
+                          "Sound could not be enabled. Check site sound permissions and try again."
+                        );
+                        return;
+                      }
+                      if (isActivePartyMode && activeRoom.partyQuestionPhase === "preparing_audio") {
+                        void preparePartyHostQuestion(true, {
+                          roomId: activeRoom.id,
+                          matchGeneration: activeRoom.roundNumber,
+                          questionIndex: activeRoom.partyQuestionIndex,
+                        });
+                        return;
+                      }
+                      void startDuelAnswerRound(true);
+                    });
                   }}
                 >
                   {isActivePartyMode &&
                   activeRoom.partyQuestionPhase === "preparing_audio"
                     ? "Enable host audio"
-                    : "Retry audio once"}
+                    : "Enable sound and retry"}
                 </button>
               )}
             </div>

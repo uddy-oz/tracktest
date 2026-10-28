@@ -773,12 +773,12 @@ select:focus,
 .quiz-live .game-state,
 .arena-game-modal .game-state {
   box-sizing: border-box;
-  min-height: clamp(164px, 18.5vh, 184px);
-  height: clamp(164px, 18.5vh, 184px);
+  min-height: clamp(184px, 24vh, 212px);
+  height: auto;
   max-height: none;
-  padding-block: 9px;
-  flex: 0 0 clamp(164px, 18.5vh, 184px);
-  overflow: hidden;
+  padding-block: 12px;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .quiz-live .timer-ring,
@@ -815,16 +815,12 @@ select:focus,
   line-height: 0.95;
 }
 
-.arena-game-modal .duel-room-screen.duel-game-screen {
-  grid-template-rows: auto auto minmax(164px, 184px) auto minmax(144px, auto);
-}
-
 @media (max-width: 768px) {
   .quiz-live .game-state,
   .arena-game-modal .game-state {
-    min-height: clamp(152px, 19vh, 170px);
-    height: clamp(152px, 19vh, 170px);
-    flex-basis: clamp(152px, 19vh, 170px);
+    min-height: clamp(176px, 22vh, 196px);
+    height: auto;
+    flex-basis: auto;
     padding-block: 8px;
   }
 
@@ -844,17 +840,14 @@ select:focus,
     font-size: clamp(58px, 9vh, 76px);
   }
 
-  .arena-game-modal .duel-room-screen.duel-game-screen {
-    grid-template-rows: auto auto auto minmax(152px, 170px) auto minmax(132px, auto);
-  }
 }
 
 @media (max-height: 680px) {
   .quiz-live .game-state,
   .arena-game-modal .game-state {
-    min-height: 148px;
-    height: 148px;
-    flex-basis: 148px;
+    min-height: 160px;
+    height: auto;
+    flex-basis: auto;
     padding-block: 6px;
   }
 
@@ -874,9 +867,6 @@ select:focus,
     font-size: 58px;
   }
 
-  .arena-game-modal .duel-room-screen.duel-game-screen {
-    grid-template-rows: auto auto auto minmax(148px, 148px) auto minmax(116px, auto);
-  }
 }
 
 /* Design audit phase 1: accessible mode text and responsive game statistics. */

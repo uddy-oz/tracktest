@@ -14,6 +14,7 @@ import type { SpotifyAlbum } from "../lib/spotifyApi";
 import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
 import GuestBadge from "./GuestBadge";
+import { getAlbumDisplayTitle } from "../lib/albumDisplay";
 
 type SinglePlayerPageProps = {
   session: Session | null;
@@ -165,7 +166,7 @@ function SinglePlayerPage({
               {recentResults.map((result) => (
                 <div className="home-list-row" key={result.id}>
                   <span>
-                    <strong>{result.albumName}</strong>
+                    <strong>{getAlbumDisplayTitle(result.albumName)}</strong>
                     <small>
                       {result.artistName} - {result.correctAnswers}/
                       {result.totalQuestions} correct
