@@ -25,8 +25,6 @@ security definer
 set search_path = ''
 as $$
 begin
-  perform public.cancel_stale_arena_rooms();
-
   return query
     with invite_room as (
       select *

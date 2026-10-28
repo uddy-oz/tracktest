@@ -32,11 +32,23 @@ create table if not exists arena_private.question_keys (
       or preview_url like 'https://audio.itunes.apple.com/%')
 );
 
+-- Keep legacy snapshots available for protected recovery/audit while removing
+-- answer-bearing JSON from the client-readable room row below.
+create table if not exists arena_private.legacy_question_snapshots (
+  room_id uuid primary key,
+  room_status text not null,
+  round_number integer,
+  quiz_questions jsonb not null,
+  competitive_reserve_questions jsonb not null,
+  archived_at timestamptz not null default clock_timestamp()
+);
+
 create index if not exists arena_private_question_keys_room_round_idx
   on arena_private.question_keys (room_id, round_number, question_id);
 
 alter table arena_private.question_sets enable row level security;
 alter table arena_private.question_keys enable row level security;
+alter table arena_private.legacy_question_snapshots enable row level security;
 revoke all on all tables in schema arena_private from public, anon, authenticated, service_role;
 revoke all on all sequences in schema arena_private from public, anon, authenticated, service_role;
 
@@ -74,8 +86,23 @@ begin
 end;
 $$;
 
--- Clear legacy client-authored question payloads from waiting and historical
--- rooms. Active rooms with a trusted staged set are preserved.
+-- Preserve legacy waiting and historical payloads in the restricted archive
+-- before clearing answer-bearing JSON from client-readable room rows. Active
+-- rooms with a trusted staged set are preserved. DO NOTHING keeps this safe
+-- to rerun without replacing an earlier archive.
+insert into arena_private.legacy_question_snapshots (
+  room_id, room_status, round_number,
+  quiz_questions, competitive_reserve_questions
+)
+select id, status, round_number,
+  coalesce(quiz_questions, '[]'::jsonb),
+  coalesce(competitive_reserve_questions, '[]'::jsonb)
+from public.arena_rooms
+where status not in ('starting', 'active')
+  and (coalesce(jsonb_array_length(quiz_questions), 0) > 0
+    or coalesce(jsonb_array_length(competitive_reserve_questions), 0) > 0)
+on conflict (room_id) do nothing;
+
 update public.arena_rooms
 set quiz_questions = '[]'::jsonb,
     competitive_reserve_questions = '[]'::jsonb
