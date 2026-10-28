@@ -17,6 +17,7 @@
     "test:party-mode": "node --experimental-strip-types --test tools/party-mode-reliability.test.ts",
     "test:arena-sql": "node tools/check-arena-sql.mjs",
     "test:arena-lifecycle-integration": "node --test tools/arena-lifecycle.integration.test.mjs",
+    "test:arena-maintenance": "node tools/arena-maintenance.integration.test.mjs",
     "test:multiplayer-progression": "node --experimental-strip-types tools/multiplayer-progression.test.ts",
     "test:catalog": "node --experimental-strip-types --test tools/catalog-discovery.test.ts",
     "test:apple-catalog": "node --experimental-strip-types --test tools/apple-music-catalog.test.ts",
