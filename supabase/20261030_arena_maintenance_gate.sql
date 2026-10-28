@@ -6,14 +6,25 @@ begin;
 --   SET enabled = false, updated_at = clock_timestamp()
 --   WHERE control_name = 'multiplayer_maintenance';
 -- Re-lock on failure by running the same UPDATE with enabled = true.
+-- Use pg_advisory_xact_lock(246013579, 8731) in the same transaction when
+-- toggling the gate, matching the existing production maintenance guard.
 create table if not exists arena_private.runtime_controls (
   control_name text primary key check (control_name = 'multiplayer_maintenance'),
   enabled boolean not null,
+  message text not null default 'StanZer multiplayer is temporarily unavailable for maintenance.',
   updated_at timestamptz not null default pg_catalog.clock_timestamp()
 );
 
-insert into arena_private.runtime_controls (control_name, enabled)
-values ('multiplayer_maintenance', true)
+-- Production already has this table, including a required message without a
+-- default. Keep that schema and its custom message; also support older local
+-- rehearsals which installed the control table without a message column.
+alter table arena_private.runtime_controls
+  add column if not exists message text not null
+  default 'StanZer multiplayer is temporarily unavailable for maintenance.';
+
+insert into arena_private.runtime_controls (control_name, enabled, message)
+values ('multiplayer_maintenance', true,
+  'StanZer multiplayer is temporarily unavailable for maintenance.')
 on conflict (control_name) do update
 set enabled = true,
     updated_at = pg_catalog.clock_timestamp();
@@ -30,13 +41,17 @@ set search_path = ''
 as $$
 declare
   maintenance_enabled boolean;
+  maintenance_message text;
 begin
-  select coalesce(
-    (select control.enabled
-     from arena_private.runtime_controls control
-     where control.control_name = 'multiplayer_maintenance'),
-    true
-  ) into maintenance_enabled;
+  perform pg_catalog.pg_advisory_xact_lock(246013579, 8731);
+  select control.enabled, control.message
+  into maintenance_enabled, maintenance_message
+  from arena_private.runtime_controls control
+  where control.control_name = 'multiplayer_maintenance';
+
+  maintenance_enabled := coalesce(maintenance_enabled, true);
+  maintenance_message := coalesce(nullif(pg_catalog.btrim(maintenance_message), ''),
+    'StanZer multiplayer is temporarily unavailable for maintenance.');
 
   if not maintenance_enabled then
     return new;
@@ -46,14 +61,14 @@ begin
     if tg_op = 'INSERT' then
       raise exception using
         errcode = '55000',
-        message = 'StanZer multiplayer is temporarily unavailable for maintenance.';
+        message = maintenance_message;
     end if;
 
     if old.status is distinct from new.status
        and new.status in ('starting', 'active') then
       raise exception using
         errcode = '55000',
-        message = 'StanZer multiplayer is temporarily unavailable for maintenance.';
+        message = maintenance_message;
     end if;
   elsif tg_table_name = 'arena_room_players' then
     if tg_op = 'INSERT'
@@ -62,7 +77,7 @@ begin
            and new.result_status = 'active') then
       raise exception using
         errcode = '55000',
-        message = 'StanZer multiplayer is temporarily unavailable for maintenance.';
+        message = maintenance_message;
     end if;
   end if;
 
