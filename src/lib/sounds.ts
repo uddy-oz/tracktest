@@ -2,6 +2,14 @@ const MUTE_STORAGE_KEY = "tracktest_arena_muted";
 
 let audioContext: AudioContext | null = null;
 let muted = false;
+let lastContextError = "";
+
+function resumeContext(context: AudioContext) {
+  void context.resume().then(() => { lastContextError = ""; }).catch((error: unknown) => {
+    lastContextError = error instanceof Error ? error.name : "AudioContext resume rejected";
+    console.warn("[STANZER_SOUND] Web Audio needs a user gesture", {state: context.state, error: lastContextError});
+  });
+}
 
 try {
   muted = localStorage.getItem(MUTE_STORAGE_KEY) === "1";
@@ -10,12 +18,12 @@ try {
 }
 
 function getAudioContext() {
-  if (!audioContext) {
+  if (!audioContext || audioContext.state === "closed") {
     audioContext = new AudioContext();
   }
 
   if (audioContext.state === "suspended") {
-    void audioContext.resume();
+    resumeContext(audioContext);
   }
 
   return audioContext;
@@ -34,6 +42,8 @@ function tone(
 
   try {
     const context = getAudioContext();
+    // Do not queue obsolete countdown/result tones in a blocked context.
+    if (context.state !== "running") return;
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     const startTime = context.currentTime + startDelay;
@@ -55,6 +65,9 @@ function tone(
 }
 
 export const sounds = {
+  getDiagnostics() {
+    return {muted, state: audioContext?.state || "not-created", lastContextError};
+  },
   isMuted() {
     return muted;
   },
@@ -76,7 +89,7 @@ export const sounds = {
 
     try {
       const context = getAudioContext();
-      void context.resume();
+      resumeContext(context);
 
       // A silent oscillator created inside the user's click reliably unlocks
       // short Web Audio cues in browsers that otherwise drop later countdowns.
@@ -132,6 +145,21 @@ export const sounds = {
     [392, 523.25, 659.25, 783.99, 1046.5].forEach((frequency, index) => {
       tone(frequency, index * 0.08, 0.14, "triangle", 0.07);
     });
+  },
+
+  victory() {
+    [523.25, 659.25, 783.99, 1046.5].forEach((frequency, index) =>
+      tone(frequency, index * 0.11, 0.24, "triangle", 0.09));
+  },
+
+  defeat() {
+    [392, 329.63, 261.63].forEach((frequency, index) =>
+      tone(frequency, index * 0.16, 0.25, "triangle", 0.07));
+  },
+
+  draw() {
+    tone(440, 0, 0.18, "triangle", 0.07);
+    tone(554.37, 0.2, 0.28, "triangle", 0.07);
   },
 
   achievement() {

@@ -77,6 +77,8 @@ import {
   getCompetitiveRoundKey,
 } from "../lib/arenaRoundLifecycle";
 import { isOlderArenaRoomSnapshot } from "../lib/arenaRoomSnapshots";
+import { changeWaitingArenaAlbum } from "../lib/arenaRooms";
+import { ArenaSoundCueLedger } from "../lib/arenaSoundCues";
 import {
   canPreparePartyHostAudio,
   canStartPartyHostPlayback,
@@ -414,6 +416,7 @@ function ArenaPage({
   const competitiveLobbyStartKeyRef = useRef<string>("");
   const competitiveRevealSoundKeyRef = useRef<string>("");
   const competitiveCountdownSoundKeyRef = useRef<string>("");
+  const soundCuesRef = useRef(new ArenaSoundCueLedger());
   const partyQuestionKeyRef = useRef<string>("");
   const partyAudioPrepareKeyRef = useRef<string>("");
   const partyAudioStartKeyRef = useRef<string>("");
@@ -1469,12 +1472,35 @@ function ArenaPage({
     if (duelPhase !== "countdown" || !activeQuestionRunKey) return;
 
     const soundKey = `${activeQuestionRunKey}:${duelStartCountdown}`;
-    if (competitiveCountdownSoundKeyRef.current === soundKey) return;
+    if (competitiveCountdownSoundKeyRef.current === soundKey || !soundCuesRef.current.take(soundKey)) return;
 
     competitiveCountdownSoundKeyRef.current = soundKey;
     if (duelStartCountdown > 0) sounds.tick();
-    else sounds.go();
   }, [activeQuestionRunKey, duelPhase, duelStartCountdown]);
+
+  // Follow authoritative phase changes, never a new client-side game clock.
+  // A mounted old result is intentionally silent; only observed games celebrate.
+  useEffect(() => {
+    if (!activeRoom || !session?.user.id) return;
+    const matchKey = `${activeRoom.id}:${activeRoom.roundNumber}`;
+    soundCuesRef.current.observeMatch(matchKey, activeRoom.status);
+    if (activeRoom.status === "active") {
+      const goKey = `${activeQuestionRunKey}:go`;
+      if (duelPhase === "answering" && activeQuestionRunKey && soundCuesRef.current.take(goKey)) {
+        sounds.go();
+      }
+    }
+    if (activeRoom.status !== "finished") return;
+    const players = sortDuelResults(activeRoom.players.filter(player =>
+      !["cancelled", "left"].includes(player.resultStatus) &&
+      (activeRoom.mode !== "party_mode" || player.userId !== activeRoom.hostUserId)));
+    if (!players.length || players.some(player => !player.finishedAt)) return;
+    if (!soundCuesRef.current.takeResult(matchKey)) return;
+    if (getWinnerLabel(players) === "Draw") sounds.draw();
+    else if (players[0].userId === session.user.id) sounds.victory();
+    else if (players.some(player => player.userId === session.user.id)) sounds.defeat();
+    else sounds.complete();
+  });
 
   useEffect(() => {
     if (
@@ -3483,6 +3509,7 @@ function ArenaPage({
   }
 
   function handleJoinWithCode(event: FormEvent<HTMLFormElement>) {
+    sounds.prime();
     event.preventDefault();
     void loadInviteForAcceptance(roomCodeInput);
   }
@@ -4135,6 +4162,8 @@ function ArenaPage({
       return;
     }
 
+    sounds.prime();
+
     setIsPreparingDuel(true);
     setMessage(album ? "Preparing new album rematch..." : "Preparing rematch...");
 
@@ -4170,7 +4199,9 @@ function ArenaPage({
       }
     }
 
-    const { room, error } = await resetArenaRoomForRematch({
+    const { room, error } = activeRoom.status === "waiting" && album
+      ? await changeWaitingArenaAlbum(activeRoom.id, album)
+      : await resetArenaRoomForRematch({
       roomId: activeRoom.id,
       album,
     });
@@ -4186,7 +4217,7 @@ function ArenaPage({
     setSelectedAlbum(null);
     setIsChoosingRematchAlbum(false);
     resetDuelLocalState();
-    setMessage("Rematch lobby ready. Everyone must ready up again.");
+    setMessage("Lobby ready. Everyone must ready up again.");
     setIsPreparingDuel(false);
   }
 
@@ -4198,6 +4229,7 @@ function ArenaPage({
     setVisibleAlbumCount(ALBUMS_PER_PAGE);
     setSearchTerm("");
     setIsChoosingRematchAlbum(true);
+    if (activeRoom.status === "waiting") return;
     const result = await setArenaHostAlbumSelection(activeRoom.id, true);
     if (result.error) setMessage(result.error);
     await refreshActiveRoom(false);
@@ -4210,6 +4242,7 @@ function ArenaPage({
     setAlbums([]);
     setSearchTerm("");
     if (!roomId) return;
+    if (activeRoom?.status === "waiting") return;
 
     const result = await setArenaHostAlbumSelection(roomId, false);
     if (result.error) setMessage(result.error);
@@ -4250,7 +4283,9 @@ function ArenaPage({
   }
 
   function handleToggleDuelMute() {
-    setIsDuelMuted(sounds.toggleMuted());
+    const nextMuted = sounds.toggleMuted();
+    setIsDuelMuted(nextMuted);
+    if (!nextMuted) sounds.prime();
   }
 
   function getHostPlayer(room: ArenaRoom) {
@@ -5210,7 +5245,7 @@ function ArenaPage({
       );
       const resultPlayers = activeRoom.players.filter(
         (player) =>
-          !player.leftAt &&
+          (!player.leftAt || ["completed", "forfeit", "win_by_forfeit"].includes(player.resultStatus)) &&
           player.resultStatus !== "cancelled" &&
           player.resultStatus !== "left" &&
           (!isActivePartyMode || player.userId !== activeRoom.hostUserId)
@@ -5223,22 +5258,7 @@ function ArenaPage({
       const isHost = activeRoom.hostUserId === session?.user.id;
       const lobbyEligibility = getArenaLobbyStartEligibility(activeRoom);
       const lobbyMembers = lobbyEligibility.members;
-      const recentDepartedPlayer = [...activeRoom.players]
-        .filter(
-          (player) =>
-            !lobbyMembers.some((member) => member.userId === player.userId) &&
-            (Boolean(player.leftAt) ||
-              ["cancelled", "left", "forfeit"].includes(player.resultStatus))
-        )
-        .sort((a, b) =>
-          (b.leftAt || b.joinedAt).localeCompare(a.leftAt || a.joinedAt)
-        )[0];
-      const lobbyDisplayPlayers =
-        activeRoom.status === "waiting" &&
-        recentDepartedPlayer &&
-        lobbyMembers.length < activeRoom.maxPlayers
-          ? [...lobbyMembers, recentDepartedPlayer]
-          : lobbyMembers;
+      const lobbyDisplayPlayers = lobbyMembers;
       const hasReconnectingLobbyPlayer =
         activeRoom.mode !== "party_mode" &&
         lobbyMembers.some(
@@ -5868,6 +5888,17 @@ function ArenaPage({
 
           {renderPrivateInvitePanel(activeRoom)}
 
+          {isHost && activeRoom.status === "waiting" && (
+            <div className="duel-room-actions">
+              <button type="button" className="secondary-button"
+                disabled={isPreparingDuel || isChoosingRematchAlbum}
+                onClick={() => void handleBeginRematchAlbumSelection()}>
+                Change Album
+              </button>
+            </div>
+          )}
+          {isHost && activeRoom.status === "waiting" && renderRematchAlbumPicker()}
+
           {usesLiveLeaderboard ? (
             <div className="duel-player-grid group-player-grid">
               {(activeRoom.status === "waiting" ? lobbyDisplayPlayers : presentPlayers).map(
@@ -5945,27 +5976,25 @@ function ArenaPage({
               <div className={`duel-player-card ${
                 activeRoom.status === "starting" && guestPlayer?.isReady
                   ? "audio-ready"
-                  : activeRoom.status === "waiting" && (guestPlayer || recentDepartedPlayer)
-                    ? `lobby-${getLobbyPlayerState(guestPlayer || recentDepartedPlayer!).toLowerCase().replace(" ", "-")}`
+                  : activeRoom.status === "waiting" && guestPlayer
+                    ? `lobby-${getLobbyPlayerState(guestPlayer).toLowerCase().replace(" ", "-")}`
                     : ""
               }`}>
                 <span>Joined Player</span>
                 <div className="guest-name-line">
                   <strong>
-                    {guestPlayer?.displayName || recentDepartedPlayer?.displayName || "Waiting for rival"}
+                    {guestPlayer?.displayName || "Waiting for rival"}
                   </strong>
-                  {(guestPlayer || recentDepartedPlayer) &&
-                    isGuestArenaPlayer(guestPlayer || recentDepartedPlayer!) && (
+                  {guestPlayer && isGuestArenaPlayer(guestPlayer) && (
                       <GuestBadge compact />
                     )}
                 </div>
-                {(guestPlayer?.username || recentDepartedPlayer?.username) &&
-                  !isGuestArenaPlayer(guestPlayer || recentDepartedPlayer!) && (
-                  <p>@{guestPlayer?.username || recentDepartedPlayer?.username}</p>
+                {guestPlayer?.username && !isGuestArenaPlayer(guestPlayer) && (
+                  <p>@{guestPlayer.username}</p>
                 )}
-                {activeRoom.status === "waiting" && (guestPlayer || recentDepartedPlayer) && (
+                {activeRoom.status === "waiting" && guestPlayer && (
                   <small className="lobby-player-status">
-                    {getLobbyPlayerState(guestPlayer || recentDepartedPlayer!)}
+                    {getLobbyPlayerState(guestPlayer)}
                   </small>
                 )}
                 {activeRoom.status === "starting" && guestPlayer && (
@@ -6021,7 +6050,7 @@ function ArenaPage({
                 <button
                   type="button"
                   className="duel-start-button"
-                  disabled={!canHostStartLobby || isPreparingDuel}
+                  disabled={!canHostStartLobby || isPreparingDuel || isChoosingRematchAlbum}
                   onClick={() => void handleStartDuel()}
                 >
                   {isPreparingDuel
@@ -6517,10 +6546,10 @@ function ArenaPage({
                 Back to Multiplayer
               </button>
             )}
-            {renderDuelLobby()}
             {visibleMessage && (
               <p className="arena-message" role="status">{visibleMessage}</p>
             )}
+            {renderDuelLobby()}
           </div>
         </div>
       )}

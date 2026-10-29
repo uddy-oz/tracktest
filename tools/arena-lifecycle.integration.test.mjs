@@ -7,6 +7,7 @@ const url = process.env.LOCAL_URL;
 const anonKey = process.env.LOCAL_ANON;
 const serviceKey = process.env.LOCAL_SERVICE;
 const configured = Boolean(url && anonKey && serviceKey);
+if (configured) assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname), 'Integration tests require isolated localhost Supabase.');
 const identities = [];
 
 const admin = configured
@@ -127,6 +128,97 @@ if (!configured) {
     skip: "Set LOCAL_URL, LOCAL_ANON, and LOCAL_SERVICE from local Supabase status.",
   }, () => {});
 } else {
+  test("repeated guest rejoin and readiness remain authoritative across clients", async () => {
+    const host = await registeredIdentity("Rejoin Host");
+    const guest = await guestIdentity("Rejoining Guest");
+    const roomId = await createRoom(host, "duel", 2);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await joinRoom(guest, roomId);
+      const ready = await guest.client.rpc("set_arena_lobby_ready", {target_room_id: roomId, target_ready: true});
+      assert.equal(ready.error, null);
+      const observed = await host.client.from("arena_room_players").select("*").eq("room_id", roomId).eq("user_id", guest.user.id).single();
+      assert.equal(observed.error, null);
+      assert.equal(observed.data.left_at, null);
+      assert.equal(observed.data.lobby_ready, true);
+      assert.equal((await guest.client.rpc("leave_arena_room", {target_room_id: roomId})).error, null);
+    }
+  });
+
+  test("host and opponent forfeits retain membership and permit a new-album rematch", async () => {
+    for (const hostForfeits of [true, false]) {
+      const host = await registeredIdentity("Rematch Host");
+      const opponent = await guestIdentity("Rematch Guest");
+      const roomId = await createRoom(host, "duel", 2);
+      await joinRoom(opponent, roomId);
+      await activateRoom("duel", roomId, [host, opponent]);
+      const forfeiter = hostForfeits ? host : opponent;
+      for (let attempt = 0; attempt < 2; attempt++) assert.equal((await forfeiter.client.rpc("forfeit_arena_room", {target_room_id: roomId})).error, null);
+      const result = await roomAndPlayers(roomId);
+      assert.equal(result.room.status, "finished");
+      assert.equal(result.players.find(p => p.user_id === forfeiter.user.id).left_at, null);
+      assert.equal(result.players.find(p => p.user_id === forfeiter.user.id).result_status, "forfeit");
+      const history = await admin.from("quiz_results").select("*").eq("arena_room_id", roomId);
+      assert.equal(history.error, null);
+      assert.equal(history.data.length, 1, "only the registered player receives one persistent result; the guest receives none");
+      const reset = await host.client.rpc("reset_arena_room_for_rematch", {target_room_id: roomId, new_album_id: "itunes:US:123", new_album_name: "New Album"});
+      assert.equal(reset.error, null);
+      const rematch = await roomAndPlayers(roomId);
+      assert.equal(rematch.room.status, "waiting");
+      assert.equal(rematch.room.album_name, "New Album");
+      assert.ok(rematch.players.every(p => p.left_at === null && !p.lobby_ready && p.result_status === "active"));
+      const historyAfterReset = await admin.from("quiz_results").select("*").eq("arena_room_id", roomId);
+      assert.deepEqual(historyAfterReset.data, history.data, "rematch must preserve the prior match result unchanged");
+    }
+  });
+
+  test("waiting album switch requires the host, clears readiness, and rejects active games", async () => {
+    const host = await registeredIdentity("Album Host");
+    const guest = await guestIdentity("Album Guest");
+    const roomId = await createRoom(host, "duel", 2);
+    await joinRoom(guest, roomId);
+    const args = {target_room_id: roomId, new_album_id: "itunes:US:123", new_album_name: "Replacement Album"};
+    assert.ok((await guest.client.rpc("change_waiting_arena_album", args)).error);
+    await host.client.rpc("set_arena_lobby_ready", {target_room_id: roomId, target_ready: true});
+    await guest.client.rpc("set_arena_lobby_ready", {target_room_id: roomId, target_ready: true});
+    assert.equal((await host.client.rpc("change_waiting_arena_album", args)).error, null);
+    const changed = await roomAndPlayers(roomId);
+    assert.equal(changed.room.round_number, 2);
+    assert.equal(changed.room.album_name, "Replacement Album");
+    assert.ok(changed.players.every(p => !p.lobby_ready));
+    await activateRoom("duel", roomId, [host, guest]);
+    assert.ok((await host.client.rpc("change_waiting_arena_album", args)).error);
+  });
+
+  test("Group forfeit retains host ownership and memberships until a normal rematch", async () => {
+    const host = await registeredIdentity("Group Forfeit Host");
+    const second = await registeredIdentity("Group Second");
+    const guest = await guestIdentity("Group Guest");
+    const roomId = await createRoom(host, "group_lobby", 10);
+    await joinRoom(second, roomId); await joinRoom(guest, roomId);
+    await activateRoom("group_lobby", roomId, [host, second, guest]);
+    for (const player of [host, second, guest]) {
+      assert.equal((await player.client.rpc("forfeit_arena_room", {target_room_id: roomId})).error, null);
+      const current = await roomAndPlayers(roomId);
+      assert.equal(current.room.host_user_id, host.user.id);
+      assert.ok(current.players.every(p => p.left_at === null));
+    }
+    assert.equal((await roomAndPlayers(roomId)).room.status, "finished");
+    assert.equal((await host.client.rpc("reset_arena_room_for_rematch", {target_room_id: roomId})).error, null);
+  });
+
+  test("Party guest forfeit does not transfer host audio ownership", async () => {
+    const host = await registeredIdentity("Party Forfeit Host");
+    const guest = await guestIdentity("Party Guest");
+    const roomId = await createRoom(host, "party_mode", 10);
+    await joinRoom(guest, roomId);
+    await activateRoom("party_mode", roomId, [host, guest]);
+    assert.ok((await host.client.rpc("forfeit_arena_room", {target_room_id: roomId})).error);
+    assert.equal((await guest.client.rpc("forfeit_arena_room", {target_room_id: roomId})).error, null);
+    const result = await roomAndPlayers(roomId);
+    assert.equal(result.room.host_user_id, host.user.id);
+    assert.equal(result.players.find(p => p.user_id === guest.user.id).left_at, null);
+  });
+
   after(async () => {
     for (const identity of identities) {
       try {

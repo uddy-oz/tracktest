@@ -1759,6 +1759,19 @@ export async function resetArenaRoomForRematch({
   return fetchArenaRoom(roomId);
 }
 
+export async function changeWaitingArenaAlbum(roomId: string, album: SpotifyAlbum) {
+  if (!supabase) return {room: null, error: "Supabase is not configured yet."};
+  const {error} = await supabase.rpc("change_waiting_arena_album", {
+    target_room_id: roomId,
+    new_album_id: album.id,
+    new_album_name: album.title,
+    new_artist_name: album.artist,
+    new_artwork_url: album.imageUrl,
+  });
+  if (error) return {room: null, error: getFriendlyArenaError(error.message)};
+  return fetchArenaRoom(roomId);
+}
+
 export async function endArenaRoom(roomId: string) {
   if (!supabase) {
     return { error: "Supabase is not configured yet." };

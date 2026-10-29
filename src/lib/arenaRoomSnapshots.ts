@@ -13,6 +13,8 @@ type SnapshotPlayer = {
   finishedAt?: string | null;
   leftAt?: string | null;
   resultStatus?: string;
+  joinedAt?: string;
+  presenceUpdatedAt?: string;
 };
 
 export type ArenaRoomSnapshot = {
@@ -124,6 +126,20 @@ export function isOlderArenaRoomSnapshot(
   for (const currentPlayer of current.players) {
     const nextPlayer = nextPlayers.get(currentPlayer.userId);
     if (!nextPlayer) continue;
+
+    // Lobby membership can legitimately move LEFT -> active, and ready can
+    // toggle in either direction. Order those updates by server timestamps,
+    // not match-result monotonicity. Match generations/phases stay protected.
+    if (next.status === "waiting" && current.status === "waiting") {
+      const revision = (player: SnapshotPlayer) => Math.max(
+        ...[player.joinedAt, player.presenceUpdatedAt, player.leftAt]
+          .map((value) => Date.parse(value || "") || 0)
+      );
+      const nextRevision = revision(nextPlayer);
+      const currentRevision = revision(currentPlayer);
+      if (nextRevision < currentRevision) return true;
+      if (nextRevision > currentRevision) continue;
+    }
 
     if (TERMINAL_PLAYER_STATUSES.has(currentPlayer.resultStatus || "")) {
       if (currentPlayer.resultStatus !== nextPlayer.resultStatus) return true;

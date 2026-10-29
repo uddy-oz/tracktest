@@ -86,7 +86,8 @@ const albumTrackCache = new Map<string, CachedValue<SpotifyTrack[]>>();
 const albumTrackRequests = new Map<string, Promise<SpotifyTrack[]>>();
 
 function normalizeCacheKey(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return value.normalize("NFKD").replace(/\p{M}/gu, "")
+    .trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function getCachedValue<T>(cache: Map<string, CachedValue<T>>, key: string) {
@@ -150,10 +151,12 @@ function improveArtworkUrl(url: string) {
 
 function cleanText(text: string) {
   return text
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
     .replace(/\(.*?\)/g, "")
     .replace(/\[.*?\]/g, "")
-    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/[^\p{L}\p{N} ]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -584,6 +587,8 @@ export async function searchSpotifyAlbums(
   if (!request) {
     const startedAt = performance.now();
     request = searchAlbumsUncached(normalizedQuery)
+      .then((albums) => albums.length || query.trim().toLowerCase() === normalizedQuery
+        ? albums : searchAlbumsUncached(query.trim()))
       .then((albums) => {
         albumSearchCache.set(normalizedQuery, {
           value: albums,
@@ -615,6 +620,8 @@ export async function searchSpotifyArtists(
   if (!request) {
     const startedAt = performance.now();
     request = searchArtistsUncached(normalizedQuery)
+      .then((artists) => artists.length || query.trim().toLowerCase() === normalizedQuery
+        ? artists : searchArtistsUncached(query.trim()))
       .then((artists) => {
         artistSearchCache.set(normalizedQuery, {
           value: artists,

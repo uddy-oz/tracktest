@@ -5,6 +5,14 @@ import {
   type ArenaRoomSnapshot,
 } from "../src/lib/arenaRoomSnapshots.ts";
 
+test("waiting lobby accepts a newer rejoin but rejects the delayed departure", () => {
+  const left = snapshot({status: "waiting", players: [{userId: "p", resultStatus: "left", leftAt: "2026-10-29T10:00:00Z"}]});
+  const rejoined = snapshot({status: "waiting", players: [{userId: "p", resultStatus: "active", leftAt: null, presenceUpdatedAt: "2026-10-29T10:00:01Z"}]});
+  assert.equal(isOlderArenaRoomSnapshot(rejoined, left), false);
+  assert.equal(isOlderArenaRoomSnapshot(left, rejoined), true);
+  assert.equal(isOlderArenaRoomSnapshot({...rejoined, roundNumber: 1}, left), true);
+});
+
 function snapshot(changes: Partial<ArenaRoomSnapshot> = {}): ArenaRoomSnapshot {
   return {
     id: "room-1",
