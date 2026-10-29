@@ -23,6 +23,34 @@ const album = (changes: Partial<ITunesAlbum> = {}): ITunesAlbum => ({
   ...changes,
 });
 
+test("artist comparisons fold accents without dropping letters", () => {
+  for (const [query, artistName] of [["Giveon", "GIVĒON"], ["Beyonce", "Beyoncé"], ["Rosalia", "Rosalía"], ["Sigur Ros", "Sigur Rós"]]) {
+    const artist = {artistId: 123, artistName};
+    assert.equal(scoreArtist(artist, query), scoreArtist(artist, artistName));
+    assert.equal(scoreAlbum(album({artistName}), query), scoreAlbum(album({artistName}), artistName));
+  }
+});
+
+test("catalog-specific accented query retries are bounded and share the folded cache", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (input) => {
+    calls++;
+    const term = new URL(String(input)).searchParams.get("term");
+    const results = term === "GIVĒON"
+      ? [{artistId: 981, artistName: "GIVĒON", wrapperType: "artist"}]
+      : [];
+    return new Response(JSON.stringify({results}), {status: 200});
+  };
+  try {
+    const artists = await searchSpotifyArtists("GIVĒON");
+    assert.equal(artists[0]?.name, "GIVĒON");
+    assert.equal(calls, 10, "five storefronts, at most one alternate pass");
+    assert.deepEqual(await searchSpotifyArtists("Giveon"), artists);
+    assert.equal(calls, 10);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("exact album title outranks an artist-name-only catalog match", () => {
   const exactTitle = scoreAlbum(album(), "ICEMAN");
   const artistOnly = scoreAlbum(

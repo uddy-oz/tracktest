@@ -458,7 +458,7 @@
   background: linear-gradient(135deg, color-mix(in srgb, var(--mode-championship) 12%, transparent), transparent 72%), var(--game-surface-raised);
 }
 
-.duel-results-card .duel-player-card > span,
+.duel-player-card > span,
 .duel-results-card .duel-player-card small,
 .duel-results-card .competitive-outcome-banner p {
   display: block;
