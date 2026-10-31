@@ -5,6 +5,9 @@
   "description": "StanZer - Prove you're a superfan with album quizzes, live Duels, and Party Mode.",
   "type": "module",
   "scripts": {
+    "test:history-clock": "node --experimental-strip-types --test tools/history-clock.test.ts",
+    "test:achievement-permanence": "node --experimental-strip-types --test tools/achievement-permanence.test.ts",
+    "test:badge-vault": "node --experimental-strip-types --test tools/badge-vault.test.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -32,6 +35,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
+    "lucide-react": "1.63.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

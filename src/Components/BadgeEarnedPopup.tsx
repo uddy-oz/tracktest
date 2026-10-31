@@ -1,49 +1,42 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ArenaBadge } from "../lib/badges";
 import { sounds } from "../lib/sounds";
+import BadgeEmblem from "./BadgeEmblem";
 
 type BadgeEarnedPopupProps = {
   badge: ArenaBadge | null;
   onDone: () => void;
 };
 
-const iconSymbols: Record<ArenaBadge["icon"], string> = {
-  checkRing: "✓",
-  diamond: "◆",
-  bolt: "ϟ",
-  record: "◉",
-  crown: "♛",
-  discs: "◎",
-  calendar: "▣",
-  flame: "▲",
-  trophy: "★",
-  shield: "◈",
-  star: "✦",
-  clutch: "◇",
-  swords: "⚔",
-  users: "◉",
-  party: "♫",
-  comeback: "↗",
-  target: "⊙",
-  headphones: "♪",
-  stack: "≡",
-  key: "◆",
-};
-
 function BadgeEarnedPopup({ badge, onDone }: BadgeEarnedPopupProps) {
+  const badgeId = badge?.id;
+  const notified = useRef(new Set<string>());
+  const completed = useRef(new Set<string>());
+  const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
   useEffect(() => {
-    if (!badge) {
+    if (!badgeId) {
       return;
     }
+    if (completed.current.has(badgeId)) {
+      const skipId = window.setTimeout(() => onDoneRef.current(), 0);
+      return () => window.clearTimeout(skipId);
+    }
 
-    sounds.achievement();
+    if (!notified.current.has(badgeId)) {
+      notified.current.add(badgeId);
+      sounds.achievement();
+    }
 
-    const timerId = window.setTimeout(onDone, 4200);
+    const timerId = window.setTimeout(() => {
+      completed.current.add(badgeId);
+      onDoneRef.current();
+    }, 4200);
 
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [badge, onDone]);
+  }, [badgeId]);
 
   if (!badge) {
     return null;
@@ -51,20 +44,19 @@ function BadgeEarnedPopup({ badge, onDone }: BadgeEarnedPopupProps) {
 
   return (
     <aside
+      key={badge.id}
       className={`badge-earned-popup badge-${badge.accent} badge-tier-${badge.tier.toLowerCase()}`}
       role="status"
       aria-live="polite"
       aria-atomic="true"
     >
-      <div className={`badge-earned-popup-icon badge-icon-${badge.icon}`}>
-        <span>{iconSymbols[badge.icon]}</span>
-      </div>
+      <BadgeEmblem key={badge.id} badge={badge} />
 
-      <div>
-        <span>Achievement Unlocked</span>
+      <div className="vault-reveal-copy">
+        <span className="vault-reveal-eyebrow">Achievement Unlocked</span>
         <strong>{badge.title}</strong>
         <small>
-          {badge.category} - {badge.tier}
+          {badge.category} <span className="vault-reveal-tier">{badge.tier}</span>
         </small>
       </div>
     </aside>

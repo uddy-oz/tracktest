@@ -1,0 +1,3 @@
+# Preserve the exact bytes of the already-reviewed production migration files.
+supabase/20261101_persistent_achievements.sql -text
+supabase/20261102_daily_challenge_clock.sql -text

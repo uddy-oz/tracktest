@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import BadgeCard from "./BadgeCard";
+import BadgeGrid from "./BadgeGrid";
+import BadgeEmblem from "./BadgeEmblem";
+import { achievementDateLabel } from "../lib/achievementRecords";
+import { achievableCollection, badgeProgress, badgeProgressLabel, badgeStateLabel } from "../lib/badgeVault";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 import { getArenaBadges, type ArenaBadge } from "../lib/badges";
 import {
@@ -236,6 +240,7 @@ function ProfilePage({
           .filter((badge): badge is ArenaBadge => Boolean(badge))
       : getShowcaseBadges(badges);
   const unlockedBadgeCount = unlockedBadges.length;
+  const collection = achievableCollection(badges);
   const artistStats = Object.values(profileState.stats.artists);
   const albumStats = Object.values(profileState.stats.albums);
   const hasStats = profileState.stats.overall.totalQuizzesPlayed > 0;
@@ -326,21 +331,11 @@ function ProfilePage({
   }
 
   function getBadgeProgressLabel(badge: ArenaBadge) {
-    if (!badge.target) {
-      return badge.unlocked ? "Unlocked" : "Locked";
-    }
-
-    return badge.unlocked
-      ? "Unlocked"
-      : `${badge.progress || 0} / ${badge.target}`;
+    return badgeProgressLabel(badge);
   }
 
   function getBadgeProgressPercent(badge: ArenaBadge) {
-    if (!badge.target) {
-      return badge.unlocked ? 100 : 0;
-    }
-
-    return Math.min(100, Math.round(((badge.progress || 0) / badge.target) * 100));
+    return badgeProgress(badge);
   }
 
   if (!session && !isPublicProfile) {
@@ -569,7 +564,7 @@ function ProfilePage({
             <h2>Featured Achievements</h2>
           </div>
           <span>
-            {unlockedBadgeCount} of {badges.length} unlocked
+            {collection.unlocked} of {collection.total} achievable / {unlockedBadgeCount} owned
           </span>
         </div>
         {isOwnProfile && unlockedBadgeCount > 0 && (
@@ -667,27 +662,7 @@ function ProfilePage({
       </section>
 
       {isBadgeCollectionVisible && (
-        <section className="badge-section profile-badge-collection">
-          <div className="badge-section-header">
-            <div>
-              <p className="eyebrow">Badge Collection</p>
-              <h2>All Achievements</h2>
-            </div>
-            <span>
-              {unlockedBadgeCount} / {badges.length}
-            </span>
-          </div>
-
-          <div className="badge-grid profile-showcase-grid">
-            {badges.map((badge) => (
-              <BadgeCard
-                badge={badge}
-                key={badge.id}
-                onSelect={setSelectedBadge}
-              />
-            ))}
-          </div>
-        </section>
+        <BadgeGrid key={username} badges={badges} ownerId={isOwnProfile && !isAnonymousUser(session?.user) ? session?.user.id : undefined} />
       )}
 
       <details className="profile-secondary-records" open={!isPublicProfile}>
@@ -811,7 +786,7 @@ function ProfilePage({
         >
           <section
             ref={badgeDialogRef}
-            className={`badge-detail-modal badge-${selectedBadge.accent}`}
+            className={`badge-detail-modal vault-detail badge-${selectedBadge.accent} badge-tier-${selectedBadge.tier.toLowerCase()}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="badge-detail-title"
@@ -826,13 +801,15 @@ function ProfilePage({
               X
             </button>
             <p className="eyebrow">Badge Details</p>
+            <BadgeEmblem badge={selectedBadge} />
             <h2 id="badge-detail-title">{selectedBadge.title}</h2>
             <div className="badge-detail-meta">
               <span>{selectedBadge.tier}</span>
               <span>{selectedBadge.category}</span>
-              <span>{selectedBadge.unlocked ? "Unlocked" : "Locked"}</span>
+              <span>{badgeStateLabel(selectedBadge)}</span>
             </div>
             <p>{selectedBadge.description}</p>
+            {selectedBadge.unlocked && <p className="vault-note">{achievementDateLabel(selectedBadge)}</p>}
             <div
               className="badge-progress badge-detail-progress"
               aria-label={`${getBadgeProgressPercent(selectedBadge)}% complete`}

@@ -1,4 +1,5 @@
 import type { TrackTestStats } from "./stats";
+import { mergeAchievementRecords } from "./achievementRecords.ts";
 
 export type BadgeCategory =
   | "Skill"
@@ -46,6 +47,8 @@ export type ArenaBadge = {
   target?: number;
   icon: BadgeIcon;
   accent: string;
+  awardProvenance?: "server_verified" | "legacy_preserved";
+  trackingAvailable?: boolean;
 };
 
 const FUTURE_ARENA_BADGES: ArenaBadge[] = [
@@ -276,7 +279,7 @@ const FUTURE_ARENA_BADGES: ArenaBadge[] = [
   {
     id: "party-starter",
     title: "Party Starter",
-    description: "Host your first Party Mode room.",
+    description: "Host and complete a Party Mode game with at least one participant answering.",
     category: "Party Mode",
     tier: "Bronze",
     unlocked: false,
@@ -288,7 +291,7 @@ const FUTURE_ARENA_BADGES: ArenaBadge[] = [
   {
     id: "room-controller",
     title: "Room Controller",
-    description: "Run a Party Mode game with 10 or more players.",
+    description: "Complete Party Mode with 10 or more participants, excluding the host.",
     category: "Party Mode",
     tier: "Gold",
     unlocked: false,
@@ -804,7 +807,7 @@ export function getArenaBadges(stats: TrackTestStats) {
     ...getMultiplayerBadges(stats),
   ];
 
-  return badges;
+  return mergeAchievementRecords(badges.map(b => b.id === "party-starter" ? { ...b, trackingAvailable: stats.achievementLedgerAvailable === true } : b), stats.achievementRecords || []);
 }
 
 export function getRecentUnlockedBadge(badges: ArenaBadge[]) {
