@@ -8,6 +8,7 @@ import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import BadgeGrid from "./BadgeGrid";
 import { getArenaBadges, getRecentUnlockedBadge } from "../lib/badges";
 import { getDailyGoalFoundation, type DailyGoal } from "../lib/dailyGoals";
+import { useUtcGoalDay } from "../hooks/useUtcGoalDay";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 import {
   getCompactPlayerBadges,
@@ -132,6 +133,7 @@ function Leaderboard({
   onOpenProfile,
   progressionRevision = 0,
 }: LeaderboardProps) {
+  const goalClock=useUtcGoalDay();
   const [activeTab, setActiveTab] = useState<LeaderboardTab>("global");
   const [stats, setStats] = useState(getTrackTestStats);
   const [globalData, setGlobalData] = useState<GlobalLeaderboardData | null>(
@@ -198,7 +200,7 @@ function Leaderboard({
   const badges = getArenaBadges(stats);
   const recentBadge = getRecentUnlockedBadge(badges);
   const playerBadges = getCompactPlayerBadges(stats, badges);
-  const dailyGoals = getDailyGoalFoundation(stats);
+  const dailyGoals = getDailyGoalFoundation(stats,goalClock.now);
 
   function handleClearStats() {
     const shouldClear = window.confirm(
@@ -268,6 +270,7 @@ function Leaderboard({
         />
       ) : (
         <MyStats
+          ownerId={!isAnonymousUser(session?.user) ? session?.user.id : undefined}
           stats={stats}
           topArtists={topArtists}
           topAlbums={topAlbums}
@@ -279,6 +282,7 @@ function Leaderboard({
           recentBadge={recentBadge}
           playerBadges={playerBadges}
           dailyGoals={dailyGoals}
+          dailyResetLabel={goalClock.label}
           onClearStats={handleClearStats}
         />
       )}
@@ -817,6 +821,7 @@ function MultiplayerLeaderboardRow({
 }
 
 function MyStats({
+  ownerId,
   stats,
   topArtists,
   topAlbums,
@@ -828,8 +833,10 @@ function MyStats({
   recentBadge,
   playerBadges,
   dailyGoals,
+  dailyResetLabel,
   onClearStats,
 }: {
+  ownerId?: string;
   stats: ReturnType<typeof getTrackTestStats>;
   topArtists: ReturnType<typeof getTrackTestStats>["artists"][string][];
   topAlbums: ReturnType<typeof getTrackTestStats>["albums"][string][];
@@ -841,6 +848,7 @@ function MyStats({
   recentBadge: ReturnType<typeof getRecentUnlockedBadge>;
   playerBadges: CompactPlayerBadge[];
   dailyGoals: DailyGoal[];
+  dailyResetLabel: string;
   onClearStats: () => void;
 }) {
   return (
@@ -857,15 +865,16 @@ function MyStats({
         <PlayerIdentityBadges badges={playerBadges} />
       </section>
 
-      <BadgeGrid badges={badges} recentBadge={recentBadge} />
+      <BadgeGrid key={ownerId || "local"} badges={badges} recentBadge={recentBadge} ownerId={ownerId} />
 
       <section className="daily-goals-panel">
         <div className="badge-section-header">
           <div>
             <p className="eyebrow">Daily Goals</p>
-            <h2>Goal Foundation</h2>
+            <h2>Daily Challenges</h2>
+            <small>{dailyResetLabel}</small>
           </div>
-          <span>Frontend-ready</span>
+          <span>UTC daily reset</span>
         </div>
 
         <div className="daily-goal-list">

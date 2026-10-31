@@ -1,0 +1,150 @@
+/* Badge Vault: isolated collection surfaces; gameplay styles are unchanged. */
+.badge-vault { padding: 0; background: none; border: 0; }
+.vault-overview { display: grid; grid-template-columns: 1fr auto auto; gap: 32px; align-items: center; padding: 32px 0; border-block: 1px solid var(--separator); }
+.badge-vault .vault-overview h2 { font-size: 40px; margin: 8px 0 12px; line-height: 1.1; color: var(--content-primary); }
+.vault-overview h2 > span { font-size: 14px; vertical-align: top; margin-left: 10px; color: var(--brand-primary); }
+.vault-overview p, .vault-count small, .vault-note, .vault-result-count { color: var(--content-secondary); }
+.vault-completion { width: 114px; height: 114px; padding: 7px; border-radius: 50%; }
+.vault-completion > div { height: 100%; background: var(--page); border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
+.vault-completion strong { font-size: 26px; color: var(--content-primary); }
+.vault-completion span { font-size: 10px; color: var(--content-secondary); }
+.vault-count > strong { font-size: 34px; color: var(--content-primary); }
+.vault-count strong > span { font-size: 22px; color: var(--content-secondary); }
+.vault-count p { margin: 3px 0 8px; }
+.vault-tier-strip { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); border-bottom: 1px solid var(--separator); margin-bottom: 26px; }
+.vault-tier-strip > div { display: flex; align-items: center; gap: 8px; padding: 20px 12px; color: var(--content-primary); font-size: 13px; }
+.vault-tier-strip strong { margin-left: auto; }
+.vault-tier-strip small { color: var(--content-secondary); font-weight: 400; }
+.badge-tier-bronze { --vault-metal: #edb38a; --vault-deep: #85451d; --vault-edge: #b7734c; --vault-shine: #f8d3b5; --vault-aura: 6%; }
+.badge-tier-silver { --vault-metal: #d7e2ee; --vault-deep: #46566c; --vault-edge: #8e9fb5; --vault-shine: #f1f6ff; --vault-aura: 7%; }
+.badge-tier-gold { --vault-metal: #f4ce70; --vault-deep: #785000; --vault-edge: #c39734; --vault-shine: #fff0b6; --vault-aura: 11%; }
+.badge-tier-platinum { --vault-metal: #93e4f7; --vault-deep: #205e82; --vault-edge: #688ce0; --vault-shine: #d3faff; --vault-aura: 12%; }
+.badge-tier-legendary { --vault-metal: #d7b8ff; --vault-deep: #6938ae; --vault-edge: #b587ef; --vault-shine: #f4dca1; --vault-aura: 16%; }
+:is(.vault-gallery .badge-card,.vault-detail,.vault-focus,.badge-earned-popup) { --vault-ink: var(--vault-metal); --vault-bar: var(--vault-metal); }
+.vault-tier-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vault-metal); box-shadow: 0 0 9px color-mix(in srgb,var(--vault-metal) 35%,transparent); }
+.vault-toolbar { display: grid; grid-template-columns: minmax(160px,1.5fr) repeat(4,minmax(100px,1fr)); gap: 12px; align-items: end; }
+.vault-toolbar label { display: grid; gap: 7px; color: var(--content-secondary); font-size: 12px; }
+.vault-toolbar :is(input,select) { width: 100%; min-width: 0; min-height: 46px; border: 1px solid var(--separator); border-radius: 8px; background: var(--surface); color: var(--content-primary); padding: 10px; font: inherit; font-size: 14px; }
+.vault-toolbar input::placeholder { color: var(--content-secondary); opacity: 1; }
+.vault-search { position: relative; }
+.vault-search > svg { position: absolute; left: 12px; top: 14px; }
+.vault-toolbar .vault-search input { padding-left: 38px; }
+.vault-result-count { font-size: 13px; margin: 20px 0 14px; }
+.badge-vault .vault-gallery { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; }
+.vault-gallery .badge-card {
+  --vault-card-background: linear-gradient(150deg,color-mix(in srgb,var(--vault-edge) var(--vault-aura),transparent),transparent 66%),var(--surface);
+  min-width: 0; min-height: 330px; padding: 20px; border-radius: 8px;
+  background: var(--vault-card-background);
+  border: 1px solid color-mix(in srgb,var(--vault-edge) 48%,var(--separator));
+  box-shadow: inset 0 1px color-mix(in srgb,var(--vault-shine) 15%,transparent);
+  justify-content: flex-start; overflow: hidden;
+  transition: transform 160ms ease,border-color 160ms ease,box-shadow 160ms ease;
+}
+.vault-gallery .badge-card::before {
+  background: linear-gradient(115deg,transparent 25%,color-mix(in srgb,var(--vault-shine) 6%,transparent) 47%,transparent 65%);
+  opacity: 1;
+}
+.vault-gallery .badge-unlocked {
+  border-top-color: var(--vault-metal);
+  box-shadow: inset 0 2px var(--vault-metal),0 5px 18px color-mix(in srgb,var(--vault-edge) 7%,transparent);
+}
+.vault-gallery .badge-unlocked:is(.badge-tier-gold,.badge-tier-platinum,.badge-tier-legendary) {
+  border-color: color-mix(in srgb,var(--vault-metal) 62%,var(--separator));
+  box-shadow: inset 0 2px var(--vault-shine),inset 0 -1px color-mix(in srgb,var(--vault-edge) 35%,transparent),0 5px 22px color-mix(in srgb,var(--vault-edge) 10%,transparent);
+}
+.vault-gallery .badge-card:hover { transform: translateY(-3px); border-color: var(--vault-metal); box-shadow: 0 8px 26px color-mix(in srgb,var(--vault-edge) 16%,transparent),inset 0 1px var(--vault-shine); }
+.vault-gallery .badge-topline { color: var(--content-secondary); font-size: 10px; gap: 8px; align-items: flex-start; letter-spacing: 0; line-height: 1.5; min-height: 26px; }
+.vault-gallery .badge-topline > span { padding-top: 4px; overflow-wrap: anywhere; }
+.vault-gallery .badge-topline strong { color: var(--vault-ink); border: 1px solid color-mix(in srgb,var(--vault-edge) 55%,var(--separator)); background: color-mix(in srgb,var(--vault-edge) 10%,var(--surface)); border-radius: 4px; padding: 4px 6px; font-size: 10px; line-height: 1.5; font-weight: 750; white-space: nowrap; }
+.vault-gallery .badge-tier-legendary .badge-topline strong { border-color: color-mix(in srgb,var(--vault-shine) 65%,var(--separator)); }
+:is(.vault-gallery,.vault-detail,.vault-focus,.badge-earned-popup) .badge-icon {
+  width: 84px; height: 84px; flex-shrink: 0; margin: 24px auto 20px;
+  border: 1px solid var(--vault-edge); color: var(--vault-ink);
+  background: linear-gradient(140deg,color-mix(in srgb,var(--vault-shine) 18%,transparent),transparent 42%,color-mix(in srgb,var(--vault-edge) 16%,transparent)),var(--surface-strong);
+  box-shadow: 0 6px 22px color-mix(in srgb,var(--vault-edge) 14%,transparent),inset 0 0 0 5px var(--surface),inset 0 0 0 6px color-mix(in srgb,var(--vault-metal) 35%,transparent);
+  display: grid; place-items: center; border-radius: 22%; transform: none;
+}
+:is(.vault-gallery,.vault-detail) :is(.badge-icon-record,.badge-icon-discs) { border-radius: 50%; outline: 1px dashed color-mix(in srgb,var(--vault-metal) 50%,transparent); outline-offset: 4px; }
+:is(.vault-gallery,.vault-detail) :is(.badge-icon-shield,.badge-icon-swords) { border-radius: 20% 20% 42% 42%; }
+.vault-gallery .badge-tier-gold .badge-icon { border-top: 2px solid var(--vault-shine); border-bottom: 2px solid var(--vault-edge); }
+.vault-gallery .badge-tier-platinum .badge-icon { border-style: double; border-width: 3px; outline: 1px solid color-mix(in srgb,var(--vault-edge) 40%,transparent); outline-offset: 4px; }
+.vault-gallery .badge-tier-legendary .badge-icon { outline: 1px solid color-mix(in srgb,var(--vault-shine) 65%,transparent); outline-offset: 5px; border-color: var(--vault-metal); box-shadow: 0 0 26px color-mix(in srgb,var(--vault-edge) 24%,transparent),inset 0 0 0 5px var(--surface),inset 0 0 0 6px var(--vault-edge); }
+.vault-gallery .badge-locked, .vault-gallery .badge-locked:hover { filter: none; opacity: 1; }
+.vault-gallery .badge-card::after { display: none; }
+.vault-gallery .badge-locked .badge-icon { opacity: .88; filter: none; outline-style: dashed; box-shadow: inset 0 0 0 5px var(--surface),inset 0 0 0 6px color-mix(in srgb,var(--vault-edge) 35%,transparent); }
+.vault-gallery .badge-unavailable { --vault-aura: 3%; border-style: dashed; }
+.vault-gallery .badge-unavailable::before { background: repeating-linear-gradient(130deg,transparent 0 16px,color-mix(in srgb,var(--content-secondary) 3%,transparent) 16px 17px); }
+.badge-state { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.badge-state > svg { flex-shrink: 0; }
+.vault-gallery .badge-state { color: var(--content-secondary); font-size: 11px; margin-top: auto; padding-top: 16px; line-height: 1.5; }
+.vault-gallery .badge-unlocked .badge-state { color: var(--vault-ink); }
+.vault-gallery .badge-copy h3 { color: var(--content-primary); font-size: 18px; font-weight: 750; line-height: 1.3; overflow-wrap: anywhere; margin-bottom: 8px; }
+.vault-gallery .badge-copy p { color: var(--content-secondary); font-size: 13px; line-height: 1.55; }
+.vault-gallery .badge-progress { margin-top: 10px; }
+.vault-gallery .badge-progress small { color: var(--content-secondary); font-size: 11px; }
+.vault-gallery .badge-progress > div { background: var(--separator); height: 5px; }
+.vault-gallery .badge-progress > div > span { background: linear-gradient(90deg,var(--vault-edge),var(--vault-bar)); }
+.vault-gallery .badge-unlocked .badge-progress > div { height: 3px; }
+.vault-card-highlight { display: inline-flex; gap: 4px; align-items: center; color: var(--vault-ink); }
+.vault-gallery .badge-highlight-tracked { border-color: var(--vault-metal); box-shadow: inset 3px 0 var(--vault-metal); }
+.vault-gallery .badge-highlight-collection { border-color: var(--vault-shine); }
+.vault-focus { display: flex; gap: 16px; align-items: center; padding: 18px 0; margin: 0 0 24px; border-bottom: 1px solid var(--separator); color: var(--content-primary); }
+.vault-focus .badge-icon { width: 58px; height: 58px; margin: 0; }
+.vault-focus .badge-icon svg { width: 28px; height: 28px; }
+.vault-focus-copy { display: grid; gap: 5px; flex: 1; min-width: 0; }
+.vault-focus-copy strong { font-size: 18px; overflow-wrap: anywhere; }
+.vault-focus-copy small { color: var(--vault-ink); font-size: 10px; font-weight: 750; }
+.vault-focus-copy > span, .vault-focus-progress > span { color: var(--content-secondary); font-size: 12px; line-height: 1.5; }
+.vault-focus-progress { width: 150px; display: grid; gap: 8px; flex-shrink: 0; }
+.vault-focus :is(.vault-focus-open,.vault-focus-dismiss) { width: 44px; height: 44px; min-width: 44px; padding: 0; display: grid; place-items: center; border: 1px solid var(--separator); border-radius: 8px; background: var(--surface); color: var(--content-primary); box-shadow: none; }
+.vault-focus .vault-focus-open { color: var(--vault-ink); border-color: var(--vault-edge); }
+.vault-focus :is(.vault-focus-open,.vault-focus-dismiss):hover { background: var(--surface-strong); border-color: var(--vault-ink); }
+.badge-vault progress { height: 7px; width: 100%; accent-color: var(--brand-primary); }
+.vault-focus progress { accent-color: var(--vault-bar); }
+.vault-recent { display: flex; align-items: center; gap: 8px; color: var(--content-secondary); font-size: 13px; }
+.vault-detail { max-height: calc(100dvh - 32px); overflow-y: auto; color: var(--content-primary); }
+.vault-detail .badge-icon { margin: 0 0 24px; }
+.vault-detail h3 { font-size: 14px; margin-top: 24px; }
+.vault-detail-state { font-size: 13px; border: 1px solid var(--separator); border-radius: 6px; padding: 5px 8px; }
+.vault-detail > button:not(.badge-detail-close) { display: inline-flex; gap: 8px; align-items: center; }
+.vault-note { font-size: 13px; line-height: 1.6; }
+.vault-empty { padding: 40px 16px; text-align: center; color: var(--content-secondary); }
+.badge-vault :is(button,input,select,[role="button"]):focus-visible { outline: 3px solid var(--brand-primary); outline-offset: 4px; }
+:root[data-theme="light"] .vault-tier-dot { background: var(--vault-deep); }
+/* Keep legacy light-tier gradients from replacing the Vault's semantic surface. */
+:root[data-theme="light"] .vault-gallery .badge-card { background: var(--vault-card-background); }
+:root[data-theme="light"] :is(.vault-gallery .badge-card,.vault-detail,.vault-focus,.badge-earned-popup) { --vault-ink: var(--vault-deep); --vault-bar: var(--vault-deep); }
+.badge-earned-popup .badge-icon { width: 58px; height: 58px; margin: 0; flex-shrink: 0; }
+.badge-earned-popup { border-color: var(--vault-edge); border-top: 2px solid var(--vault-shine); border-radius: 8px; grid-template-columns: 58px minmax(0,1fr); background: linear-gradient(120deg,color-mix(in srgb,var(--vault-edge) 12%,transparent),transparent 70%),var(--surface); box-shadow: 0 8px 36px color-mix(in srgb,var(--vault-edge) 22%,transparent); overflow: hidden; }
+.badge-earned-popup::after { content: ""; position: absolute; pointer-events: none; inset: 0; background: linear-gradient(110deg,transparent 30%,color-mix(in srgb,var(--vault-shine) 16%,transparent),transparent 65%); transform: translateX(-100%); animation: vault-reveal-sheen 900ms 120ms ease-out both; }
+.badge-earned-popup .vault-reveal-eyebrow { color: var(--vault-ink); font-size: 10px; letter-spacing: 0; }
+.badge-earned-popup strong { font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+.badge-earned-popup small { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px; line-height: 1.5; }
+.badge-earned-popup .vault-reveal-tier { color: var(--vault-ink); border: 1px solid var(--vault-edge); border-radius: 4px; padding: 2px 5px; font-size: 9px; letter-spacing: 0; }
+.badge-earned-popup .badge-icon svg { animation: vault-reveal 650ms cubic-bezier(.2,.8,.2,1) both; }
+@keyframes vault-reveal { from { opacity: 0; transform: scale(.6) rotate(-12deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes vault-reveal-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media(max-width:1000px) { .badge-vault .vault-gallery { grid-template-columns: repeat(3,minmax(0,1fr)); } .vault-toolbar { grid-template-columns: repeat(4,minmax(0,1fr)); } .vault-search { grid-column: 1/-1; } }
+@media(max-width:650px) {
+  .vault-overview { grid-template-columns: 1fr auto; gap: 20px; padding: 24px 0; }
+  .badge-vault .vault-overview h2 { font-size: 32px; }
+  .vault-overview > div:first-child { grid-column: 1/-1; }
+  .vault-completion { width: 100px; height: 100px; }
+  .vault-count { text-align: right; }
+  .vault-tier-strip { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .vault-tier-strip > div { padding: 12px 6px; font-size: 11px; gap: 5px; }
+  .vault-toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .badge-vault .vault-gallery { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+  .vault-gallery .badge-card { padding: 14px 12px; min-height: 340px; }
+  .vault-gallery .badge-topline { flex-direction: column; gap: 5px; min-height: 62px; }
+  .vault-gallery .badge-topline strong { order: -1; }
+  .vault-gallery .badge-copy h3 { font-size: 16px; }
+  .vault-gallery .badge-icon { width: 74px; height: 74px; margin: 18px auto 20px; }
+  .vault-focus { display: grid; grid-template-columns: 48px minmax(0,1fr) 44px; gap: 12px; }
+  .vault-focus .badge-icon { width: 48px; height: 48px; }
+  .vault-focus-copy strong { font-size: 16px; }
+  .vault-focus-progress { grid-column: 2; width: 100%; }
+  .vault-focus .vault-focus-open { grid-column: 3; grid-row: 1; }
+  .vault-focus .vault-focus-dismiss { grid-column: 3; grid-row: 2; }
+}
+@media(prefers-reduced-motion:reduce) { .vault-gallery .badge-card, .badge-earned-popup, .badge-earned-popup::after, .badge-earned-popup .badge-icon svg { animation: none; transition: none; } .vault-gallery .badge-card:hover { transform: none; } }

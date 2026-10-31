@@ -1,50 +1,27 @@
 import type { ArenaBadge } from "../lib/badges";
+import BadgeEmblem from "./BadgeEmblem";
+import { BadgeCheck, Clock3, Crosshair, LockKeyhole, Sparkles } from "lucide-react";
+import { badgeProgress, badgeProgressLabel, badgeStateLabel, isBadgeUnavailable } from "../lib/badgeVault";
 
 type BadgeCardProps = {
   badge: ArenaBadge;
   onSelect?: (badge: ArenaBadge) => void;
+  highlight?: "tracked" | "collection";
 };
 
-const iconSymbols: Record<ArenaBadge["icon"], string> = {
-  checkRing: "✓",
-  diamond: "◆",
-  bolt: "ϟ",
-  record: "◉",
-  crown: "♛",
-  discs: "◎",
-  calendar: "▣",
-  flame: "▲",
-  trophy: "★",
-  shield: "◈",
-  star: "✦",
-  clutch: "◇",
-  swords: "⚔",
-  users: "◉",
-  party: "♫",
-  comeback: "↗",
-  target: "⊙",
-  headphones: "♪",
-  stack: "≡",
-  key: "◆",
-};
-
-function BadgeCard({ badge, onSelect }: BadgeCardProps) {
-  const progress =
-    badge.progress !== undefined && badge.target
-      ? Math.min(100, Math.round((badge.progress / badge.target) * 100))
-      : badge.unlocked
-        ? 100
-        : 0;
+function BadgeCard({ badge, onSelect, highlight }: BadgeCardProps) {
+  const progress = badgeProgress(badge);
+  const StateIcon = isBadgeUnavailable(badge) ? Clock3 : badge.unlocked ? BadgeCheck : LockKeyhole;
 
   return (
     <article
       className={`badge-card badge-${badge.accent} badge-tier-${badge.tier.toLowerCase()} ${
         badge.unlocked ? "badge-unlocked" : "badge-locked"
-      } ${onSelect ? "badge-card-clickable" : ""}`}
+      } ${isBadgeUnavailable(badge) ? "badge-unavailable" : ""} ${highlight ? `badge-highlight-${highlight}` : ""} ${onSelect ? "badge-card-clickable" : ""}`}
       role={onSelect ? "button" : undefined}
       aria-label={
         onSelect
-          ? `${badge.title}, ${badge.tier}, ${badge.unlocked ? "unlocked" : "locked"}. Open details.`
+          ? `${badge.title}, ${badge.tier}, ${badgeStateLabel(badge)}. Open details.`
           : undefined
       }
       tabIndex={onSelect ? 0 : undefined}
@@ -65,18 +42,17 @@ function BadgeCard({ badge, onSelect }: BadgeCardProps) {
         <strong>{badge.tier}</strong>
       </div>
 
-      <div className={`badge-icon badge-icon-${badge.icon}`} aria-hidden="true">
-        <span>{iconSymbols[badge.icon]}</span>
-      </div>
-
-      <span className="badge-state" aria-hidden="true">
-        {badge.unlocked ? "Unlocked" : "Locked"}
-      </span>
+      <BadgeEmblem badge={badge} />
 
       <div className="badge-copy">
         <h3>{badge.title}</h3>
         <p>{badge.description}</p>
       </div>
+
+      <span className="badge-state" aria-hidden="true">
+        <StateIcon size={13} />{badgeStateLabel(badge)}
+        {highlight && <span className="vault-card-highlight">{highlight === "tracked" ? <Crosshair size={12} /> : <Sparkles size={12} />}{highlight === "tracked" ? "Tracking" : "Highlight"}</span>}
+      </span>
 
       {badge.target && (
         <div className="badge-progress" aria-label={`${progress}% complete`}>
@@ -84,9 +60,7 @@ function BadgeCard({ badge, onSelect }: BadgeCardProps) {
             <span style={{ width: `${progress}%` }} />
           </div>
           <small>
-            {badge.unlocked
-              ? "Unlocked"
-              : `${badge.progress || 0} / ${badge.target}`}
+            {badgeProgressLabel(badge)}
           </small>
         </div>
       )}

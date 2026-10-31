@@ -1,5 +1,9 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
+import { fetchAchievementState } from "./cloudAchievements";
+import { getArenaBadges } from "./badges";
+import { preserveObservedAchievements } from "./achievementRecords";
+import { collectHistoryPages, historyCursorFilter } from "./historyPagination";
 import {
   buildArenaProgress,
   type AlbumStats,
@@ -42,59 +46,61 @@ type QuizResultRow = {
   dominant_win?: boolean | null;
 };
 
+async function attachAchievements(user: User, stats: TrackTestStats) {
+  if (user.is_anonymous) return stats;
+  const ledger = await fetchAchievementState(user.id, true);
+  const legacy = preserveObservedAchievements(user.id, getArenaBadges({ ...stats, achievementRecords: ledger.records }));
+  return { ...stats, achievementRecords: [...legacy, ...ledger.records], achievementLedgerAvailable: ledger.available };
+}
+
 export async function fetchCloudBadgeStats(user: User) {
   if (!supabase) {
     return { data: null, error: "Supabase is not configured yet." };
   }
 
-  const result = await supabase
-    .from("quiz_results")
-    .select(
+  function fetchRows(columns: string) {
+    return collectHistoryPages<QuizResultRow>((cursor,size) => {
+      let query = supabase!.from("quiz_results").select(columns).eq("user_id",user.id).order("played_at",{ascending:false}).order("id",{ascending:false}).limit(size);
+      if (cursor) query=query.or(historyCursorFilter(cursor));
+      return query.then(r=>({ data:r.data as unknown as QuizResultRow[] | null,error:r.error }));
+    });
+  }
+  const result = await fetchRows(
       "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time, multiplayer_outcome, competitive_progression_eligible, clean_sheet, opponent_round_wins, opponents_defeated, comeback_win, dominant_win"
-    )
-    .eq("user_id", user.id)
-    .order("played_at", { ascending: false });
+    );
 
   if (!result.error) {
     return {
-      data: buildTrackTestStats((result.data || []) as QuizResultRow[]),
+      data: await attachAchievements(user, buildTrackTestStats((result.data || []) as QuizResultRow[])),
       error: null,
     };
   }
 
-  const preProgressionResult = await supabase
-    .from("quiz_results")
-    .select(
+  const preProgressionResult = await fetchRows(
       "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time"
-    )
-    .eq("user_id", user.id)
-    .order("played_at", { ascending: false });
+    );
 
   if (!preProgressionResult.error) {
     return {
-      data: buildTrackTestStats(
+      data: await attachAchievements(user, buildTrackTestStats(
         (preProgressionResult.data || []) as QuizResultRow[]
-      ),
+      )),
       error: null,
     };
   }
 
   // Keep cloud stats readable while the progression migration is being
   // deployed. Legacy rows are treated as Single Player results.
-  const legacyResult = await supabase
-    .from("quiz_results")
-    .select(
+  const legacyResult = await fetchRows(
       "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at"
-    )
-    .eq("user_id", user.id)
-    .order("played_at", { ascending: false });
+    );
 
   if (legacyResult.error) {
     return { data: null, error: result.error.message };
   }
 
   return {
-    data: buildTrackTestStats((legacyResult.data || []) as QuizResultRow[]),
+    data: await attachAchievements(user, buildTrackTestStats((legacyResult.data || []) as QuizResultRow[])),
     error: null,
   };
 }

@@ -2,6 +2,8 @@ import type { User } from "@supabase/supabase-js";
 import { fetchCloudBadgeStats } from "./cloudBadgeStats";
 import { getLocalFeaturedBadgeIds } from "./featuredBadges";
 import { supabase } from "./supabaseClient";
+import { fetchAchievementState } from "./cloudAchievements";
+import { collectHistoryPages, historyCursorFilter } from "./historyPagination";
 import { fetchProfileDisplayInfo, type ProfileDisplayInfo } from "./profiles";
 import {
   getTrackTestStats,
@@ -200,15 +202,16 @@ export async function fetchPublicProfileByUsername(
     };
   }
 
+  const ledger = await fetchAchievementState(summaryRow.user_id);
   return {
     displayInfo: mapPublicDisplayInfo(summaryRow),
     featuredBadgeIds: getPublicFeaturedBadgeIds(summaryRow),
-    stats: buildPublicTrackTestStats(
+    stats: { ...buildPublicTrackTestStats(
       summaryRow,
       (recentResults.data || []) as PublicQuizResultRow[],
       (artistStats.data || []) as PublicArtistRow[],
       (albumStats.data || []) as PublicAlbumRow[]
-    ),
+    ), achievementRecords: ledger.records, achievementLedgerAvailable: ledger.available },
     error: null,
     notFound: false,
   };
@@ -219,14 +222,16 @@ async function fetchPublicQuizResults(username: string) {
     return { data: null, error: { message: "Supabase is not configured yet." } };
   }
 
-  const result = await supabase
-    .from("public_profile_recent_results")
-    .select(
+  function fetchRows(columns: string) {
+    return collectHistoryPages<PublicQuizResultRow>((cursor,size) => {
+      let query=supabase!.from("public_profile_recent_results").select(columns).eq("username",username).order("played_at",{ascending:false}).order("id",{ascending:false}).limit(size);
+      if(cursor)query=query.or(historyCursorFilter(cursor));
+      return query.then(r=>({data:r.data as unknown as PublicQuizResultRow[]|null,error:r.error}));
+    });
+  }
+  const result = await fetchRows(
       "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at, game_mode, is_private, is_winner, was_host, player_count, placement, score_margin, result_status, scoring_model, round_points, rounds_won, rounds_played, average_winning_response_time, fastest_winning_response_time, multiplayer_outcome, competitive_progression_eligible, clean_sheet, opponent_round_wins, opponents_defeated, comeback_win, dominant_win"
-    )
-    .eq("username", username)
-    .order("played_at", { ascending: false })
-    .limit(1000);
+    );
 
   if (!result.error) {
     return result;
@@ -234,14 +239,9 @@ async function fetchPublicQuizResults(username: string) {
 
   // Public profiles stay available if the frontend deploys before the new
   // view columns. Those legacy results naturally map to Single Player.
-  return supabase
-    .from("public_profile_recent_results")
-    .select(
+  return fetchRows(
       "id, album_name, artist_name, total_questions, correct_answers, accuracy, final_points, average_answer_time, played_at"
-    )
-    .eq("username", username)
-    .order("played_at", { ascending: false })
-    .limit(1000);
+    );
 }
 
 function getPublicFeaturedBadgeIds(row: PublicProfileSummaryRow) {

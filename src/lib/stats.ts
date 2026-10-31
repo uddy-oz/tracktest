@@ -107,6 +107,8 @@ export type AlbumStats = {
 };
 
 export type TrackTestStats = {
+  achievementRecords?: import("./achievementRecords").AchievementRecord[];
+  achievementLedgerAvailable?: boolean;
   version: 1;
   quizResults: QuizResult[];
   overall: OverallStats;

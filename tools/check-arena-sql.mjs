@@ -36,7 +36,7 @@ const readyAckReconciliation = readFileSync(
 const multiplayerProgression = readFileSync(
   new URL("../supabase/20261007_multiplayer_progression_and_leaderboards.sql", import.meta.url),
   "utf8"
-);
+).replace(/\r\n/g, "\n");
 const multiplayerAuthoritySecurity = readFileSync(
   new URL("../supabase/20261026_multiplayer_authority_and_atomic_membership.sql", import.meta.url),
   "utf8"

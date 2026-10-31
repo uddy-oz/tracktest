@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { getArenaBadges } from "../lib/badges";
 import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import { getDailyGoalFoundation } from "../lib/dailyGoals";
+import { useUtcGoalDay } from "../hooks/useUtcGoalDay";
 import { fetchGlobalLeaderboard } from "../lib/globalLeaderboard";
 import {
   getCompactPlayerBadges,
@@ -124,7 +125,6 @@ function HomePage({
   const {
     playerBadges,
     featuredBadges,
-    dailyGoals,
     recentResults,
   } = useMemo(() => {
     const badges = getArenaBadges(stats);
@@ -133,10 +133,11 @@ function HomePage({
       playerBadges:
         identityBadges || getCompactPlayerBadges(stats, badges),
       featuredBadges: badges.filter((badge) => badge.unlocked).slice(0, 3),
-      dailyGoals: getDailyGoalFoundation(stats).slice(0, 3),
       recentResults: stats.quizResults.slice(0, 3),
     };
   }, [identityBadges, stats]);
+  const goalClock=useUtcGoalDay();
+  const dailyGoals = getDailyGoalFoundation(stats,goalClock.now).slice(0, 3);
   const recoverableArenaRoom = isArenaRoomRecoverableForUser(
     activeArenaRoom,
     session?.user.id
@@ -304,6 +305,7 @@ function HomePage({
             <div>
               <p className="eyebrow">Daily Goals</p>
               <h2>Today</h2>
+              <small>{goalClock.label}</small>
             </div>
           </div>
           <div className="home-list">

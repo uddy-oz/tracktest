@@ -23,6 +23,7 @@ test("CSS entrypoint preserves the established cascade across focused modules", 
     "./styles/foundation.css",
     "./styles/gameplay.css",
     "./styles/theme.css",
+    "./styles/badge-vault.css",
   ]);
 
   const css = readApplicationCss();

@@ -6,20 +6,7 @@ const MAX_FEATURED_BADGES = 6;
 
 type FeaturedBadgeStore = Record<string, string[]>;
 
-export function sanitizeFeaturedBadgeIds(
-  badgeIds: string[],
-  unlockedBadgeIds: Set<string>
-) {
-  const selected = new Set<string>();
-
-  badgeIds.forEach((badgeId) => {
-    if (selected.size < MAX_FEATURED_BADGES && unlockedBadgeIds.has(badgeId)) {
-      selected.add(badgeId);
-    }
-  });
-
-  return [...selected];
-}
+export { sanitizeFeaturedBadgeIds } from "./featuredBadgeSelection";
 
 export function getLocalFeaturedBadgeIds(username?: string | null) {
   if (!username) {
