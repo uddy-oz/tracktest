@@ -1387,3 +1387,26 @@ input:focus-visible,
   }
 }
 
+
+
+/* StanZer brand identity: transparent wordmarks, responsive header. */
+.logo-button.stanzer-brand {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+.logo-button.stanzer-brand::after {
+  display: none;
+}
+.stanzer-nav-logo {
+  display: block;
+  width: 140px;
+  height: auto;
+  max-width: 42vw;
+}
+@media (max-width: 940px) {
+  .stanzer-nav-logo {
+    width: 134px;
+    max-width: 48vw;
+  }
+}

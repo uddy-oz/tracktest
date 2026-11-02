@@ -74,11 +74,17 @@ function Navbar({
       <div className="nav-shell">
         <button
           type="button"
-          className="logo logo-button"
+          className="logo logo-button stanzer-brand"
+          aria-label="StanZer home"
           onClick={() => navigate(onShowHome)}
         >
-          <span>StanZer</span>
-          <small>Music competition</small>
+          <img
+            src={theme === "dark" ? "/stanzer-wordmark-dark.svg" : "/stanzer-wordmark-light.svg"}
+            alt="StanZer"
+            className="stanzer-nav-logo"
+            width={995}
+            height={334}
+          />
         </button>
 
         <button
