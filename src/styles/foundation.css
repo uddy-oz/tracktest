@@ -1233,10 +1233,12 @@ input:focus-visible,
     overflow-y: auto;
     border: 1px solid var(--glass-border);
     border-radius: 14px;
-    background: var(--glass);
+    /* Opaque expanded menu prevents homepage content showing through. */
+    background: var(--surface);
     box-shadow: var(--shadow-lifted);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
-    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    z-index: 1;
   }
 
   .nav-links.is-open { display: grid; }
