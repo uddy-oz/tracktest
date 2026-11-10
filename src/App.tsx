@@ -205,10 +205,14 @@ function App() {
     const nameValidation = validateGuestDisplayName(requestedName);
     if (!nameValidation.ok) return nameValidation.error;
     const guestName = nameValidation.value;
+    const returnPath =
+      getInitialView() === "multiplayer"
+        ? window.location.pathname
+        : window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer";
 
     if (session?.user && !isAnonymousUser(session.user)) {
       setIsGuestNamePromptOpen(false);
-      showMultiplayer();
+      navigateToInternalPath(returnPath);
       return "";
     }
 
@@ -233,9 +237,7 @@ function App() {
         displayName: guestName,
       });
       setIsGuestNamePromptOpen(false);
-      navigateToInternalPath(
-        window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
-      );
+      navigateToInternalPath(returnPath);
       window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
       return "";
     }
@@ -267,9 +269,7 @@ function App() {
       }
 
       setIsGuestNamePromptOpen(false);
-      navigateToInternalPath(
-        window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer"
-      );
+      navigateToInternalPath(returnPath);
       window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
       return "";
     } finally {
@@ -389,29 +389,6 @@ function App() {
     activeArenaRoom,
     session?.user.id,
   ]);
-
-  useEffect(() => {
-    const pageLabel =
-      activeView === "play"
-        ? "Single Player"
-        : activeView === "multiplayer"
-          ? "Multiplayer"
-          : activeView === "leaderboard"
-            ? "Leaderboard"
-            : activeView === "profile"
-              ? "Player Profile"
-              : activeView === "auth"
-                ? authMode === "signup"
-                  ? "Create Account"
-                  : authMode === "forgot" || authMode === "reset"
-                    ? "Password Recovery"
-                    : authMode === "settings"
-                      ? "Account Settings"
-                      : "Log In"
-                : "Prove you're a superfan";
-
-    document.title = `${pageLabel} | StanZer`;
-  }, [activeView, authMode]);
 
   useEffect(() => {
     let isActive = true;
@@ -923,7 +900,11 @@ function App() {
           onHome={showHome}
           onLogin={() => showAuth("login", window.location.pathname)}
           onGuest={requestGuestSession}
+          isGuestNamePromptOpen={isGuestNamePromptOpen}
           inviteCode={arenaInviteCode}
+          onInviteRequested={(code) =>
+            navigateToInternalPath(`/multiplayer/invite/${encodeURIComponent(code)}`, false)
+          }
           recoveredRoom={activeArenaRoom}
           onArenaRoomChange={handleArenaRoomChange}
           onProgressionUpdated={refreshIdentityBadges}

@@ -16,6 +16,7 @@ test("dialog focus wraps in both directions", () => {
 test("all custom dialog owners use the shared accessibility behavior", () => {
   for (const path of [
     "src/Components/GuestNameModal.tsx",
+    "src/Components/MultiplayerAccessDialog.tsx",
     "src/Components/AuthPage.tsx",
     "src/Components/Leaderboard.tsx",
     "src/Components/ProfilePage.tsx",

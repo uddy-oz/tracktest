@@ -7849,16 +7849,6 @@ button:active:not(:disabled) {
   margin-left: 6px;
 }
 
-.arena-guest-entry {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 14px;
-  border: 1px solid rgba(36, 213, 232, 0.28);
-  background: rgba(36, 213, 232, 0.06);
-}
-
-.arena-guest-actions,
 .settings-reset-actions {
   display: flex;
   flex-wrap: wrap;

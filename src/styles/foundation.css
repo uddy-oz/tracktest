@@ -1391,6 +1391,73 @@ input:focus-visible,
 
 
 
+.multiplayer-access-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(4, 8, 16, 0.72);
+}
+
+.multiplayer-access-dialog {
+  position: relative;
+  width: min(100%, 440px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: clamp(20px, 5vw, 32px);
+  border: 1px solid var(--arena-border-strong);
+  border-top-color: var(--brand-primary);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--content-primary);
+  box-shadow: var(--shadow-lifted);
+}
+
+.multiplayer-access-dialog .eyebrow {
+  padding-right: 48px;
+  color: var(--content-secondary);
+}
+
+.multiplayer-access-dialog h2 {
+  margin: 10px 0;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.multiplayer-access-dialog #multiplayer-access-description {
+  color: var(--content-secondary);
+  line-height: 1.5;
+}
+
+.multiplayer-access-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.multiplayer-access-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.multiplayer-access-actions button {
+  min-height: 48px;
+  white-space: normal;
+}
+
+.multiplayer-access-dialog button:focus-visible {
+  outline: 2px solid var(--brand-secondary);
+  outline-offset: 3px;
+}
+
 /* StanZer brand identity: transparent wordmarks, responsive header. */
 .logo-button.stanzer-brand {
   display: flex;

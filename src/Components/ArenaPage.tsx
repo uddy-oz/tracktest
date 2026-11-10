@@ -97,6 +97,7 @@ import {
   prepareArenaLobbyStart,
 } from "../lib/arenaLobbyStart";
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
+import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
 
 const arenaModes = [
   {
@@ -264,8 +265,10 @@ type ArenaPageProps = {
   profile: UserProfile | null;
   onHome: () => void;
   onLogin: () => void;
-  onGuest?: () => void;
+  onGuest: () => void;
+  isGuestNamePromptOpen: boolean;
   inviteCode?: string | null;
+  onInviteRequested: (code: string) => void;
   recoveredRoom?: ArenaRoom | null;
   onArenaRoomChange?: (room: ArenaRoom | null) => void;
   onInviteHandled?: () => void;
@@ -281,13 +284,16 @@ function ArenaPage({
   onHome,
   onLogin,
   onGuest,
+  isGuestNamePromptOpen,
   inviteCode,
+  onInviteRequested,
   recoveredRoom,
   onArenaRoomChange,
   onInviteHandled,
   onProgressionUpdated,
   navigationNotice,
 }: ArenaPageProps) {
+  const [isAccessPromptOpen, setIsAccessPromptOpen] = useState(true);
   const [selectedArenaTheme, setSelectedArenaTheme] =
     useState<ArenaTheme | null>(null);
   const [activeArenaMode, setActiveArenaMode] = useState<ArenaRoomMode | null>(
@@ -325,7 +331,8 @@ function ArenaPage({
   );
   const [isPresenceSynced, setIsPresenceSynced] = useState(false);
   const startRequestInFlightRef = useRef(false);
-  const isArenaDialogOpen = Boolean(
+  const canShowRoomDialogs = Boolean(session?.user) && !isGuestNamePromptOpen;
+  const isArenaDialogOpen = canShowRoomDialogs && Boolean(
     activeRoom ||
       activeArenaMode ||
       pendingInvite ||
@@ -336,7 +343,7 @@ function ArenaPage({
   const canDismissArenaDialog = Boolean(
     !activeRoom && !pendingInvite && !inviteError
   );
-  const isConfirmationDialogOpen = Boolean(
+  const isConfirmationDialogOpen = canShowRoomDialogs && Boolean(
     albumPlaybackError || (isConfirmingEndLobby && activeRoom)
   );
   const arenaDialogRef = useAccessibleDialog<HTMLDivElement>({
@@ -354,11 +361,11 @@ function ArenaPage({
     },
   });
   const albumErrorDialogRef = useAccessibleDialog<HTMLDivElement>({
-    open: albumPlaybackError,
+    open: canShowRoomDialogs && albumPlaybackError,
     closeOnEscape: false,
   });
   const endLobbyDialogRef = useAccessibleDialog<HTMLDivElement>({
-    open: isConfirmingEndLobby && Boolean(activeRoom),
+    open: canShowRoomDialogs && isConfirmingEndLobby && Boolean(activeRoom),
     closeOnEscape: false,
   });
 
@@ -656,7 +663,7 @@ function ArenaPage({
     let isActive = true;
 
     async function loadInvite() {
-      if (!inviteCode) {
+      if (!inviteCode || !session?.user.id) {
         setPendingInvite(null);
         setInviteError("");
         return;
@@ -692,7 +699,7 @@ function ArenaPage({
     return () => {
       isActive = false;
     };
-  }, [inviteCode]);
+  }, [inviteCode, session?.user.id]);
 
   useEffect(() => {
     if (
@@ -3511,12 +3518,18 @@ function ArenaPage({
   function handleJoinWithCode(event: FormEvent<HTMLFormElement>) {
     sounds.prime();
     event.preventDefault();
+    if (!session?.user) {
+      const code = normalizeArenaInviteCode(roomCodeInput);
+      if (code) onInviteRequested(code);
+      setIsAccessPromptOpen(true);
+      return;
+    }
     void loadInviteForAcceptance(roomCodeInput);
   }
 
   async function handleCreateRoom() {
     if (!session?.user) {
-      onLogin();
+      setIsAccessPromptOpen(true);
       return;
     }
 
@@ -3575,7 +3588,7 @@ function ArenaPage({
 
   function handleOpenRoomRequest(room: ArenaRoom) {
     if (!session?.user) {
-      onLogin();
+      setIsAccessPromptOpen(true);
       return;
     }
 
@@ -3586,7 +3599,7 @@ function ArenaPage({
 
   async function handleJoinRoom(room: ArenaRoom) {
     if (!session?.user) {
-      onLogin();
+      setIsAccessPromptOpen(true);
       return;
     }
 
@@ -3643,7 +3656,7 @@ function ArenaPage({
       .then(setIsArenaAudioUnlocked);
 
     if (!session?.user) {
-      onLogin();
+      setIsAccessPromptOpen(true);
       return;
     }
 
@@ -4594,7 +4607,7 @@ function ArenaPage({
               disabled={isUnavailable || isInviteLoading || isJoiningInvite}
               onClick={() => {
                 if (!session) {
-                  onLogin();
+                  setIsAccessPromptOpen(true);
                   return;
                 }
 
@@ -4625,7 +4638,7 @@ function ArenaPage({
               }}
             >
               {!session
-                ? "Login to Accept"
+                ? "Choose How to Play"
                 : canResumeRoom
                   ? "Resume Room"
                   : isJoiningInvite
@@ -6100,29 +6113,6 @@ function ArenaPage({
             </span>
           </div>
 
-          {!session && (
-            <div className="arena-guest-entry">
-              <p className="arena-note">
-                Continue as a guest, or sign in to save multiplayer progression.
-                Guest progress is temporary and is not saved to your account.
-              </p>
-              <div className="arena-guest-actions">
-                <button type="button" className="secondary-button" onClick={onLogin}>
-                  Sign In / Create Account
-                </button>
-                {onGuest && (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={onGuest}
-                  >
-                    Continue as Guest
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
           {session?.user.is_anonymous && (
             <p className="arena-guest-banner">
               Guest session. Create an account to save stats, badges, and wins.
@@ -6375,6 +6365,11 @@ function ArenaPage({
         <p>
           Challenge your friends in live Duels, Group Lobbies, and Party Mode.
         </p>
+        {!session && (
+          <button type="button" className="secondary-button" onClick={() => setIsAccessPromptOpen(true)}>
+            Choose How to Play
+          </button>
+        )}
       </div>
 
       <div className="arena-status">
@@ -6457,6 +6452,10 @@ function ArenaPage({
               }`}
               key={mode.title}
               onClick={() => {
+                if (roomMode && !session?.user) {
+                  setIsAccessPromptOpen(true);
+                  return;
+                }
                 setSelectedArenaTheme(theme);
 
                 if (roomMode) {
@@ -6495,12 +6494,7 @@ function ArenaPage({
           {visibleMessage}
         </p>
       )}
-      {(activeRoom ||
-        activeArenaMode ||
-        pendingInvite ||
-        pendingPublicRoom ||
-        inviteError ||
-        isInviteLoading) && (
+      {isArenaDialogOpen && (
         <div
           ref={arenaDialogRef}
           className={`arena-mode-overlay ${
@@ -6554,9 +6548,17 @@ function ArenaPage({
         </div>
       )}
 
-      {shouldShowAlbumDock && renderSelectedAlbumStartBar()}
+      {canShowRoomDialogs && shouldShowAlbumDock && renderSelectedAlbumStartBar()}
 
-      {albumPlaybackError && (
+      {!session && isAccessPromptOpen && !isGuestNamePromptOpen && (
+        <MultiplayerAccessDialog
+          onClose={() => setIsAccessPromptOpen(false)}
+          onSignIn={onLogin}
+          onGuest={onGuest}
+        />
+      )}
+
+      {canShowRoomDialogs && albumPlaybackError && (
         <div
           ref={albumErrorDialogRef}
           className="arena-confirm-overlay"
@@ -6585,7 +6587,7 @@ function ArenaPage({
         </div>
       )}
 
-      {isConfirmingEndLobby && activeRoom && (
+      {canShowRoomDialogs && isConfirmingEndLobby && activeRoom && (
         <div
           ref={endLobbyDialogRef}
           className="arena-confirm-overlay"

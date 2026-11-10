@@ -2,7 +2,7 @@
 
 **Prove you're a superfan.**
 
-[Open the live app](https://tracktest-xwee.vercel.app)
+[Play StanZer](https://stanzer.app)
 
 StanZer is a competitive album quiz game. Players identify songs from five second previews, earn speed-based points, build a badge collection, climb public rankings, and compete in synchronized multiplayer rooms.
 
@@ -12,12 +12,13 @@ StanZer is a competitive album quiz game. Players identify songs from five secon
 - Dynamic solo quizzes with a three-second start countdown and ten-second answers
 - Speed scoring, streak feedback, perfect runs, achievement badges, and player tiers
 - Local signed-out Solo stats plus Supabase-backed accounts, profiles, progression, and featured badges
-- Temporary `guest_######` multiplayer identities powered by Supabase Anonymous Sign-Ins
+- Multiplayer entry with an account or a temporary guest name, powered by Supabase Anonymous Sign-Ins
+- Badge Vault with progress, filters, tracked goals, featured achievements, and permanent server-verified multiplayer unlocks
 - Public profiles and Global Arena leaderboards
 - Complete email/password account flows with username setup, recovery, and account settings
 - Synchronized Duel, Group Lobby, and host-audio-only Party Mode
 - Public rooms, private invite links and codes, rematches, reconnect recovery, leaving, and forfeits
-- Responsive dark game interface for desktop and mobile
+- Responsive dark and light themes for desktop and mobile
 
 ## Game Modes
 
@@ -29,13 +30,15 @@ StanZer is a competitive album quiz game. Players identify songs from five secon
 
 ## Architecture
 
-StanZer is a React 19 and TypeScript application built with Vite.
+StanZer uses React 19, TypeScript, Vite, and CSS on the frontend, Supabase Auth,
+PostgreSQL and Realtime for accounts and multiplayer, and Vercel for hosting
+and server-side API routes.
 
 - `src/App.tsx` owns the lightweight route/view state, protected auth destinations, session-level progression refreshes, and route-level code splitting.
 - `src/Components` contains the Home, Single Player, Multiplayer, profile, leaderboard, badge, and authentication interfaces.
 - `src/lib` contains iTunes access, Supabase clients, Arena room operations, local/cloud stats, profile helpers, badge rules, sounds, and player identity calculations.
 - `src/lib/catalog.ts` defines a provider-neutral discovery contract for albums, artists, playlists, tracks, rights/availability metadata, and immutable future multiplayer question snapshots. `src/lib/appleMusicCatalogAdapter.ts` implements that contract through a same-origin metadata proxy and falls back to the mock adapter when server credentials are absent. Neither adapter can start gameplay or audio.
-- `api` contains the Vercel serverless proxies used for production iTunes requests.
+- `api` contains Vercel functions for catalog requests and trusted multiplayer question preparation.
 - `supabase` contains the base schema and additive SQL migrations for profiles, stats, leaderboards, Arena rooms, RLS, room lifecycle, multiplayer progression, and Party Mode.
 - `localStorage` remains the signed-out Solo fallback; authenticated progression uses Supabase as the cross-device source of truth.
 - Anonymous multiplayer auth is held in `sessionStorage`, so a guest can reload in the same tab but does not become a permanent browser identity.
@@ -44,7 +47,7 @@ No service-role key is used by the browser. Supabase Row Level Security and secu
 
 ## Multiplayer Synchronization
 
-The host generates one quiz question set when a room starts. That set, including answer choices, correct answers, clip offsets, and room start data, is stored with the Arena room so every client renders the same game.
+The host requests one shared question set from the server when starting a room. The server validates the album and stages the questions. Players receive the same choices, clip timing, and round boundaries; answer keys remain server-side until the reveal.
 
 Duel and Group Lobby use server-authoritative competitive rounds. The first correct answer wins one round point; the database accepts one answer per player, chooses the winner from server timestamps, and publishes a shared reveal boundary. Audio readiness is acknowledged by every active participant before the answer clock begins. A failed client or readiness deadline produces one global skipped round instead of divergent local games. Match placement uses round points and the persisted competitive result data.
 
@@ -62,7 +65,7 @@ Party Mode uses a server-authoritative question state machine implemented by Sup
 
 ### Prerequisites
 
-- Node.js 22 or newer
+- Node.js 22.12+ on the 22.x line, or 24 LTS (recommended)
 - npm
 - A Supabase project
 - A Vercel account only if deploying the included production API proxies
@@ -72,7 +75,7 @@ Party Mode uses a server-authoritative question state machine implemented by Sup
 ```bash
 git clone https://github.com/uddy-oz/tracktest.git
 cd tracktest
-npm install
+npm ci
 ```
 
 Create `.env.local` with the public Supabase project values:
@@ -141,8 +144,8 @@ In Supabase Dashboard, open **Authentication > URL Configuration**. Set the prod
 ```text
 http://localhost:5173/login
 http://localhost:5173/reset-password
-https://your-production-domain/login
-https://your-production-domain/reset-password
+https://stanzer.app/login
+https://stanzer.app/reset-password
 ```
 
 Email/password authentication must be enabled. Hosted Supabase projects normally require email confirmation by default. For a production release, configure custom SMTP instead of relying on the limited best-effort development email service.
@@ -198,6 +201,11 @@ competitive client has buffered and seeked the authoritative preview. If any
 client fails or the readiness deadline expires, Supabase skips that question
 for the whole room so scores and progression remain synchronized.
 
+For the production achievement ledger and daily challenge clock, see the
+[Badge Vault release notes](docs/badge-vault-production-release.md). These describe
+the deployed schema and its dependencies; do not replay the production release
+or legacy checkpoint to set up a local test project.
+
 Guest multiplayer and secure progress reset additionally require:
 
 - `supabase/20260921_guest_multiplayer_and_progress_reset.sql`
@@ -224,6 +232,13 @@ All migrations are additive and should be reviewed against the target Supabase p
 npm run dev
 ```
 
+Open `http://localhost:5173`. Use a local or disposable Supabase project, not
+production, for testing login, guest access, and rooms. Plain Vite serves the
+frontend. To test full multiplayer starts locally, run `vercel dev` with the
+server-only credentials for that same test project so the question preparation
+route is available. Allow the local URL printed by the dev server in Supabase
+Auth's redirect configuration.
+
 ### Production Build
 
 ```bash
@@ -247,7 +262,7 @@ npm.cmd run lint
 For browser media verification, run the dev server and open `/tools/arena-audio-harness.html`. Add `?stanzerDebug=1` to an Arena URL to enable structured round, RPC, and media diagnostics for that browser session.
 
 1. Run `npm.cmd run build` and `npm.cmd run lint`.
-2. Verify signup validation, email confirmation, mandatory unique username creation, login, logout, returning sessions, and invite redirect after login.
+2. Open Multiplayer signed out; check keyboard dismissal, then confirm room creation or joining requires an account or guest decision. Verify login, guest entry, and signup/profile completion return to Multiplayer or the original invite.
 3. Request a password reset, follow the email to `/reset-password`, set a new password, and confirm an expired link has a useful recovery state.
 4. Open `/settings`; edit username/display name, request an email change, change a password, toggle sound effects, and sign out locally.
 5. Verify album and exact-title searches, album selection, Solo scoring, audio fallback, result saving, and restart.

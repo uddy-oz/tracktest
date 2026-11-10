@@ -21,18 +21,21 @@ function GuestNameModal({
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const canClose = canDismiss && !isSubmitting;
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useAccessibleDialog<HTMLElement>({
     open,
     onClose,
-    closeOnEscape: canDismiss,
-    initialFocusRef: inputRef,
+    closeOnEscape: canClose,
+    initialFocusRef: isSubmitting ? undefined : inputRef,
+    focusDialog: isSubmitting,
   });
 
   if (!open) return null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) return;
     const validation = validateGuestDisplayName(name);
 
     if (!validation.ok) {
@@ -42,9 +45,14 @@ function GuestNameModal({
 
     setIsSubmitting(true);
     setError("");
-    const submitError = await onSubmit(validation.value);
-    if (submitError) setError(submitError);
-    setIsSubmitting(false);
+    try {
+      const submitError = await onSubmit(validation.value);
+      if (submitError) setError(submitError);
+    } catch {
+      setError("Could not start a guest session. Try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -52,7 +60,7 @@ function GuestNameModal({
       className="guest-name-modal-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (canDismiss && event.target === event.currentTarget) onClose();
+        if (canClose && event.target === event.currentTarget) onClose();
       }}
     >
       <section
@@ -68,6 +76,7 @@ function GuestNameModal({
             type="button"
             className="guest-name-close"
             aria-label="Close guest name setup"
+            disabled={!canClose}
             onClick={onClose}
           >
             X
@@ -80,7 +89,7 @@ function GuestNameModal({
           this guest session.
         </p>
 
-        <form className="guest-name-form" onSubmit={handleSubmit} noValidate>
+        <form className="guest-name-form" onSubmit={handleSubmit} aria-busy={isSubmitting} noValidate>
           <label htmlFor="guest-display-name">Display name</label>
           <input
             ref={inputRef}
