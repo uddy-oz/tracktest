@@ -280,6 +280,7 @@ input:focus-visible,
 }
 
 .account-button {
+  min-width: 0;
   max-width: 190px;
   display: inline-flex;
   align-items: center;
@@ -1171,7 +1172,7 @@ input:focus-visible,
   }
 }
 
-@media (max-width: 940px) {
+@media (max-width: 1080px) {
   :root { --nav-height: 70px; }
 
   .navbar {
@@ -1231,6 +1232,7 @@ input:focus-visible,
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     overflow-y: auto;
+    overflow-x: hidden;
     border: 1px solid var(--glass-border);
     border-radius: 14px;
     /* Opaque expanded menu prevents homepage content showing through. */
@@ -1257,8 +1259,13 @@ input:focus-visible,
   }
 
   .theme-toggle-label { display: inline; }
-  .account-button { max-width: none; }
+  .account-button {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+}
 
+@media (max-width: 940px) {
   .home-dashboard,
   .single-player-page,
   .arena-page { padding-top: 94px; }
@@ -1458,9 +1465,113 @@ input:focus-visible,
   outline-offset: 3px;
 }
 
+.daily-challenge-card {
+  min-width: 0;
+  margin-block: 16px;
+  padding: 18px;
+  border: 1px solid var(--ui-border);
+  border-top-color: var(--brand-primary);
+  border-radius: var(--radius-card);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  text-align: left;
+}
+
+.daily-challenge-compact {
+  margin: 0;
+}
+
+.daily-challenge-heading,
+.daily-challenge-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.daily-challenge-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 20px;
+  color: var(--ui-text);
+}
+
+.daily-challenge-heading p,
+.daily-challenge-note,
+.daily-challenge-list small {
+  margin: 5px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.daily-challenge-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.daily-challenge-list li {
+  padding: 9px 0;
+  border-top: 1px solid var(--ui-border);
+}
+
+.daily-challenge-list small {
+  display: block;
+}
+
+.daily-challenge-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.daily-challenge-list .complete .daily-challenge-count {
+  color: var(--ui-success-text);
+  background: var(--ui-success-surface);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.daily-challenge-list .complete progress {
+  accent-color: var(--ui-success-text);
+}
+
+.daily-challenge-swept {
+  border-top-color: var(--ui-gold-text);
+}
+
+.daily-challenge-sweep {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 9px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--ui-gold-text);
+  background: var(--ui-gold-surface);
+}
+
+.daily-challenge-sweep span {
+  font-size: 13px;
+}
+
+.daily-challenge-list progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--brand-primary);
+}
+
 /* StanZer brand identity: transparent wordmarks, responsive header. */
 .logo-button.stanzer-brand {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-start;
 }
@@ -1473,7 +1584,7 @@ input:focus-visible,
   height: auto;
   max-width: 42vw;
 }
-@media (max-width: 940px) {
+@media (max-width: 1080px) {
   .stanzer-nav-logo {
     width: 134px;
     max-width: 48vw;

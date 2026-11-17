@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import BadgeCard from "./BadgeCard";
 import BadgeGrid from "./BadgeGrid";
+import DailyGoalsPanel from "./DailyGoalsPanel";
 import BadgeEmblem from "./BadgeEmblem";
 import { achievementDateLabel } from "../lib/achievementRecords";
 import { achievableCollection, badgeProgress, badgeProgressLabel, badgeStateLabel } from "../lib/badgeVault";
@@ -662,7 +663,18 @@ function ProfilePage({
       </section>
 
       {isBadgeCollectionVisible && (
-        <BadgeGrid key={username} badges={badges} ownerId={isOwnProfile && !isAnonymousUser(session?.user) ? session?.user.id : undefined} />
+        <BadgeGrid
+          key={username}
+          badges={badges}
+          ownerId={isOwnProfile && !isAnonymousUser(session?.user) ? session?.user.id : undefined}
+          dailyGoals={!isPublicProfile && (
+            <DailyGoalsPanel
+              ownerId={session?.user.id}
+              guest={isAnonymousUser(session?.user)}
+              progressionRevision={progressionRevision}
+            />
+          )}
+        />
       )}
 
       <details className="profile-secondary-records" open={!isPublicProfile}>

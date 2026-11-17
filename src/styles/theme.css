@@ -21,6 +21,7 @@
   --ui-secondary-text: #f5f8ff;
   --ui-overlay: rgba(3, 6, 13, 0.82);
   --ui-success-text: #8ff0b2;
+  --ui-success-surface: #163328;
   --ui-danger-text: #ffadb8;
   --ui-warning-text: #f5d978;
   --ui-info-text: #8ee7f2;
@@ -61,6 +62,7 @@
   --ui-secondary-text: #182136;
   --ui-overlay: rgba(224, 231, 241, 0.88);
   --ui-success-text: #126b36;
+  --ui-success-surface: #e5f6ea;
   --ui-danger-text: #a51d32;
   --ui-warning-text: #765000;
   --ui-info-text: #086b83;
@@ -75,8 +77,8 @@
   --ui-legendary-text: #932057;
   --ui-legendary-surface: #f9ddec;
   --ui-duel-text: #c32272;
-  --ui-group-text: #007f95;
-  --ui-party-text: #477d13;
+  --ui-group-text: #006579;
+  --ui-party-text: #396513;
   --ui-championship-text: #8a6500;
 }
 
@@ -741,7 +743,7 @@ select:focus,
   }
 }
 
-@media (max-width: 940px) {
+@media (max-width: 1080px) {
   .account-button {
     width: 100%;
     max-width: none;

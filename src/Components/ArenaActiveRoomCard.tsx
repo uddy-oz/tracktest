@@ -50,7 +50,11 @@ function ArenaActiveRoomCard({
   const canClose = isHost && ["waiting", "starting"].includes(room.status);
 
   return (
-    <article className={`arena-active-room-card ${compact ? "compact" : ""}`}>
+    <article
+      className={`arena-active-room-card ${compact ? "compact" : ""}`}
+      data-mode={room.mode}
+      data-has-artwork={Boolean(room.artworkUrl)}
+    >
       {room.artworkUrl && (
         <img src={room.artworkUrl} alt="" aria-hidden decoding="async" />
       )}
@@ -59,8 +63,10 @@ function ArenaActiveRoomCard({
         <h2>{room.albumName}</h2>
         <p>{room.artistName}</p>
         <div className="arena-active-room-meta">
-          <span>{getModeLabel(room)}</span>
-          <span>{getStatusLabel(room)}</span>
+          <span className="arena-recovery-mode">{getModeLabel(room)}</span>
+          <span className="arena-recovery-status" data-status={room.status}>
+            {getStatusLabel(room)}
+          </span>
           <span>
             {presentPlayers.length}/{room.maxPlayers} players
           </span>
@@ -68,7 +74,7 @@ function ArenaActiveRoomCard({
         </div>
       </div>
       <div className="arena-active-room-actions">
-        <button type="button" onClick={onResume}>
+        <button type="button" className="primary-button" onClick={onResume}>
           Resume Room
         </button>
         {canClose && onClose && (

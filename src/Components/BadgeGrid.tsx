@@ -8,8 +8,8 @@ import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 import { achievableCollection } from "../lib/badgeVault";
 import { achievementDateLabel } from "../lib/achievementRecords";
 
-type BadgeGridProps = { badges: ArenaBadge[]; recentBadge?: ArenaBadge; ownerId?: string };
-export default function BadgeGrid({ badges, recentBadge, ownerId }: BadgeGridProps) {
+type BadgeGridProps = { badges: ArenaBadge[]; recentBadge?: ArenaBadge; ownerId?: string; dailyGoals?: React.ReactNode };
+export default function BadgeGrid({ badges, recentBadge, ownerId, dailyGoals }: BadgeGridProps) {
   const [category, setCategory] = useState("");
   const [tier, setTier] = useState("");
   const [status, setStatus] = useState<VaultStatus>("all");
@@ -39,6 +39,7 @@ export default function BadgeGrid({ badges, recentBadge, ownerId }: BadgeGridPro
       <div className="vault-count"><strong>{collection.unlocked}<span> / {collection.total}</span></strong><p>achievable badges unlocked</p><small>{unlocked} owned / {badges.length} catalogued. Coming Soon excluded.</small></div>
     </header>
     <div className="vault-tier-strip">{BADGE_TIERS.map(t => { const tierCollection = achievableCollection(badges.filter(b => b.tier === t)); return <div key={t} className={`badge-tier-${t.toLowerCase()}`}><span className="vault-tier-dot" /><span>{t}</span><strong>{tierCollection.unlocked}<small> / {tierCollection.total}</small></strong></div>; })}</div>
+    {dailyGoals}
     {focusBadge && <div className={`vault-focus badge-tier-${focusBadge.tier.toLowerCase()} ${goal ? "vault-tracked" : "vault-next"}`}>
       <BadgeEmblem badge={focusBadge} />
       <div className="vault-focus-copy"><small>{goal ? goal.unlocked ? "GOAL COMPLETED" : "ON YOUR RADAR" : "CLOSEST TO UNLOCK"}</small><strong>{focusBadge.title}</strong><span>{focusBadge.description}</span></div>

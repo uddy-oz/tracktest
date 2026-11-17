@@ -60,6 +60,8 @@ const requiredPairs: Array<[string, string]> = [
   ["--ui-secondary-text", "--ui-secondary-bg"],
   ["--ui-danger-text", "--ui-surface"],
   ["--ui-warning-text", "--ui-surface"],
+  ["--ui-warning-text", "--ui-gold-surface"],
+  ["--ui-success-text", "--ui-success-surface"],
   ["--ui-info-text", "--ui-surface"],
   ["--ui-gold-text", "--ui-gold-surface"],
   ["--ui-silver-text", "--ui-silver-surface"],
@@ -115,13 +117,24 @@ test("light multiplayer return controls define every interaction state", () => {
   }
 });
 
-test("account badges stay grouped until the mobile menu breakpoint", () => {
+test("account badges stay grouped and have a full row in compact navigation", () => {
   assert.match(
     semanticLayer,
     /\.account-button \.player-identity-badges\s*\{[^}]*flex-wrap:\s*nowrap/s
   );
   assert.match(
     css,
-    /@media \(max-width: 940px\)\s*\{[\s\S]*?\.nav-menu-button\s*\{[\s\S]*?display:\s*grid/s
+    /@media \(max-width: 1080px\)\s*\{[\s\S]*?\.nav-menu-button\s*\{[\s\S]*?display:\s*grid/s
   );
+  assert.match(
+    css,
+    /@media \(max-width: 1080px\)\s*\{[\s\S]*?\.account-button\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s
+  );
+});
+
+test("room recovery cards and lobby badges pair text with theme surfaces", () => {
+  assert.match(css, /\.arena-active-room-card\s*\{[^}]*background:[^}]*var\(--ui-surface\)/s);
+  assert.match(css, /\.arena-active-room-main h2\s*\{[^}]*color:\s*var\(--ui-text\)/s);
+  assert.match(css, /\.arena-recovery-status\[data-status="active"\]\s*\{[^}]*--room-status-ink:\s*var\(--ui-success-text\)[^}]*--room-status-surface:\s*var\(--ui-success-surface\)/s);
+  assert.match(css, /\.lobby-reconnecting \.lobby-player-status\s*\{[^}]*color:\s*var\(--ui-warning-text\)[^}]*background:\s*var\(--ui-gold-surface\)/s);
 });

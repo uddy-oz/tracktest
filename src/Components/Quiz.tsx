@@ -11,6 +11,16 @@ import { getArenaBadges, type ArenaBadge } from "../lib/badges";
 import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import { pickGrade, pickHype, type HypeEvent } from "../lib/hype";
 import { sounds } from "../lib/sounds";
+import { isArenaDebugEnabled } from "../lib/arenaDiagnostics";
+import {
+  chooseSoloClipOffset,
+  getSoloReserveTrack,
+  SOLO_AUDIO_STALL_TIMEOUT_MS,
+  SOLO_AUDIO_START_TIMEOUT_MS,
+  SOLO_CLIP_SECONDS,
+  startSoloAudio,
+  waitForSoloMetadata,
+} from "../lib/soloAudio";
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
@@ -33,6 +43,7 @@ type QuestionResult = {
 type QuizPhase =
   | "preparing"
   | "countdown"
+  | "audioStarting"
   | "audioBlocked"
   | "answering"
   | "correctHold"
@@ -64,16 +75,12 @@ function buildQuizQuestions(tracks: SpotifyTrack[]) {
   const questionCount = getQuestionCount(tracks.length);
   const quizTracks = shuffleArray(tracks).slice(0, questionCount);
 
-  return quizTracks.map((correctTrack) => {
-    const wrongOptions = shuffleArray(
-      tracks.filter((track) => track.id !== correctTrack.id)
-    ).slice(0, 3);
+  return quizTracks.map((track) => buildQuestion(track, tracks));
+}
 
-    return {
-      correctTrack,
-      options: shuffleArray([correctTrack, ...wrongOptions]),
-    };
-  });
+function buildQuestion(correctTrack: SpotifyTrack, tracks: SpotifyTrack[]): QuizQuestion {
+  const wrongOptions = shuffleArray(tracks.filter(track => track.id !== correctTrack.id)).slice(0, 3);
+  return { correctTrack, options: shuffleArray([correctTrack, ...wrongOptions]) };
 }
 
 function getStreakRewardLabel(currentStreak: number) {
@@ -114,6 +121,8 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const [totalPoints, setTotalPoints] = useState(0);
   const [correctAnswers, setCorrectAnswers] = useState(0);
   const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
+  const [audioSkipCount, setAudioSkipCount] = useState(0);
+  const [audioSkipped, setAudioSkipped] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(QUESTION_TIME_SECONDS);
   const [startCountdown, setStartCountdown] = useState(
     START_COUNTDOWN_SECONDS
@@ -128,8 +137,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const [error, setError] = useState("");
   const [cloudSaveMessage, setCloudSaveMessage] = useState("");
 
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [resolvedPreview, setResolvedPreview] = useState<{ trackId: string; url: string } | null>(null);
   const [isClipPlaying, setIsClipPlaying] = useState(false);
   const [audioFallbackMessage, setAudioFallbackMessage] = useState("");
   const [isMuted, setIsMuted] = useState(sounds.isMuted());
@@ -141,19 +149,28 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const [earnedBadgeQueue, setEarnedBadgeQueue] = useState<ArenaBadge[]>([]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const clipStartTimeRef = useRef(8);
+  const clipStartTimeRef = useRef(0);
+  const audioStartRef = useRef<AbortController | null>(null);
+  const audioPreparedAtRef = useRef(0);
+  const allowLateSeekRef = useRef(true);
+  const countdownFinishedAtRef = useRef<number | null>(null);
+  const answerDeadlineRef = useRef(0);
   const clipTimerRef = useRef<number | null>(null);
   const correctAnswerHoldTimerRef = useRef<number | null>(null);
   const isCorrectAnswerHoldRef = useRef(false);
-  const previewCacheRef = useRef<Record<string, string | null>>({});
+  const previewCacheRef = useRef<Record<string, string>>({});
   const hasSavedQuizResultRef = useRef(false);
+  const retiredAudioTracksRef = useRef<SpotifyTrack[]>([]);
   const hasAnsweredRef = useRef(false);
   const isEndingRunRef = useRef(false);
 
-  const CLIP_LENGTH_SECONDS = 5;
-
   const currentQuestion = questions[currentQuestionIndex];
   const currentTrack = currentQuestion?.correctTrack;
+  const previewUrl = currentTrack?.previewUrl ||
+    (resolvedPreview?.trackId === currentTrack?.id ? resolvedPreview?.url : "") || "";
+  const isPreviewLoading = Boolean(
+    currentTrack && !currentTrack.previewUrl && resolvedPreview?.trackId !== currentTrack.id
+  );
   const lastResult = questionResults[questionResults.length - 1];
   const timerProgress = Math.max(0, timeRemaining / QUESTION_TIME_SECONDS);
   const ringOffset = RING_CIRCUMFERENCE * (1 - timerProgress);
@@ -184,6 +201,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   );
 
   useEffect(() => {
+    const controller = new AbortController();
     async function loadTracks() {
       try {
         setIsLoading(true);
@@ -197,6 +215,9 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         setDisplayPoints(0);
         setCorrectAnswers(0);
         setQuestionResults([]);
+        setAudioSkipCount(0);
+        setAudioSkipped(false);
+        retiredAudioTracksRef.current = [];
         setStreak(0);
         setBestStreak(0);
         setRevealMessage("");
@@ -210,8 +231,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         hasAnsweredRef.current = false;
         setIsQuizComplete(false);
         setCloudSaveMessage("");
-        setPreviewUrl("");
-        setIsPreviewLoading(false);
+        setResolvedPreview(null);
         setIsClipPlaying(false);
         setAudioFallbackMessage("");
 
@@ -219,7 +239,8 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         hasSavedQuizResultRef.current = false;
         isEndingRunRef.current = false;
 
-        const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id);
+        const albumTracks = await getSpotifyAlbumTracks(selectedAlbum.id, { signal: controller.signal });
+        if (controller.signal.aborted) return;
 
         if (albumTracks.length < MIN_QUESTIONS) {
           setError("Not enough tracks for a quiz.");
@@ -232,74 +253,49 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         setQuestions(buildQuizQuestions(cleanedSpotifyTracks));
         setQuizPhase("countdown");
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error(error);
         setError("Could not load tracks for this album.");
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     }
 
     loadTracks();
+    return () => controller.abort();
   }, [selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
 
   useEffect(() => {
-    let isActive = true;
+    if (!currentTrack || currentTrack.previewUrl) return;
+    const controller = new AbortController();
+    const deadline = window.setTimeout(() => {
+      controller.abort();
+      setResolvedPreview({ trackId: currentTrack.id, url: "" });
+    }, 6000);
 
     async function loadPreviewForCurrentQuestion() {
-      stopClip(false);
-      setPreviewUrl("");
-      setIsPreviewLoading(false);
-
-      if (!currentTrack) {
-        return;
-      }
-
-      if (currentTrack.previewUrl) {
-        setPreviewUrl(currentTrack.previewUrl);
-        return;
-      }
-
-      if (currentTrack.id in previewCacheRef.current) {
-        const cachedPreview = previewCacheRef.current[currentTrack.id];
-        setPreviewUrl(cachedPreview || "");
-        return;
-      }
-
+      if (!currentTrack) return;
       try {
-        setIsPreviewLoading(true);
-
-        const preview = await searchITunesPreview(
+        const cached = previewCacheRef.current[currentTrack.id];
+        const foundPreviewUrl = cached ?? (await searchITunesPreview(
           selectedAlbum.artist,
           currentTrack.name,
-          selectedAlbum.title
-        );
-
-        if (!isActive) {
-          return;
-        }
-
-        const foundPreviewUrl = preview?.previewUrl || null;
-
+          selectedAlbum.title,
+          controller.signal
+        ))?.previewUrl ?? "";
+        if (controller.signal.aborted) return;
         previewCacheRef.current[currentTrack.id] = foundPreviewUrl;
-        setPreviewUrl(foundPreviewUrl || "");
-      } catch (error) {
-        console.error("Could not load preview for:", currentTrack.name, error);
-
-        if (isActive) {
-          previewCacheRef.current[currentTrack.id] = null;
-          setPreviewUrl("");
-        }
+        setResolvedPreview({ trackId: currentTrack.id, url: foundPreviewUrl });
       } finally {
-        if (isActive) {
-          setIsPreviewLoading(false);
-        }
+        window.clearTimeout(deadline);
       }
     }
 
     loadPreviewForCurrentQuestion();
 
     return () => {
-      isActive = false;
+      window.clearTimeout(deadline);
+      controller.abort();
     };
   }, [
     currentQuestionIndex,
@@ -309,25 +305,33 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   ]);
 
   useEffect(() => {
-    clearClipTimer();
-    clearCorrectAnswerHoldTimer();
-    // Reset media UI atomically when the question's preview source changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsClipPlaying(false);
-
     const audio = audioRef.current;
-
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.load();
+    if (!audio || !previewUrl || !currentQuestion) return;
+    audioPreparedAtRef.current = performance.now();
+    allowLateSeekRef.current = true;
+    clipStartTimeRef.current = 0;
+    function prepareOffset() {
+      if (!audio || audio.error || !allowLateSeekRef.current) return;
+      const offset = chooseSoloClipOffset(audio.duration);
+      try {
+        audio.currentTime = offset;
+        clipStartTimeRef.current = offset;
+      } catch {
+        // Non-seekable previews can still play from the beginning.
+      }
     }
+    if (audio.readyState >= 1) prepareOffset();
+    else audio.addEventListener("loadedmetadata", prepareOffset, { once: true });
 
     return () => {
+      audio.removeEventListener("loadedmetadata", prepareOffset);
+      audioStartRef.current?.abort();
+      audioStartRef.current = null;
+      audio.pause();
       clearClipTimer();
       clearCorrectAnswerHoldTimer();
     };
-  }, [previewUrl, currentQuestionIndex]);
+  }, [previewUrl, currentQuestion]);
 
   useEffect(() => {
     if (
@@ -368,17 +372,10 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     }
 
     const startTimerId = window.setTimeout(() => {
-      if (isPreviewLoading) {
-        setQuizPhase("preparing");
-        return;
-      }
-
-      void startAnswerRound(false);
-    }, 600);
-
-    return () => {
-      window.clearTimeout(startTimerId);
-    };
+      countdownFinishedAtRef.current ??= performance.now();
+      if (!isPreviewLoading) void startAnswerRound(false);
+    }, 0);
+    return () => window.clearTimeout(startTimerId);
   }, [
     currentQuestion,
     isPreviewLoading,
@@ -389,26 +386,27 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   ]);
 
   useEffect(() => {
-    if (quizPhase !== "preparing" || isPreviewLoading || !currentQuestion) {
-      return;
-    }
-
-    void startAnswerRound(false);
-  }, [currentQuestion, isPreviewLoading, previewUrl, quizPhase]);
-
-  useEffect(() => {
     if (quizPhase !== "answering" || isQuizComplete || !currentQuestion) {
       return;
     }
 
     const timerId = window.setInterval(() => {
-      setTimeRemaining((currentTime) => Math.max(0, currentTime - 1));
-    }, 1000);
+      setTimeRemaining(Math.max(0, Math.ceil((answerDeadlineRef.current - performance.now()) / 1000)));
+    }, 100);
 
     return () => {
       window.clearInterval(timerId);
     };
   }, [currentQuestion, isQuizComplete, quizPhase]);
+
+  useEffect(() => {
+    if (quizPhase !== "audioStarting" && quizPhase !== "answering") return;
+    function handleVisibility() {
+      if (document.hidden) skipAudioQuestion("tab_hidden");
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  });
 
   useEffect(() => {
     if (
@@ -471,12 +469,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       return;
     }
 
-    if (startCountdown > 0) {
-      sounds.tick();
-      return;
-    }
-
-    sounds.go();
+    if (startCountdown > 0) sounds.tick();
   }, [currentQuestion, isQuizComplete, quizPhase, startCountdown]);
 
   useEffect(() => {
@@ -554,36 +547,18 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     isCorrectAnswerHoldRef.current = false;
   }
 
-  function getRandomClipStart(duration: number) {
-    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 30;
-    const latestStart = Math.max(0, safeDuration - CLIP_LENGTH_SECONDS);
-    const preferredStart = 6;
-    const preferredEnd = Math.min(22, latestStart);
-
-    // iTunes previews do not include lyric/title timestamps. Starting later in
-    // the preview reduces obvious title giveaways, but cannot fully guarantee
-    // the title or hook will be avoided.
-    if (preferredEnd >= preferredStart) {
-      return preferredStart + Math.random() * (preferredEnd - preferredStart);
-    }
-
-    if (latestStart > 1) {
-      return 1 + Math.random() * (latestStart - 1);
-    }
-
-    return 0;
-  }
-
   function stopClip(resetToStart = true) {
     const audio = audioRef.current;
 
     clearClipTimer();
     clearCorrectAnswerHoldTimer();
+    audioStartRef.current?.abort();
+    audioStartRef.current = null;
 
     if (audio) {
       audio.pause();
 
-      if (resetToStart) {
+      if (resetToStart && audio.readyState >= 1) {
         audio.currentTime = clipStartTimeRef.current;
       }
     }
@@ -591,36 +566,41 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     setIsClipPlaying(false);
   }
 
-  async function playFiveSecondClip() {
-    const audio = audioRef.current;
+  function logSoloAudio(event: string, details: Record<string, unknown> = {}) {
+    if (!isArenaDebugEnabled()) return;
+    console.info("[STANZER_SOLO_AUDIO]", {
+      event, round: currentQuestionIndex + 1,
+      readyState: audioRef.current?.readyState,
+      networkState: audioRef.current?.networkState,
+      mediaError: audioRef.current?.error?.code,
+      ...details,
+    });
+  }
 
-    if (!audio || !previewUrl) {
-      return false;
+  function skipAudioQuestion(reason: string) {
+    if (!currentQuestion || isEndingRunRef.current || hasAnsweredRef.current) return;
+    hasAnsweredRef.current = true;
+    stopClip(false);
+    // Do not offer a fresh scored question after the original started playing.
+    const replacement = answerDeadlineRef.current === 0
+      ? getSoloReserveTrack(tracks, questions.map(question => question.correctTrack), retiredAudioTracksRef.current)
+      : undefined;
+    if (replacement) {
+      retiredAudioTracksRef.current.push(currentQuestion.correctTrack);
+      const next = buildQuestion(replacement, tracks);
+      logSoloAudio("question_replaced", { reason });
+      setQuestions(questions.map((question, index) => index === currentQuestionIndex ? next : question));
+      resetQuestionFlow();
+      setMessage("Clip unavailable. Loading a replacement question.");
+      return;
     }
-
-    try {
-      clearClipTimer();
-
-      const startTime = getRandomClipStart(audio.duration);
-      clipStartTimeRef.current = startTime;
-
-      audio.pause();
-      audio.currentTime = startTime;
-
-      await audio.play();
-
-      setIsClipPlaying(true);
-
-      clipTimerRef.current = window.setTimeout(() => {
-        stopClip();
-      }, CLIP_LENGTH_SECONDS * 1000);
-
-      return true;
-    } catch (error) {
-      console.error("Could not play audio clip:", error);
-      setIsClipPlaying(false);
-      return false;
-    }
+    logSoloAudio("question_skipped", { reason });
+    setHasAnswered(true);
+    setAudioSkipCount(count => count + 1);
+    setAudioSkipped(true);
+    setMessage("Question skipped. Points and streak unchanged. This run will not be saved.");
+    setRevealMessage("");
+    startRevealCountdown();
   }
 
   function handleAudioTimeUpdate() {
@@ -631,7 +611,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     }
 
     if (
-      audio.currentTime >= clipStartTimeRef.current + CLIP_LENGTH_SECONDS &&
+      audio.currentTime >= clipStartTimeRef.current + SOLO_CLIP_SECONDS &&
       !isCorrectAnswerHoldRef.current
     ) {
       stopClip();
@@ -641,6 +621,11 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   function handleAudioEnded() {
     clearClipTimer();
     setIsClipPlaying(false);
+    const audio = audioRef.current;
+    if (audio && quizPhase === "answering" && isClipPlaying &&
+        audio.currentTime - clipStartTimeRef.current < SOLO_CLIP_SECONDS - 0.25) {
+      skipAudioQuestion("preview_ended_early");
+    }
   }
 
   function getPointsForAnswer(isCorrect: boolean, remainingSeconds: number) {
@@ -661,32 +646,98 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       quizPhase === "answering" ||
       quizPhase === "correctHold" ||
       quizPhase === "reveal" ||
-      isEndingRunRef.current
+      isEndingRunRef.current ||
+      audioStartRef.current ||
+      answerDeadlineRef.current
     ) {
       return;
     }
 
-    setAudioFallbackMessage("");
-
-    if (previewUrl) {
-      const didPlay = await playFiveSecondClip();
-
-      if (isEndingRunRef.current) {
-        stopClip(false);
-        return;
-      }
-
-      if (!didPlay) {
-        setQuizPhase("audioBlocked");
-        setAudioFallbackMessage(
-          isManualStart
-            ? "Audio is still blocked. Try the button again."
-            : "Click to play audio and continue."
-        );
-        return;
-      }
+    const audio = audioRef.current;
+    if (document.hidden && previewUrl && audio && !audio.error) {
+      setAudioFallbackMessage("Tap Retry Audio when you are ready to listen.");
+      setQuizPhase("audioBlocked");
+      return;
+    }
+    if (!previewUrl || !audio || audio.error) {
+      skipAudioQuestion("preview_unavailable");
+      return;
     }
 
+    const attempt = new AbortController();
+    audioStartRef.current = attempt;
+    const requestedAt = performance.now();
+    if (isManualStart) {
+      if (audio.readyState >= 1) {
+        try {
+          audio.currentTime = clipStartTimeRef.current;
+        } catch {
+          // Play within the gesture even if the browser cannot seek.
+        }
+      }
+      else allowLateSeekRef.current = false;
+    }
+    setQuizPhase("audioStarting");
+    const metadata = !isManualStart && audio.readyState < 1
+      ? await waitForSoloMetadata(audio, attempt.signal)
+      : "ready";
+    if (audioStartRef.current !== attempt || attempt.signal.aborted) return;
+    const playRequestedAt = performance.now();
+    const remainingBudgetMs = SOLO_AUDIO_START_TIMEOUT_MS - (playRequestedAt - requestedAt);
+    if (metadata === "ready" && remainingBudgetMs > 0) {
+      logSoloAudio("play_requested", {
+        manual: isManualStart, bufferedForMs: Math.round(playRequestedAt - audioPreparedAtRef.current),
+        metadataWaitMs: Math.round(playRequestedAt - requestedAt),
+      });
+    }
+    const outcome = metadata !== "ready" ? metadata : remainingBudgetMs > 0
+      ? await startSoloAudio(audio, attempt.signal, remainingBudgetMs)
+      : "timeout";
+    if (audioStartRef.current !== attempt || attempt.signal.aborted) return;
+    audioStartRef.current = null;
+    const observedAt = performance.now();
+    logSoloAudio("play_result", {
+      outcome, manual: isManualStart,
+      startupMs: Math.round(observedAt - requestedAt),
+      playToPlaybackMs: metadata === "ready" ? Math.round(observedAt - playRequestedAt) : null,
+      afterCountdownMs: Math.round(observedAt - (countdownFinishedAtRef.current ?? requestedAt)),
+    });
+
+    if (outcome !== "playing") {
+      stopClip(false);
+      if (!isManualStart && (outcome === "blocked" || outcome === "timeout")) {
+        setQuizPhase("audioBlocked");
+        setAudioFallbackMessage(outcome === "blocked"
+          ? "Your browser needs a tap to start the clip."
+          : "The clip took too long to start. Retry or skip this question.");
+      } else if (outcome !== "aborted") {
+        skipAudioQuestion(outcome);
+      }
+      return;
+    }
+
+    setIsClipPlaying(true);
+    clipStartTimeRef.current = audio.currentTime;
+    const stopAt = clipStartTimeRef.current + SOLO_CLIP_SECONDS;
+    let lastPosition = audio.currentTime;
+    let lastMovement = performance.now();
+    const checkClip = () => {
+      if (audio.currentTime >= stopAt) {
+        stopClip();
+        return;
+      }
+      if (audio.currentTime > lastPosition + 0.005) {
+        lastPosition = audio.currentTime;
+        lastMovement = performance.now();
+      } else if (performance.now() - lastMovement >= SOLO_AUDIO_STALL_TIMEOUT_MS) {
+        skipAudioQuestion("playback_stalled");
+        return;
+      }
+      clipTimerRef.current = window.setTimeout(checkClip, 50);
+    };
+    clipTimerRef.current = window.setTimeout(checkClip, 50);
+    answerDeadlineRef.current = observedAt + QUESTION_TIME_SECONDS * 1000;
+    sounds.go();
     setTimeRemaining(QUESTION_TIME_SECONDS);
     setQuizPhase("answering");
   }
@@ -712,6 +763,9 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
   function resetQuestionFlow() {
     stopClip(false);
+    setAudioSkipped(false);
+    answerDeadlineRef.current = 0;
+    countdownFinishedAtRef.current = null;
     setGuess("");
     setMessage("");
     setTimeRemaining(QUESTION_TIME_SECONDS);
@@ -752,9 +806,11 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     const correctAnswer = currentQuestion.correctTrack.name;
     const normalizedGuess = selectedGuess.toLowerCase();
     const normalizedAnswer = correctAnswer.toLowerCase();
+    const remainingSeconds = Math.max(0, Math.ceil((answerDeadlineRef.current - performance.now()) / 1000));
+    timedOut ||= remainingSeconds === 0;
     const isCorrect = !timedOut && normalizedGuess === normalizedAnswer;
-    const pointsEarned = getPointsForAnswer(isCorrect, timeRemaining);
-    const answerTimeSeconds = QUESTION_TIME_SECONDS - timeRemaining;
+    const pointsEarned = getPointsForAnswer(isCorrect, remainingSeconds);
+    const answerTimeSeconds = QUESTION_TIME_SECONDS - remainingSeconds;
     let nextStreak = streak;
     let hypeEvent: HypeEvent;
 
@@ -837,6 +893,11 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
     }
 
     stopClip(false);
+    if (audioSkipCount > 0 || questionResults.length !== questions.length) {
+      setCloudSaveMessage("Practice only: audio was skipped, so this run does not update scores, badges, or Daily Goals.");
+      setIsQuizComplete(true);
+      return;
+    }
     const isPerfectRun = questions.length > 0 && correctAnswers === questions.length;
 
     if (isPerfectRun) {
@@ -936,6 +997,11 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
   function restartQuiz() {
     stopClip(false);
+    setAudioSkipCount(0);
+    setAudioSkipped(false);
+    retiredAudioTracksRef.current = [];
+    answerDeadlineRef.current = 0;
+    countdownFinishedAtRef.current = null;
     setCurrentQuestionIndex(0);
     setGuess("");
     setMessage("");
@@ -1022,9 +1088,10 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   }
 
   if (isQuizComplete) {
+    const playedQuestions = questionResults.length;
     const accuracy =
-      questions.length > 0 ? Math.round((correctAnswers / questions.length) * 100) : 0;
-    const isPerfectRun = questions.length > 0 && correctAnswers === questions.length;
+      playedQuestions > 0 ? Math.round((correctAnswers / playedQuestions) * 100) : 0;
+    const isPerfectRun = audioSkipCount === 0 && questions.length > 0 && correctAnswers === questions.length;
     const averageAnswerTime =
       questionResults.length > 0
         ? questionResults.reduce(
@@ -1056,7 +1123,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
           ))}
         </div>
 
-        <h2>{isPerfectRun ? "Perfect Run" : "Quiz complete"}</h2>
+        <h2>{audioSkipCount > 0 ? "Practice run complete" : isPerfectRun ? "Perfect Run" : "Quiz complete"}</h2>
         <p className={`grade-word ${isPerfectRun ? "gold-badge" : ""}`}>
           {isPerfectRun ? "Perfect Run Celebration" : pickGrade(accuracy)}
         </p>
@@ -1068,8 +1135,9 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         <div className="score-breakdown">
           <p>
             Correct answers: <strong>{correctAnswers}</strong> /{" "}
-            <strong>{questions.length}</strong>
+            <strong>{playedQuestions}</strong>
           </p>
+          {audioSkipCount > 0 && <p>Audio skips: <strong>{audioSkipCount}</strong></p>}
           <p>
             Accuracy: <strong>{accuracy}%</strong>
           </p>
@@ -1171,18 +1239,19 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       </div>
 
       <div className="game-state">
-        {quizPhase === "preparing" && (
+        {(quizPhase === "preparing" || quizPhase === "audioStarting" ||
+          (quizPhase === "countdown" && startCountdown === 0)) && (
           <>
             <p className="game-state-label">Preparing question</p>
             <p className="game-state-detail">Getting the clip ready...</p>
           </>
         )}
 
-        {quizPhase === "countdown" && (
+        {quizPhase === "countdown" && startCountdown > 0 && (
           <>
             <p className="game-state-label">Get ready</p>
             <p className="start-countdown">
-              {startCountdown === 0 ? "GO" : startCountdown}
+              {startCountdown}
             </p>
             <p className="game-state-detail">Clip starts on go.</p>
           </>
@@ -1190,7 +1259,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
 
         {quizPhase === "audioBlocked" && (
           <>
-            <p className="game-state-label">Audio needs a tap</p>
+            <p className="game-state-label">Audio not ready</p>
             <p className="game-state-detail">
               {audioFallbackMessage || "Click to play audio and continue."}
             </p>
@@ -1239,7 +1308,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         {quizPhase === "reveal" && (
           <>
             <p className="game-state-label">Reveal</p>
-            {lastResult?.isCorrect ? (
+            {audioSkipped ? <p className="game-state-detail">Audio skipped</p> : lastResult?.isCorrect ? (
               <>
                 <div className="correct-burst" aria-hidden="true">
                   {burstPieces.map((piece) => (
@@ -1280,42 +1349,35 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         correct track from <strong>{getAlbumDisplayTitle(selectedAlbum.title)}</strong>.
       </p>
 
-      <div className="audio-preview-wrapper">
-        {isPreviewLoading && quizPhase === "preparing" && (
-          <p className="preview-unavailable">Loading preview...</p>
-        )}
+      <audio
+        ref={audioRef}
+        className="hidden-audio-preview"
+        preload="auto"
+        src={previewUrl || undefined}
+        onTimeUpdate={handleAudioTimeUpdate}
+        onEnded={handleAudioEnded}
+        onWaiting={() => logSoloAudio("playback_waiting")}
+        onError={() => {
+          if (quizPhase === "answering" && isClipPlaying) skipAudioQuestion("media_error");
+        }}
+      >
+        Your browser does not support the audio element.
+      </audio>
 
-        {!isPreviewLoading && previewUrl && (
-          <audio
-            ref={audioRef}
-            key={previewUrl}
-            className="hidden-audio-preview"
-            preload="auto"
-            src={previewUrl}
-            onTimeUpdate={handleAudioTimeUpdate}
-            onEnded={handleAudioEnded}
-          >
-            Your browser does not support the audio element.
-          </audio>
-        )}
-
-        {quizPhase === "audioBlocked" && previewUrl && (
-          <button
-            type="button"
-            className="clip-button"
-            onClick={() => void startAnswerRound(true)}
-          >
-            Click to play audio and continue
-          </button>
-        )}
-
-        {!isPreviewLoading && !previewUrl && quizPhase !== "countdown" && (
-          <p className="preview-unavailable">
-            Audio preview unavailable for this question. Try answering from the
-            options.
-          </p>
-        )}
-      </div>
+      {quizPhase === "audioBlocked" && previewUrl && (
+        <div className="solo-audio-actions">
+            <button
+              type="button"
+              className="clip-button"
+              onClick={() => void startAnswerRound(true)}
+            >
+              Retry Audio
+            </button>
+            <button type="button" className="secondary-button" onClick={() => skipAudioQuestion("player_skipped")}>
+              Skip Question
+            </button>
+        </div>
+      )}
 
       <div className="song-options">
         {currentQuestion.options.map((track) => (
@@ -1325,7 +1387,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
             className={`song-button ${
               guess === track.name ? "selected-song" : ""
             } ${
-              hasAnswered && track.name === currentQuestion.correctTrack.name
+              hasAnswered && !audioSkipped && track.name === currentQuestion.correctTrack.name
                 ? "correct-song"
                 : ""
             } ${

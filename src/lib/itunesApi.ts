@@ -135,7 +135,7 @@ function scoreResult(
 
 function getITunesSearchUrl(searchTerm: string, country: string) {
   const baseUrl = import.meta.env.PROD
-    ? "/itunes/search"
+    ? "/api/itunes-search"
     : "https://itunes.apple.com/search";
 
   return (
@@ -147,7 +147,8 @@ function getITunesSearchUrl(searchTerm: string, country: string) {
 export async function searchITunesPreview(
   artistName: string,
   trackName: string,
-  albumTitle = ""
+  albumTitle = "",
+  signal?: AbortSignal
 ): Promise<ITunesPreview | null> {
   const countries = ["US", "GB", "CA", "NG"];
 
@@ -160,7 +161,7 @@ export async function searchITunesPreview(
   try {
     for (const country of countries) {
       for (const searchTerm of searchTerms) {
-        const response = await fetch(getITunesSearchUrl(searchTerm, country));
+        const response = await fetch(getITunesSearchUrl(searchTerm, country), { signal });
 
         if (!response.ok) {
           console.error("iTunes request failed:", response.status, searchTerm);
@@ -207,6 +208,7 @@ export async function searchITunesPreview(
 
     return null;
   } catch (error) {
+    if (signal?.aborted) return null;
     console.error("Could not fetch iTunes preview:", error);
     return null;
   }

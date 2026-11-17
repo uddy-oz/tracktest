@@ -2984,13 +2984,33 @@ button:hover {
   grid-template-columns: 92px minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
-  border: 1px solid color-mix(in srgb, var(--arena-mode-accent, #7c5cff), transparent 56%);
+  border: 1px solid color-mix(in srgb, var(--recovery-accent) 42%, var(--ui-border));
   border-radius: 20px;
   background:
-    radial-gradient(circle at 10% 0%, var(--arena-mode-accent-soft, rgba(124, 92, 255, 0.16)), transparent 34%),
-    rgba(18, 18, 28, 0.94);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+    radial-gradient(ellipse at 0% 0%, color-mix(in srgb, var(--recovery-accent) 10%, transparent), transparent 60%),
+    var(--ui-surface);
+  box-shadow: var(--shadow-soft);
   text-align: left;
+  --recovery-accent: var(--mode-duel);
+  --recovery-ink: var(--ui-duel-text);
+}
+
+.arena-active-room-card[data-mode="group_lobby"] {
+  --recovery-accent: var(--mode-group);
+  --recovery-ink: var(--ui-group-text);
+}
+
+.arena-active-room-card[data-mode="party_mode"] {
+  --recovery-accent: var(--mode-party);
+  --recovery-ink: var(--ui-party-text);
+}
+
+.arena-active-room-card[data-has-artwork="false"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.arena-active-room-card .eyebrow {
+  color: var(--recovery-ink);
 }
 
 .arena-active-room-card.compact {
@@ -3006,14 +3026,15 @@ button:hover {
 
 .arena-active-room-main h2 {
   margin: 0 0 5px;
-  color: white;
+  color: var(--ui-text);
   font-size: clamp(24px, 3vw, 36px);
   overflow-wrap: anywhere;
 }
 
 .arena-active-room-main p:not(.eyebrow) {
   margin: 0 0 10px;
-  color: var(--arena-muted);
+  color: var(--ui-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .arena-active-room-meta {
@@ -3032,6 +3053,31 @@ button:hover {
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.arena-active-room-meta span {
+  border-color: var(--ui-border);
+  color: var(--ui-text-secondary);
+  background: var(--ui-surface);
+}
+
+.arena-active-room-meta .arena-recovery-mode {
+  color: var(--recovery-ink);
+}
+
+.arena-recovery-status {
+  --room-status-ink: var(--ui-warning-text);
+  --room-status-surface: var(--ui-gold-surface);
+}
+
+.arena-recovery-status[data-status="active"] {
+  --room-status-ink: var(--ui-success-text);
+  --room-status-surface: var(--ui-success-surface);
+}
+
+.arena-active-room-meta .arena-recovery-status {
+  color: var(--room-status-ink);
+  background: var(--room-status-surface);
 }
 
 .arena-active-room-actions {
@@ -3738,7 +3784,7 @@ button:hover {
   border: 1px solid color-mix(in srgb, var(--arena-mode-accent), transparent 62%);
   border-radius: 999px;
   background: var(--arena-mode-accent-soft);
-  color: var(--arena-ink) !important;
+  color: var(--arena-ink);
   font-size: 13px;
   font-weight: 900;
   text-transform: uppercase;
@@ -3794,8 +3840,8 @@ button:hover {
   padding: 8px 11px;
   border: 1px solid rgba(255, 215, 106, 0.38);
   border-radius: 999px;
-  color: #fff1a8;
-  background: rgba(255, 215, 106, 0.12);
+  color: var(--ui-warning-text);
+  background: var(--ui-gold-surface);
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
@@ -3854,7 +3900,7 @@ button:hover {
 }
 
 .duel-player-card.audio-ready small {
-  color: #8dffb5;
+  color: var(--ui-success-text);
   font-weight: 800;
 }
 
@@ -3862,7 +3908,7 @@ button:hover {
   border-color: rgba(46, 230, 107, 0.58);
   background:
     linear-gradient(135deg, rgba(46, 230, 107, 0.09), transparent 58%),
-    rgba(16, 16, 24, 0.88);
+    var(--ui-surface);
   box-shadow: inset 3px 0 0 #2ee66b, 0 0 24px rgba(46, 230, 107, 0.1);
 }
 
@@ -3872,14 +3918,15 @@ button:hover {
 }
 
 .duel-player-card.lobby-left {
-  opacity: 0.58;
-  filter: saturate(0.35);
+  border-style: dashed;
 }
 
 .lobby-player-status {
   width: fit-content;
   padding: 5px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text-secondary);
+  background: var(--ui-surface);
   border-radius: 999px;
   font-size: 11px;
   font-weight: 900;
@@ -3888,14 +3935,14 @@ button:hover {
 
 .lobby-ready .lobby-player-status {
   border-color: rgba(46, 230, 107, 0.5);
-  color: #8dffb5;
-  background: rgba(46, 230, 107, 0.09);
+  color: var(--ui-success-text);
+  background: var(--ui-success-surface);
 }
 
 .lobby-reconnecting .lobby-player-status {
   border-color: rgba(255, 215, 106, 0.46);
-  color: #fff1a8;
-  background: rgba(255, 215, 106, 0.08);
+  color: var(--ui-warning-text);
+  background: var(--ui-gold-surface);
 }
 
 .arena-ready-controls {
@@ -5156,7 +5203,8 @@ button:hover {
   }
 
   .arena-code-entry,
-  .arena-active-room-card {
+  .arena-active-room-card,
+  .arena-active-room-card[data-has-artwork="false"] {
     grid-template-columns: 1fr;
     text-align: center;
   }

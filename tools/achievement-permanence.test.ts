@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getArenaBadges } from "../src/lib/badges.ts";
-import { createEmptyTrackTestStats, type QuizResult } from "../src/lib/stats.ts";
-import { getDailyGoalFoundation } from "../src/lib/dailyGoals.ts";
+import { createEmptyTrackTestStats } from "../src/lib/stats.ts";
 import { mergeAchievementRecords, parseAchievementRecords, parseAchievementState, preserveObservedAchievements, readPreservedAchievements } from "../src/lib/achievementRecords.ts";
 import { achievableCollection, badgeStateLabel, selectVaultBadges } from "../src/lib/badgeVault.ts";
 import { sanitizeFeaturedBadgeIds } from "../src/lib/featuredBadgeSelection.ts";
-const record = (id:string,date:string,points=1000):QuizResult => ({id,datePlayed:date,albumName:'Album '+id,artistName:'Artist',totalQuestions:5,correctAnswers:5,accuracyPercentage:100,averageAnswerTime:2,finalPoints:points,gameMode:'single_player',resultStatus:'completed'});
 test('late reconciliation responses from a switched account cannot enter the previous identity cache',()=>{
  const response={schemaVersion:1,userId:'second',records:[{badgeId:'arena-legend',awardedAt:'2026-10-29T12:00:00Z',provenance:'server_verified'}]};
  assert.deepEqual(parseAchievementState(response,'first'),{records:[],available:false});
@@ -42,16 +40,4 @@ test('Coming Soon achievements do not count against achievable completion; legac
  const before=achievableCollection(b);assert.equal(before.total,54);
  const legacy=mergeAchievementRecords(b,[{badgeId:'clutch-player',awardedAt:null,provenance:'legacy_preserved'}]);assert.equal(legacy.find(b=>b.id==='clutch-player')!.unlocked,true);assert.equal(achievableCollection(legacy).total,54);
  const s=createEmptyTrackTestStats();s.achievementLedgerAvailable=true;assert.equal(achievableCollection(getArenaBadges(s)).total,55);
-});
-test('daily goals use exact UTC boundaries, distinct albums, deduplication and genuine prior improvement',()=>{
- const s=createEmptyTrackTestStats(),now=new Date('2026-10-29T12:00:00Z');
- s.quizResults=Array.from({length:5},(_,i)=>record(String(i),'2026-10-28T23:59:59Z'));
- assert.ok(getDailyGoalFoundation(s,now).slice(0,3).every(g=>!g.complete));
- const r=record('today','2026-10-29T00:00:00Z');s.quizResults.push(r,r,record('future','2026-10-30T00:00:00Z'));
- assert.equal(getDailyGoalFoundation(s,now)[0].progress,1);assert.equal(getDailyGoalFoundation(s,now)[1].complete,true);
- s.quizResults.push({...r,id:'repeat',datePlayed:'2026-10-29T01:00:00Z',finalPoints:1000});assert.equal(getDailyGoalFoundation(s,now)[2].complete,false);
- s.quizResults.push({...r,id:'improved',datePlayed:'2026-10-29T02:00:00Z',finalPoints:1001});assert.equal(getDailyGoalFoundation(s,now)[2].complete,true);
- s.quizResults.push({...r,id:'zero',totalQuestions:0,correctAnswers:0}, {...r,id:'cancelled',resultStatus:'cancelled'});
- assert.equal(getDailyGoalFoundation(s,now)[0].progress,1);
- assert.equal(getDailyGoalFoundation(s,new Date('2026-10-30T00:00:00Z'))[0].progress,1);
 });

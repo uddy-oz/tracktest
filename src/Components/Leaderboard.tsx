@@ -7,8 +7,7 @@ import {
 import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
 import BadgeGrid from "./BadgeGrid";
 import { getArenaBadges, getRecentUnlockedBadge } from "../lib/badges";
-import { getDailyGoalFoundation, type DailyGoal } from "../lib/dailyGoals";
-import { useUtcGoalDay } from "../hooks/useUtcGoalDay";
+import DailyGoalsPanel from "./DailyGoalsPanel";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 import {
   getCompactPlayerBadges,
@@ -133,7 +132,6 @@ function Leaderboard({
   onOpenProfile,
   progressionRevision = 0,
 }: LeaderboardProps) {
-  const goalClock=useUtcGoalDay();
   const [activeTab, setActiveTab] = useState<LeaderboardTab>("global");
   const [stats, setStats] = useState(getTrackTestStats);
   const [globalData, setGlobalData] = useState<GlobalLeaderboardData | null>(
@@ -200,7 +198,6 @@ function Leaderboard({
   const badges = getArenaBadges(stats);
   const recentBadge = getRecentUnlockedBadge(badges);
   const playerBadges = getCompactPlayerBadges(stats, badges);
-  const dailyGoals = getDailyGoalFoundation(stats,goalClock.now);
 
   function handleClearStats() {
     const shouldClear = window.confirm(
@@ -281,8 +278,8 @@ function Leaderboard({
           badges={badges}
           recentBadge={recentBadge}
           playerBadges={playerBadges}
-          dailyGoals={dailyGoals}
-          dailyResetLabel={goalClock.label}
+          progressionRevision={progressionRevision}
+          guest={isAnonymousUser(session?.user)}
           onClearStats={handleClearStats}
         />
       )}
@@ -832,8 +829,8 @@ function MyStats({
   badges,
   recentBadge,
   playerBadges,
-  dailyGoals,
-  dailyResetLabel,
+  progressionRevision,
+  guest,
   onClearStats,
 }: {
   ownerId?: string;
@@ -847,8 +844,8 @@ function MyStats({
   badges: ReturnType<typeof getArenaBadges>;
   recentBadge: ReturnType<typeof getRecentUnlockedBadge>;
   playerBadges: CompactPlayerBadge[];
-  dailyGoals: DailyGoal[];
-  dailyResetLabel: string;
+  progressionRevision: number;
+  guest: boolean;
   onClearStats: () => void;
 }) {
   return (
@@ -867,47 +864,7 @@ function MyStats({
 
       <BadgeGrid key={ownerId || "local"} badges={badges} recentBadge={recentBadge} ownerId={ownerId} />
 
-      <section className="daily-goals-panel">
-        <div className="badge-section-header">
-          <div>
-            <p className="eyebrow">Daily Goals</p>
-            <h2>Daily Challenges</h2>
-            <small>{dailyResetLabel}</small>
-          </div>
-          <span>UTC daily reset</span>
-        </div>
-
-        <div className="daily-goal-list">
-          {dailyGoals.map((goal) => {
-            const progress = Math.min(
-              100,
-              Math.round((goal.progress / goal.target) * 100)
-            );
-
-            return (
-              <article
-                className={`daily-goal ${goal.complete ? "complete" : ""}`}
-                key={goal.id}
-              >
-                <div>
-                  <strong>{goal.title}</strong>
-                  <span>
-                    {goal.mode} - {goal.description}
-                  </span>
-                </div>
-                <div className="badge-progress">
-                  <div>
-                    <span style={{ width: `${progress}%` }} />
-                  </div>
-                  <small>
-                    {goal.progress} / {goal.target}
-                  </small>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
+      <DailyGoalsPanel ownerId={ownerId} guest={guest} progressionRevision={progressionRevision} />
 
       <div className="leaderboard-grid">
         <div className="stat-card">

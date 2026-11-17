@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { getArenaBadges } from "../lib/badges";
 import { fetchCloudBadgeStats } from "../lib/cloudBadgeStats";
-import { getDailyGoalFoundation } from "../lib/dailyGoals";
-import { useUtcGoalDay } from "../hooks/useUtcGoalDay";
+import DailyGoalsPanel from "./DailyGoalsPanel";
 import { fetchGlobalLeaderboard } from "../lib/globalLeaderboard";
 import {
   getCompactPlayerBadges,
@@ -136,8 +135,6 @@ function HomePage({
       recentResults: stats.quizResults.slice(0, 3),
     };
   }, [identityBadges, stats]);
-  const goalClock=useUtcGoalDay();
-  const dailyGoals = getDailyGoalFoundation(stats,goalClock.now).slice(0, 3);
   const recoverableArenaRoom = isArenaRoomRecoverableForUser(
     activeArenaRoom,
     session?.user.id
@@ -255,6 +252,12 @@ function HomePage({
       )}
 
       <section className="home-dashboard-grid">
+        <DailyGoalsPanel
+          ownerId={session?.user.id}
+          guest={isAnonymousUser(session?.user)}
+          progressionRevision={progressionRevision}
+          compact
+        />
         <article className="home-panel">
           <div className="profile-panel-heading">
             <div>
@@ -298,27 +301,6 @@ function HomePage({
           ) : (
             <p className="empty-stats">Badges unlock as your quiz record grows.</p>
           )}
-        </article>
-
-        <article className="home-panel">
-          <div className="profile-panel-heading">
-            <div>
-              <p className="eyebrow">Daily Goals</p>
-              <h2>Today</h2>
-              <small>{goalClock.label}</small>
-            </div>
-          </div>
-          <div className="home-list">
-            {dailyGoals.map((goal) => (
-              <div className="home-list-row" key={goal.id}>
-                <span>
-                  <strong>{goal.title}</strong>
-                  <small>{goal.description}</small>
-                </span>
-                <b>{goal.progress}/{goal.target}</b>
-              </div>
-            ))}
-          </div>
         </article>
 
         <article className="home-panel home-global-preview">
