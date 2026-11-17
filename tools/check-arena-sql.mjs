@@ -440,9 +440,14 @@ assert.doesNotMatch(
 );
 assert.match(
   arenaRoomsClient,
-  /rpc\(\s*"create_arena_room"/,
-  "frontend creation must use the atomic server operation"
+  /rpc\(\s*unifiedFriends \? "create_friends_room" : "create_arena_room"/,
+  "frontend creation must use an atomic server operation for either entry"
 );
+const friendsRoomsSql = readFileSync(new URL("../supabase/20261117_unified_friends_rooms.sql", import.meta.url), "utf8");
+assert.match(friendsRoomsSql, /created_room_id := public\.create_arena_room\(\s*'group_lobby'/,
+  "Friends creation must reuse atomic membership creation");
+assert.match(friendsRoomsSql, /where id = target_room_id for update[\s\S]*?roster is distinct from[\s\S]*?return public\.activate_arena_question_set/i,
+  "Friends start must serialize roster validation and delegate to the trusted engine");
 assert.match(
   arenaRoomsClient,
   /rpc\(\s*"join_public_arena_room"/,

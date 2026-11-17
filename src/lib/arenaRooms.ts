@@ -98,6 +98,7 @@ export type ArenaRoom = {
   id: string;
   hostUserId: string;
   mode: ArenaRoomMode;
+  unifiedFriends?: boolean;
   status: string;
   albumId: string;
   albumName: string;
@@ -170,6 +171,7 @@ export type ArenaInvite = {
 };
 
 type ArenaRoomRow = {
+  unified_friends?: boolean;
   id: string;
   host_user_id: string;
   mode: string;
@@ -310,7 +312,7 @@ export function getFriendlyArenaError(error: string | null | undefined) {
   const normalizedError = error.toLowerCase();
 
   if (normalizedError.includes("invite not found")) {
-    return "Invalid private room code.";
+    return "Invalid room code.";
   }
 
   if (
@@ -328,7 +330,7 @@ export function getFriendlyArenaError(error: string | null | undefined) {
   }
 
   if (normalizedError.includes("already full")) {
-    return "This private room is full.";
+    return "This room is full.";
   }
 
   if (
@@ -474,7 +476,7 @@ export async function fetchOpenDuelRooms(mode: ArenaRoomMode = "duel") {
   const { data: roomsData, error: roomsError } = await supabase
     .from("arena_rooms")
     .select("*")
-    .eq("mode", mode)
+    .in("mode", mode === "party_mode" ? ["party_mode"] : ["duel", "group_lobby"])
     .eq("status", "waiting")
     .eq("is_private", false)
     .order("created_at", { ascending: false });
@@ -575,6 +577,7 @@ export async function createDuelRoom({
   mode = "duel",
   maxPlayers = 2,
   isPrivate = false,
+  unifiedFriends = false,
 }: {
   album: SpotifyAlbum;
   user: User;
@@ -582,6 +585,7 @@ export async function createDuelRoom({
   mode?: ArenaRoomMode;
   maxPlayers?: number;
   isPrivate?: boolean;
+  unifiedFriends?: boolean;
 }) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
@@ -598,14 +602,13 @@ export async function createDuelRoom({
 
   const { displayName, username } = getPlayerDisplay(profile, user);
   const { data: roomId, error: roomError } = await supabase.rpc(
-    "create_arena_room",
+    unifiedFriends ? "create_friends_room" : "create_arena_room",
     {
-      room_mode: mode,
+      ...(unifiedFriends ? {} : { room_mode: mode, requested_max_players: maxPlayers }),
       selected_album_id: album.id,
       selected_album_name: album.title,
       selected_artist_name: album.artist,
       selected_artwork_url: album.imageUrl,
-      requested_max_players: maxPlayers,
       room_is_private: isPrivate,
       player_display_name: displayName,
       player_username: username,
@@ -822,8 +825,11 @@ export async function joinArenaRoomByInvite({
       : [],
     user.id
   );
-  const { data, error } = await supabase.rpc("join_arena_room_by_invite", {
-    target_invite_code: normalizeArenaInviteCode(inviteCode),
+  const publicInvite = inviteResult.invite && !inviteResult.invite.isPrivate ? inviteResult.invite : null;
+  const { data, error } = await supabase.rpc(publicInvite ? "join_public_arena_room" : "join_arena_room_by_invite", {
+    ...(publicInvite
+      ? { target_room_id: publicInvite.roomId }
+      : { target_invite_code: normalizeArenaInviteCode(inviteCode) }),
     player_display_name: displayName,
     player_username: username,
   });
@@ -1007,11 +1013,14 @@ export async function prepareTrustedArenaQuestionSet(roomId: string) {
   }
 }
 
+export type FriendsMatchStart = { playerIds: string[]; albumId: string };
+
 export async function activateDuelRoom(
   roomId: string,
   questions: Array<Pick<DuelQuizQuestion, "questionSetId">>,
   mode: ArenaRoomMode = "duel",
-  diagnosticContext: Record<string, unknown> = {}
+  diagnosticContext: Record<string, unknown> = {},
+  friends?: FriendsMatchStart
 ) {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
@@ -1021,10 +1030,11 @@ export async function activateDuelRoom(
   if (!questionSetId) {
     return { room: null, error: "The trusted question set expired. Start again to prepare a new set." };
   }
-  const rpc = "activate_arena_question_set";
+  const rpc = friends ? "activate_friends_question_set" : "activate_arena_question_set";
   const { data, error } = await supabase.rpc(rpc, {
     target_room_id: roomId,
     target_question_set_id: questionSetId,
+    ...(friends ? { expected_player_ids: friends.playerIds, expected_album_id: friends.albumId } : {}),
   });
   logArenaDiagnostic("LOBBY_START_RPC", {
     ...diagnosticContext, roomId, mode, rpc, response: data,
@@ -1855,6 +1865,7 @@ function mapRoomRow(row: ArenaRoomRow): ArenaRoom {
     id: row.id,
     hostUserId: row.host_user_id,
     mode: isArenaRoomMode(row.mode) ? row.mode : "duel",
+    unifiedFriends: row.unified_friends === true,
     status: row.status,
     albumId: row.album_id || "",
     albumName: row.album_name || "Unknown album",

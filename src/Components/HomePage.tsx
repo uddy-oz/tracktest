@@ -192,7 +192,7 @@ function HomePage({
               onClick={onMultiplayer}
             >
               <strong>Enter Multiplayer</strong>
-              <small>Duels, groups, and Party Mode</small>
+              <small>Play With Friends and Party Mode</small>
             </button>
           </div>
         </div>

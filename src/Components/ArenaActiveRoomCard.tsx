@@ -10,6 +10,7 @@ type ArenaActiveRoomCardProps = {
 };
 
 function getModeLabel(room: ArenaRoom) {
+  if (room.unifiedFriends && room.status === "waiting") return "Friends Room";
   if (room.mode === "party_mode") {
     return "Party Mode";
   }
