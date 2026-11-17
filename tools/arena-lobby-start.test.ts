@@ -111,6 +111,28 @@ test("lobby eligibility updates immediately when a ready player leaves", () => {
   assert.match(eligibility.reason, /2 active players/);
 });
 
+test("Friends rooms start with 2, 3, 5, or 10 and pass their exact roster to the server", async () => {
+  for (const size of [2, 3, 5, 10]) {
+    const players = [player("host"), ...Array.from({length: size - 1}, (_, i) => player(`friend-${i}`))];
+    const snapshot = room({ mode: "group_lobby", maxPlayers: 10, unifiedFriends: true, players });
+    assert.equal(getArenaHostStartEligibility(snapshot).canStart, true);
+    const f = fixture(snapshot);
+    const result = await prepareArenaLobbyStart("room", host, {
+      ...f.deps,
+      activateRoom: async (id, questions, mode, _context, _targetCount, friends) => {
+        assert.deepEqual(friends, { playerIds: players.map(p => p.userId), albumId: "album" });
+        return f.deps.activateRoom(id, questions as DuelQuizQuestion[], mode);
+      },
+    });
+    assert.equal(result.room?.status, "starting");
+  }
+  const duo = room({ mode: "group_lobby", maxPlayers: 10 });
+  assert.equal(getArenaHostStartEligibility(duo).canStart, false, "legacy Group Lobby still requires three");
+  const unready = room({ mode: "group_lobby", maxPlayers: 10, unifiedFriends: true,
+    players: [player("host"), player("friend"), { ...player("just-joined"), lobbyReady: false }] });
+  assert.equal(getArenaHostStartEligibility(unready).canStart, false);
+});
+
 test("Party Mode keeps its host-controlled start without competitive ready-up", () => {
   const partyRoom = room({
     mode: "party_mode",

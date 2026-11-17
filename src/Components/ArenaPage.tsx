@@ -101,17 +101,11 @@ import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
 
 const arenaModes = [
   {
-    title: "Duel",
-    label: "1v1",
-    description: "Challenge one player head to head on one album.",
-    accent: "duel",
-    enabled: true,
-  },
-  {
-    title: "Group Lobby",
-    label: "3-10",
-    description: "3 to 10 players compete on one album.",
+    title: "Play With Friends",
+    label: "2-10 players",
+    description: "Go head to head or invite up to nine friends to the same album quiz.",
     accent: "group",
+    roomMode: "group_lobby",
     enabled: true,
   },
   {
@@ -120,6 +114,7 @@ const arenaModes = [
     description:
       "In person game where one host plays music and everyone answers on their phones.",
     accent: "party",
+    roomMode: "party_mode",
     enabled: true,
   },
   {
@@ -127,9 +122,10 @@ const arenaModes = [
     label: "Final",
     description: "Multi album tournament with one final winner.",
     accent: "championship",
+    roomMode: null,
     enabled: false,
   },
-];
+] as const;
 
 type DuelPhase =
   | "idle"
@@ -242,6 +238,12 @@ const ARENA_MODE_SETTINGS: Record<
   },
 };
 const RING_RADIUS = 54;
+const FRIENDS_ROOM_SETTINGS = {
+  ...ARENA_MODE_SETTINGS.group_lobby,
+  title: "Play With Friends",
+  roomTitle: "Friends Room",
+  minPlayersToStart: 2,
+};
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function clearStoredArenaRoomReferences() {
@@ -556,7 +558,9 @@ function ArenaPage({
   const selectedMode =
     activeArenaMode || pendingInvite?.mode || pendingPublicRoom?.mode || activeRoom?.mode || null;
   const modeSettings =
-    selectedMode && selectedMode in ARENA_MODE_SETTINGS
+    activeArenaMode && activeArenaMode !== "party_mode"
+      ? FRIENDS_ROOM_SETTINGS
+      : selectedMode && selectedMode in ARENA_MODE_SETTINGS
       ? ARENA_MODE_SETTINGS[selectedMode as ArenaRoomMode]
       : ARENA_MODE_SETTINGS.duel;
   const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
@@ -3563,6 +3567,7 @@ function ArenaPage({
         mode: activeArenaMode,
         maxPlayers: modeSettings.maxPlayers,
         isPrivate: isPrivateRoom,
+        unifiedFriends: activeArenaMode !== "party_mode",
       });
 
       if (room && !error) {
@@ -4078,7 +4083,8 @@ function ArenaPage({
             );
           }
         },
-        activateRoom: activateDuelRoom,
+        activateRoom: (id, questions, mode, context, _targetCount, friends) =>
+          activateDuelRoom(id, questions, mode, context, friends),
         log: logArenaDiagnostic,
       });
       if (
@@ -4667,8 +4673,8 @@ function ArenaPage({
     );
   }
 
-  function renderPrivateInvitePanel(room: ArenaRoom) {
-    if (!room.isPrivate || !room.inviteCode || room.status !== "waiting") {
+  function renderRoomInvitePanel(room: ArenaRoom) {
+    if (!room.inviteCode || room.status !== "waiting") {
       return null;
     }
 
@@ -4677,9 +4683,9 @@ function ArenaPage({
     return (
       <div className="arena-invite-panel">
         <div>
-          <p className="eyebrow">Private Invite</p>
+          <p className="eyebrow">{room.isPrivate ? "Private Invite" : "Public Room Code"}</p>
           <h3>{room.inviteCode}</h3>
-          <p>{inviteUrl}</p>
+          {!room.unifiedFriends && <p>{inviteUrl}</p>}
         </div>
         <div className="arena-invite-actions">
           <button
@@ -4786,11 +4792,9 @@ function ArenaPage({
         >
           {isCreatingRoom
             ? "Creating..."
-            : selectedMode === "group_lobby"
-              ? "Create Group Lobby"
-              : selectedMode === "party_mode"
-                ? "Create Party Room"
-              : "Create Duel Room"}
+            : selectedMode === "party_mode"
+              ? "Create Party Room"
+              : "Create Friends Room"}
         </button>
       </div>
     );
@@ -5233,7 +5237,9 @@ function ArenaPage({
     }
 
     if (activeRoom) {
-      const activeModeSettings = ARENA_MODE_SETTINGS[activeRoom.mode];
+      const activeModeSettings = activeRoom.unifiedFriends && activeRoom.status === "waiting"
+        ? FRIENDS_ROOM_SETTINGS
+        : ARENA_MODE_SETTINGS[activeRoom.mode];
       const isActiveGroupLobby = activeRoom.mode === "group_lobby";
       const isActivePartyMode = activeRoom.mode === "party_mode";
       const usesLiveLeaderboard = activeRoom.mode !== "duel";
@@ -5848,7 +5854,7 @@ function ArenaPage({
       }
 
       return (
-        <section className="duel-room-screen">
+        <section className={`duel-room-screen${activeRoom.unifiedFriends ? " friends-waiting-room" : ""}`}>
           <div className="duel-room-actions">
             <button
               type="button"
@@ -5896,10 +5902,13 @@ function ArenaPage({
                     ? "Active"
                     : "Waiting for players"}
               </span>
+              {activeRoom.unifiedFriends && activeRoom.status === "waiting" && (
+                <p className="friends-room-capacity">{lobbyMembers.length}/{activeRoom.maxPlayers} players</p>
+              )}
             </div>
           </div>
 
-          {renderPrivateInvitePanel(activeRoom)}
+          {renderRoomInvitePanel(activeRoom)}
 
           {isHost && activeRoom.status === "waiting" && (
             <div className="duel-room-actions">
@@ -5950,7 +5959,7 @@ function ArenaPage({
                   );
                 }
               )}
-              {lobbyMembers.length < activeRoom.maxPlayers && (
+              {activeRoom.status === "waiting" && lobbyMembers.length < activeRoom.maxPlayers && (
                 <div className="duel-player-card">
                   <span>Open Spot</span>
                   <strong>Waiting for players</strong>
@@ -6082,6 +6091,9 @@ function ArenaPage({
                 <p className="arena-note" role="status">
                   A player is reconnecting. Start unlocks when everyone is back.
                 </p>
+              )}
+              {activeRoom.unifiedFriends && isHost && !canHostStartLobby && !hasReconnectingLobbyPlayer && (
+                <p className="arena-note" role="status">{hostStartEligibility.reason}</p>
               )}
             </div>
           )}
@@ -6363,7 +6375,7 @@ function ArenaPage({
         <p className="eyebrow">StanZer</p>
         <h1>Multiplayer</h1>
         <p>
-          Challenge your friends in live Duels, Group Lobbies, and Party Mode.
+          Play an album quiz with friends or host an in-person Party.
         </p>
         {!session && (
           <button type="button" className="secondary-button" onClick={() => setIsAccessPromptOpen(true)}>
@@ -6383,7 +6395,7 @@ function ArenaPage({
           <p>
             {activeArenaMode
               ? "Create or join a waiting room, start together, and play the same synced album quiz."
-              : "Create a Duel, Group Lobby, or Party room, or join one with an invite code."}
+              : "Create a Friends or Party room, or join one with a room code."}
           </p>
         </div>
       </div>
@@ -6414,7 +6426,7 @@ function ArenaPage({
           type="text"
           placeholder="Room code"
           value={roomCodeInput}
-          aria-label="Enter private room code"
+          aria-label="Enter room code"
           onChange={(event) =>
             setRoomCodeInput(normalizeArenaInviteCode(event.target.value))
           }
@@ -6432,16 +6444,7 @@ function ArenaPage({
 
       <div className="arena-mode-grid">
         {arenaModes.map((mode) => {
-          const isDuel = mode.title === "Duel";
-          const isGroup = mode.title === "Group Lobby";
-          const isParty = mode.title === "Party Mode";
-          const roomMode: ArenaRoomMode | null = isDuel
-            ? "duel"
-            : isGroup
-              ? "group_lobby"
-              : isParty
-                ? "party_mode"
-                : null;
+          const roomMode = mode.roomMode;
           const theme: ArenaTheme = roomMode || "championship";
 
           return (
@@ -6502,7 +6505,9 @@ function ArenaPage({
           } ${shouldShowAlbumDock ? "arena-overlay-has-dock" : ""}`}
           role="dialog"
           aria-modal="true"
-          aria-label={activeRoom ? ARENA_MODE_SETTINGS[activeRoom.mode].roomTitle : "Multiplayer room setup"}
+          aria-label={activeRoom?.unifiedFriends && activeRoom.status === "waiting"
+            ? FRIENDS_ROOM_SETTINGS.roomTitle
+            : activeRoom ? ARENA_MODE_SETTINGS[activeRoom.mode].roomTitle : "Multiplayer room setup"}
           onMouseDown={(event) => {
             if (
               event.target === event.currentTarget &&

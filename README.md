@@ -16,15 +16,14 @@ StanZer is a competitive album quiz game. Players identify songs from five secon
 - Badge Vault with progress, filters, tracked goals, featured achievements, and permanent server-verified multiplayer unlocks
 - Public profiles and Global Arena leaderboards
 - Complete email/password account flows with username setup, recovery, and account settings
-- Synchronized Duel, Group Lobby, and host-audio-only Party Mode
+- Synchronized Play With Friends rooms and host-audio-only Party Mode
 - Public rooms, private invite links and codes, rematches, reconnect recovery, leaving, and forfeits
 - Responsive dark and light themes for desktop and mobile
 
 ## Game Modes
 
 - **Single Player:** Master an album, improve personal records, and unlock achievements.
-- **Duel:** Two players receive the same questions, choices, clips, and shared start time.
-- **Group Lobby:** Three to ten players compete against a live room leaderboard.
+- **Play With Friends:** One room and one invite for two to ten players. Two-player matches use Duel rules, while larger matches use Group standings. Both use the same synchronized questions, clips, and start time.
 - **Party Mode:** One host device plays the music while everyone else answers on their own device.
 - **Championship:** Presented in the interface as a future mode; tournament gameplay is not implemented yet.
 

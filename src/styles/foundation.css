@@ -969,6 +969,46 @@ input:focus-visible,
   gap: 14px;
 }
 
+.friends-waiting-room .duel-room-hero:not(:has(img)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.friends-waiting-room .duel-room-hero h2,
+.friends-waiting-room .arena-invite-panel h3,
+.friends-waiting-room .duel-player-card strong {
+  color: var(--ui-text);
+}
+
+.friends-waiting-room .arena-invite-panel,
+.friends-waiting-room .duel-player-card {
+  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
+  border-radius: 8px;
+}
+
+.friends-waiting-room .duel-room-hero .friends-room-capacity {
+  margin: 8px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.friends-waiting-room .duel-player-card {
+  min-height: 96px;
+  padding: 12px;
+}
+
+@media (max-width: 600px) {
+  .friends-waiting-room .group-player-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .friends-waiting-room .duel-player-card strong {
+    font-size: 16px;
+  }
+}
+
 .arena-mode-card {
   min-height: 224px;
   padding: 20px;

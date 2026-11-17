@@ -1,5 +1,5 @@
 import type { User } from "@supabase/supabase-js";
-import type { ArenaRoom, ArenaRoomMode, DuelQuizQuestion } from "./arenaRooms";
+import type { ArenaRoom, ArenaRoomMode, DuelQuizQuestion, FriendsMatchStart } from "./arenaRooms";
 import type { SpotifyTrack } from "./spotifyApi";
 
 export const MIN_ARENA_TRACKS = 5;
@@ -28,7 +28,7 @@ export function getArenaLobbyStartEligibility(
   room: ArenaRoom
 ): ArenaLobbyStartEligibility {
   const members = getArenaStartMembers(room);
-  const minimumPlayers = room.mode === "group_lobby" ? 3 : 2;
+  const minimumPlayers = room.mode === "group_lobby" && !room.unifiedFriends ? 3 : 2;
 
   if (
     members.length < minimumPlayers ||
@@ -67,7 +67,7 @@ export function getArenaHostStartEligibility(
   room: ArenaRoom
 ): ArenaLobbyStartEligibility {
   const members = getArenaStartMembers(room);
-  const minimumPlayers = room.mode === "group_lobby" ? 3 : 2;
+  const minimumPlayers = room.mode === "group_lobby" && !room.unifiedFriends ? 3 : 2;
 
   if (
     members.length < minimumPlayers ||
@@ -124,7 +124,8 @@ type StartDependencies = {
     questions: QuestionSet["questions"],
     mode: ArenaRoomMode,
     context: Record<string, unknown>,
-    targetQuestionCount: number
+    targetQuestionCount: number,
+    friends?: FriendsMatchStart
   ) => Promise<RoomResult>;
   log: (event: string, details: Record<string, unknown>) => void;
 };
@@ -193,7 +194,8 @@ export async function prepareArenaLobbyStart(
       questions,
       room.mode,
       context,
-      targetQuestionCount
+      targetQuestionCount,
+      room.unifiedFriends ? { playerIds: members.map(player => player.userId), albumId: room.albumId } : undefined
     );
     if (result.error || !result.room) throw new Error(result.error || "Could not prepare the room.");
     if (!["starting", "active"].includes(result.room.status)) {
