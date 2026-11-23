@@ -413,8 +413,7 @@ async function searchDirectAlbums(
   const response = await fetch(searchUrl, { signal });
 
   if (!response.ok) {
-    console.error("iTunes album search failed:", response.status, country);
-    return [];
+    throw new Error(`iTunes album search failed (${response.status}, ${country}).`);
   }
 
   const data: ITunesAlbumSearchResponse = await response.json();
@@ -445,8 +444,7 @@ async function searchArtistsByCountry(
   const response = await fetch(searchUrl, { signal });
 
   if (!response.ok) {
-    console.error("iTunes artist search failed:", response.status, country);
-    return [];
+    throw new Error(`iTunes artist search failed (${response.status}, ${country}).`);
   }
 
   const data: ITunesArtistSearchResponse = await response.json();
@@ -512,19 +510,15 @@ async function searchAlbumsUncached(
   signal?: AbortSignal
 ): Promise<SpotifyAlbum[]> {
   const countries = ["US", "NG", "GB", "CA", "ZA"];
-  const countryResults = await Promise.all(
-    countries.map(async (country) => {
-      const [directAlbums, bestArtist] = await Promise.all([
-        searchDirectAlbums(query, country, signal),
-        searchBestArtist(query, country, signal),
-      ]);
-      const artistAlbums = bestArtist
-        ? await lookupArtistAlbums(query, country, bestArtist, signal)
-        : [];
-      return [...directAlbums, ...artistAlbums];
-    })
+  const countryResults = await collectSearchResults(
+    countries.flatMap((country) => [
+      searchDirectAlbums(query, country, signal),
+      searchBestArtist(query, country, signal).then((artist) =>
+        artist ? lookupArtistAlbums(query, country, artist, signal) : []
+      ),
+    ])
   );
-  const rankedAlbums = countryResults.flat().filter((item) => item.score >= 60);
+  const rankedAlbums = countryResults.filter((item) => item.score >= 60);
 
   const sortedAlbums = rankedAlbums
     .sort((a, b) => b.score - a.score)
@@ -567,10 +561,17 @@ async function searchArtistsUncached(
   signal?: AbortSignal
 ): Promise<SpotifyArtist[]> {
   const countries = ["US", "NG", "GB", "CA", "ZA"];
-  const countryResults = await Promise.all(
+  const countryResults = await collectSearchResults(
     countries.map((country) => searchArtistsByCountry(query, country, signal))
   );
-  return removeDuplicateArtists(countryResults.flat());
+  return removeDuplicateArtists(countryResults);
+}
+
+async function collectSearchResults<T>(requests: Promise<T[]>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(requests);
+  const successes = settled.filter((result) => result.status === "fulfilled");
+  if (!successes.length) throw new Error("The music catalog could not be reached.");
+  return successes.flatMap((result) => result.value);
 }
 
 export async function searchSpotifyAlbums(

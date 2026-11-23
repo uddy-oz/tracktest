@@ -878,8 +878,11 @@ function App() {
 
       {!mustCompleteUsername && activeView === "play" && isQuizStarted && selectedAlbum && (
         <Quiz
+          key={selectedAlbum.id}
           selectedAlbum={selectedAlbum}
           onRestartApp={restartApp}
+          onStartAlbum={startQuiz}
+          onHome={showHome}
           onStatsUpdated={refreshIdentityBadges}
           user={isGuestSession ? null : session?.user || null}
         />

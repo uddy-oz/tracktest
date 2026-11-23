@@ -61,6 +61,28 @@ test("exact album title outranks an artist-name-only catalog match", () => {
   assert.ok(exactTitle > artistOnly);
 });
 
+test("search keeps surviving storefronts and lets a failed search be retried", async () => {
+  const originalFetch = globalThis.fetch;
+  let offline = true;
+  globalThis.fetch = async (input) => {
+    const params = new URL(String(input)).searchParams;
+    if (offline || params.get("country") !== "US") return new Response(null, {status: 503});
+    const results = params.get("entity") === "album"
+      ? [album({collectionId: 928, collectionName: "Recovery Album"})]
+      : [];
+    return Response.json({results});
+  };
+  try {
+    await assert.rejects(searchSpotifyAlbums("Recovery Album"), /catalog could not be reached/);
+    await assert.rejects(searchSpotifyArtists("Recovery Artist"), /catalog could not be reached/);
+    offline = false;
+    assert.equal((await searchSpotifyAlbums("Recovery Album"))[0]?.title, "Recovery Album");
+    assert.deepEqual(await searchSpotifyArtists("Recovery Artist"), []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("exact artist names lead Artist mode", () => {
   const exact = scoreArtist(
     { wrapperType: "artist", artistType: "Artist", artistId: 1, artistName: "Wizkid" },

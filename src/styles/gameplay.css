@@ -758,3 +758,47 @@
   }
 }
 
+.quiz.quiz-complete {
+  padding-top: calc(var(--nav-height) + 24px);
+  overflow-wrap: anywhere;
+}
+
+.solo-postgame-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.solo-postgame-actions > button,
+.solo-album-picker-header > button {
+  min-height: 44px;
+  white-space: normal;
+}
+
+.multiplayer-access-dialog.solo-album-picker {
+  width: min(100%, 760px);
+  padding: clamp(14px, 4vw, 28px);
+  overscroll-behavior: contain;
+}
+
+.solo-album-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.solo-album-picker .album-search {
+  padding: 0;
+}
+
+@media (max-width: 540px) {
+  .solo-postgame-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: min(100%, 320px);
+    margin-inline: auto;
+  }
+}

@@ -20,6 +20,8 @@ const CatalogDiscovery = lazy(() => import("./CatalogDiscovery"));
 type AlbumSearchProps = {
   onStartQuiz: (album: SpotifyAlbum) => void;
   compact?: boolean;
+  inPicker?: boolean;
+  starting?: boolean;
 };
 
 const ALBUMS_PER_PAGE = 12;
@@ -27,7 +29,7 @@ const MAX_VISIBLE_ALBUMS = 48;
 const SEARCH_DEBOUNCE_MS = 450;
 type SearchMode = "albums" | "artists" | "playlists";
 
-function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
+function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
@@ -44,7 +46,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
   const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
   const hasMoreAlbums = visibleAlbums.length < cappedAlbums.length;
   const isDiscoveryMode =
-    isCatalogDiscoveryEnabled &&
+    !inPicker && isCatalogDiscoveryEnabled &&
     (searchMode === "artists" || searchMode === "playlists");
 
   const runSearch = useCallback(async (rawQuery: string, mode = searchMode) => {
@@ -81,7 +83,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         }
       }
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (sequence !== searchSequenceRef.current || controller.signal.aborted) return;
       console.error(error);
       setError(
         mode === "artists"
@@ -153,10 +155,10 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       className={`album-search ${compact ? "album-search-compact" : ""}`}
       id="album-search"
     >
-      <p className="eyebrow">
+      {!inPicker && <><p className="eyebrow">
         {isDiscoveryMode ? "StanZer discovery" : "Start a new run"}
       </p>
-      <h2>{isDiscoveryMode ? "Explore future modes" : "Choose an album"}</h2>
+      <h2>{isDiscoveryMode ? "Explore future modes" : "Choose an album"}</h2></>}
 
       <p className="section-sub">
         {isDiscoveryMode
@@ -183,7 +185,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         >
           Artists
         </button>
-        <button
+        {!inPicker && <button
           type="button"
           role="tab"
           aria-selected={searchMode === "playlists"}
@@ -193,7 +195,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         >
           Playlists
           <small>{isCatalogDiscoveryEnabled ? "Preview" : "Later"}</small>
-        </button>
+        </button>}
       </div>
 
       {!isDiscoveryMode && (
@@ -218,7 +220,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
         </form>
       )}
 
-      {!isDiscoveryMode && error && <p className="search-result">{error}</p>}
+      {!isDiscoveryMode && error && <p className="search-result" role="alert">{error}</p>}
 
       {!isDiscoveryMode && isLoading && albums.length === 0 && artists.length === 0 && (
         <div className="album-grid album-grid-loading" aria-label="Loading albums">
@@ -233,7 +235,7 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
       )}
 
       {!isDiscoveryMode && submittedSearch && !error && !isLoading && albums.length === 0 && artists.length === 0 && (
-        <p className="search-result">
+        <p className="search-result" role="status">
           No matching {searchMode === "artists" ? "artists" : "albums or EPs"} found for:{" "}
           <strong>{submittedSearch}</strong>
         </p>
@@ -367,8 +369,8 @@ function AlbumSearch({ onStartQuiz, compact = false }: AlbumSearchProps) {
             <span>{selectedAlbum.artist}</span>
           </div>
 
-          <button type="button" onClick={() => onStartQuiz(selectedAlbum)}>
-            Start Quiz
+          <button type="button" disabled={starting} onClick={() => onStartQuiz(selectedAlbum)}>
+            {starting ? "Starting..." : "Start Quiz"}
           </button>
         </div>
       )}

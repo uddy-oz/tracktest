@@ -3,6 +3,7 @@ import { getAlbumDisplayTitle } from "../lib/albumDisplay";
 import type { User } from "@supabase/supabase-js";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
+import SoloAlbumPicker from "./SoloAlbumPicker";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
 import { getTrackTestStats, saveQuizResult } from "../lib/stats";
@@ -25,6 +26,8 @@ import {
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
   onRestartApp: () => void;
+  onStartAlbum: (album: SpotifyAlbum) => Promise<void>;
+  onHome: () => void;
   onStatsUpdated?: () => void;
   user: User | null;
 };
@@ -112,7 +115,7 @@ function getNewlyUnlockedBadges(
   );
 }
 
-function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) {
+function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -133,6 +136,14 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const [quizPhase, setQuizPhase] = useState<QuizPhase>("preparing");
   const [hasAnswered, setHasAnswered] = useState(false);
   const [isQuizComplete, setIsQuizComplete] = useState(false);
+  const [isAlbumPickerOpen, setIsAlbumPickerOpen] = useState(false);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!isQuizComplete) return;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    resultsHeadingRef.current?.focus({ preventScroll: true });
+  }, [isQuizComplete]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [cloudSaveMessage, setCloudSaveMessage] = useState("");
@@ -160,6 +171,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   const isCorrectAnswerHoldRef = useRef(false);
   const previewCacheRef = useRef<Record<string, string>>({});
   const hasSavedQuizResultRef = useRef(false);
+  const runRevisionRef = useRef(0);
   const retiredAudioTracksRef = useRef<SpotifyTrack[]>([]);
   const hasAnsweredRef = useRef(false);
   const isEndingRunRef = useRef(false);
@@ -939,15 +951,21 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
       hasSavedQuizResultRef.current = true;
 
       if (user) {
+        const savedRun = runRevisionRef.current;
+        const isCurrentRun = () => runRevisionRef.current === savedRun;
         setCloudSaveMessage("Saving result to cloud...");
 
         saveQuizResultToCloud(user, savedResult)
           .then(async (result) => {
             if (result.ok) {
-              setCloudSaveMessage("Cloud save complete.");
+              if (isCurrentRun()) setCloudSaveMessage("Cloud save complete.");
               const cloudBadgesBefore = await cloudBadgesBeforePromise;
               const { data: cloudStatsAfter } = await fetchCloudBadgeStats(user);
 
+              if (!isCurrentRun()) {
+                void onStatsUpdated?.();
+                return;
+              }
               if (cloudBadgesBefore && cloudStatsAfter) {
                 enqueueEarnedBadges(
                   getNewlyUnlockedBadges(
@@ -965,22 +983,26 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
               return;
             }
 
-            setCloudSaveMessage(
-              `Local stats saved. Cloud save failed: ${result.reason}`
-            );
-            enqueueEarnedBadges(
-              getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
-            );
+            if (isCurrentRun()) {
+              setCloudSaveMessage(
+                `Local stats saved. Cloud save failed: ${result.reason}`
+              );
+              enqueueEarnedBadges(
+                getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
+              );
+            }
             void onStatsUpdated?.();
           })
           .catch((error) => {
             console.error("Cloud save failed:", error);
-            setCloudSaveMessage(
-              "Local stats saved. Cloud save failed unexpectedly."
-            );
-            enqueueEarnedBadges(
-              getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
-            );
+            if (isCurrentRun()) {
+              setCloudSaveMessage(
+                "Local stats saved. Cloud save failed unexpectedly."
+              );
+              enqueueEarnedBadges(
+                getNewlyUnlockedBadges(localBadgesBefore, localBadgesAfter)
+              );
+            }
             void onStatsUpdated?.();
           });
       } else {
@@ -996,6 +1018,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
   }
 
   function restartQuiz() {
+    runRevisionRef.current += 1;
     stopClip(false);
     setAudioSkipCount(0);
     setAudioSkipped(false);
@@ -1123,7 +1146,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
           ))}
         </div>
 
-        <h2>{audioSkipCount > 0 ? "Practice run complete" : isPerfectRun ? "Perfect Run" : "Quiz complete"}</h2>
+        <h2 ref={resultsHeadingRef} tabIndex={-1}>{audioSkipCount > 0 ? "Practice run complete" : isPerfectRun ? "Perfect Run" : "Quiz complete"}</h2>
         <p className={`grade-word ${isPerfectRun ? "gold-badge" : ""}`}>
           {isPerfectRun ? "Perfect Run Celebration" : pickGrade(accuracy)}
         </p>
@@ -1166,22 +1189,38 @@ function Quiz({ selectedAlbum, onRestartApp, onStatsUpdated, user }: QuizProps) 
         </p>
 
         {cloudSaveMessage && (
-          <p className="cloud-save-message">{cloudSaveMessage}</p>
+          <p className="cloud-save-message" role="status">{cloudSaveMessage}</p>
         )}
 
-        <div className="hero-buttons">
+        <div className="hero-buttons solo-postgame-actions">
           <button type="button" onClick={restartQuiz}>
-            Restart Quiz
+            Rematch Same Album
           </button>
 
           <button
             type="button"
             className="secondary-button"
-            onClick={onRestartApp}
+            onClick={() => setIsAlbumPickerOpen(true)}
           >
             Choose Another Album
           </button>
+          <button type="button" className="secondary-button" onClick={onHome}>
+            Back to Home
+          </button>
         </div>
+        {isAlbumPickerOpen && (
+          <SoloAlbumPicker
+            onClose={() => setIsAlbumPickerOpen(false)}
+            onStartAlbum={async (album) => {
+              if (album.id === selectedAlbum.id) {
+                setIsAlbumPickerOpen(false);
+                restartQuiz();
+              } else {
+                await onStartAlbum(album);
+              }
+            }}
+          />
+        )}
       </section>
     );
   }
