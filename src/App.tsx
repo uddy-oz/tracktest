@@ -36,6 +36,7 @@ import {
   validateGuestDisplayName,
 } from "./lib/authIdentity";
 import { sounds } from "./lib/sounds";
+import { isSoloChallengeEnabled } from "./lib/soloChallengeFeatureFlag";
 
 const SinglePlayerPage = lazy(() => import("./Components/SinglePlayerPage"));
 const Quiz = lazy(() => import("./Components/Quiz"));
@@ -44,8 +45,9 @@ const Leaderboard = lazy(() => import("./Components/Leaderboard"));
 const AuthPage = lazy(() => import("./Components/AuthPage"));
 const ProfilePage = lazy(() => import("./Components/ProfilePage"));
 const ArenaPage = lazy(() => import("./Components/ArenaPage"));
+const ChallengePage = lazy(() => import("./Components/ChallengePage"));
 
-type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
+type AppView = "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile" | "challenge";
 type AppTheme = "dark" | "light";
 
 const AUTH_RETURN_STORAGE_KEY = "stanzer.auth.returnPath";
@@ -117,6 +119,7 @@ function RouteLoadingState() {
 }
 
 function getInitialView(): AppView {
+  if (getChallengeIdFromPath() !== null) return "challenge";
   if (getProfileUsernameFromPath()) {
     return "profile";
   }
@@ -147,6 +150,11 @@ function getInitialView(): AppView {
   }
 }
 
+function getChallengeIdFromPath() {
+  return window.location.pathname.match(/^\/challenge(?:\/([^/]+))?\/?$/)?.[1] ??
+    (/^\/challenge\/?$/.test(window.location.pathname) ? "" : null);
+}
+
 function App() {
   const [activeView, setActiveView] = useState<AppView>(getInitialView);
   const [authMode, setAuthMode] = useState<AuthPageMode>(getAuthModeFromPath);
@@ -172,6 +180,7 @@ function App() {
   const [theme, setTheme] = useState<AppTheme>(getInitialTheme);
   const arenaRecoveryGenerationRef = useRef(0);
   const guestSessionStartInFlightRef = useRef(false);
+  const preserveSoloOnGuestRef = useRef(false);
 
   const refreshActiveArenaRoom = useCallback(async () => {
     const recoveryGeneration = ++arenaRecoveryGenerationRef.current;
@@ -206,13 +215,14 @@ function App() {
     if (!nameValidation.ok) return nameValidation.error;
     const guestName = nameValidation.value;
     const returnPath =
-      getInitialView() === "multiplayer"
+      getInitialView() === "multiplayer" || getInitialView() === "challenge"
         ? window.location.pathname
         : window.sessionStorage.getItem(AUTH_RETURN_STORAGE_KEY) || "/multiplayer";
 
     if (session?.user && !isAnonymousUser(session.user)) {
       setIsGuestNamePromptOpen(false);
-      navigateToInternalPath(returnPath);
+      if (!(preserveSoloOnGuestRef.current && window.location.pathname === "/play")) navigateToInternalPath(returnPath);
+      preserveSoloOnGuestRef.current = false;
       return "";
     }
 
@@ -237,7 +247,8 @@ function App() {
         displayName: guestName,
       });
       setIsGuestNamePromptOpen(false);
-      navigateToInternalPath(returnPath);
+      if (!(preserveSoloOnGuestRef.current && window.location.pathname === "/play")) navigateToInternalPath(returnPath);
+      preserveSoloOnGuestRef.current = false;
       window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
       return "";
     }
@@ -269,7 +280,8 @@ function App() {
       }
 
       setIsGuestNamePromptOpen(false);
-      navigateToInternalPath(returnPath);
+      if (!(preserveSoloOnGuestRef.current && window.location.pathname === "/play")) navigateToInternalPath(returnPath);
+      preserveSoloOnGuestRef.current = false;
       window.sessionStorage.removeItem(AUTH_RETURN_STORAGE_KEY);
       return "";
     } finally {
@@ -885,8 +897,29 @@ function App() {
           onHome={showHome}
           onStatsUpdated={refreshIdentityBadges}
           user={isGuestSession ? null : session?.user || null}
+          canShare={Boolean(session?.user && (!isGuestSession || getGuestName(session.user)))}
+          onChallengeGuest={isSoloChallengeEnabled && supabase ? () => {
+            preserveSoloOnGuestRef.current = true;
+            requestGuestSession();
+          } : undefined}
         />
       )}
+
+      {!mustCompleteUsername && activeView === "challenge" && (isSoloChallengeEnabled ? (
+        <ChallengePage key={getChallengeIdFromPath()} id={getChallengeIdFromPath() ?? ""}
+          signedIn={Boolean(session?.user && (!isGuestSession || getGuestName(session.user)))}
+          onSignIn={() => void showAuth("login", window.location.pathname)}
+          onGuest={requestGuestSession} onHome={showHome} onStartAlbum={startQuiz}
+          onLeaveArena={releaseArenaRoomForNavigation} />
+      ) : (
+        <main className="quiz solo-challenge-invite">
+          <h1>Shareable Challenges unavailable</h1>
+          <p>Shareable Challenges are not open right now.</p>
+          <button type="button" className="secondary-button solo-challenge-home" onClick={showHome}>
+            Back to Home
+          </button>
+        </main>
+      ))}
 
       {!mustCompleteUsername && activeView === "leaderboard" && (
         <Leaderboard
@@ -953,7 +986,10 @@ function App() {
         <GuestNameModal
           open
           canDismiss={!isAnonymousUser(session?.user) || Boolean(getGuestName(session?.user))}
-          onClose={() => setIsGuestNamePromptOpen(false)}
+          onClose={() => {
+            preserveSoloOnGuestRef.current = false;
+            setIsGuestNamePromptOpen(false);
+          }}
           onSubmit={startGuestSession}
         />
       )}

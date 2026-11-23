@@ -802,3 +802,95 @@
     margin-inline: auto;
   }
 }
+.quiz.solo-challenge-invite {
+  padding-top: calc(var(--nav-height) + 24px);
+  overflow-wrap: anywhere;
+}
+
+.solo-challenge-invite h1 {
+  font-size: 32px;
+  margin-block: 8px;
+}
+
+.solo-challenge-invite p { margin-block: 8px; }
+.solo-challenge-album {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  width: min(100%, 560px);
+  margin: 12px auto;
+  color: var(--game-text);
+}
+
+.solo-challenge-album .quiz-album-cover {
+  width: 96px;
+  height: 96px;
+  margin: 0;
+}
+
+.solo-challenge-target {
+  width: min(100%, 520px);
+  margin: 16px auto;
+  padding: 16px;
+  border: 1px solid var(--game-border);
+  border-top-color: var(--brand-primary);
+  border-radius: 8px;
+  background: var(--game-surface-raised);
+  color: var(--game-text);
+  overflow-wrap: anywhere;
+}
+
+.solo-challenge-target .eyebrow,
+.solo-challenge-invite .solo-challenge-note,
+.solo-challenge-scores dt {
+  color: var(--game-text-secondary);
+}
+
+.solo-challenge-invite .solo-challenge-note {
+  width: min(100%, 520px);
+  margin-inline: auto;
+}
+
+.solo-challenge-points,
+.solo-challenge-scores dd {
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.solo-challenge-scores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.solo-challenge-scores dd {
+  margin: 0;
+  color: var(--game-text);
+}
+.solo-challenge-invite .solo-postgame-actions { margin-top: 20px; }
+.solo-challenge-home { margin-top: 18px; }
+
+.solo-challenge-share {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 520px;
+  margin: 20px auto;
+}
+
+.solo-challenge-share input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--game-border);
+  border-radius: 8px;
+  background: var(--game-control);
+  color: var(--game-text);
+}
+
+.solo-challenge-share button,
+.solo-challenge-invite button { min-height: 44px; }

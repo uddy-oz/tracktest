@@ -4,6 +4,8 @@ import type { User } from "@supabase/supabase-js";
 import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import SoloAlbumPicker from "./SoloAlbumPicker";
+import ChallengeShare from "./ChallengeShare";
+import { challengeOutcome, openChallengeQuestion, revealChallengeAnswer, type ChallengeQuestion, type ChallengeReplay } from "../lib/soloChallenges";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
 import { getTrackTestStats, saveQuizResult } from "../lib/stats";
@@ -30,11 +32,15 @@ type QuizProps = {
   onHome: () => void;
   onStatsUpdated?: () => void;
   user: User | null;
+  canShare?: boolean;
+  onChallengeGuest?: () => void;
+  replay?: ChallengeReplay;
 };
 
 type QuizQuestion = {
   correctTrack: SpotifyTrack;
   options: SpotifyTrack[];
+  replayOffset?: number;
 };
 
 type QuestionResult = {
@@ -115,7 +121,7 @@ function getNewlyUnlockedBadges(
   );
 }
 
-function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user }: QuizProps) {
+function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user, canShare = false, onChallengeGuest, replay }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -147,6 +153,9 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [cloudSaveMessage, setCloudSaveMessage] = useState("");
+  const [replayQuestion, setReplayQuestion] = useState<{index: number; question: QuizQuestion} | null>(null);
+  const [revealedAnswer, setRevealedAnswer] = useState("");
+  const [shareableQuestions, setShareableQuestions] = useState<ChallengeQuestion[]>([]);
 
   const [resolvedPreview, setResolvedPreview] = useState<{ trackId: string; url: string } | null>(null);
   const [isClipPlaying, setIsClipPlaying] = useState(false);
@@ -175,8 +184,16 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   const retiredAudioTracksRef = useRef<SpotifyTrack[]>([]);
   const hasAnsweredRef = useRef(false);
   const isEndingRunRef = useRef(false);
+  const questionSnapshotRef = useRef<ChallengeQuestion[]>([]);
+  const playedOffsetRef = useRef(0);
+  const replayActiveRef = useRef(false);
 
-  const currentQuestion = questions[currentQuestionIndex];
+  const questionCount = replay?.challenge.questionCount ?? questions.length;
+  const attemptId = replay?.attemptId;
+  const currentQuestion = attemptId
+    ? replayQuestion?.index === currentQuestionIndex ? replayQuestion.question : undefined
+    : questions[currentQuestionIndex];
+  const correctAnswerLabel = attemptId ? revealedAnswer : currentQuestion?.correctTrack.name;
   const currentTrack = currentQuestion?.correctTrack;
   const previewUrl = currentTrack?.previewUrl ||
     (resolvedPreview?.trackId === currentTrack?.id ? resolvedPreview?.url : "") || "";
@@ -188,7 +205,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   const ringOffset = RING_CIRCUMFERENCE * (1 - timerProgress);
   const shouldShowDanger =
     quizPhase === "answering" && timeRemaining <= 3 && !hasAnswered;
-  const activePoints = isQuizComplete ? displayPoints : totalPoints;
+  const activePoints = isQuizComplete && !attemptId ? displayPoints : totalPoints;
   const streakRewardLabel = getStreakRewardLabel(streak);
 
   const confettiPieces = useMemo(
@@ -213,6 +230,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   );
 
   useEffect(() => {
+    if (attemptId) return;
     const controller = new AbortController();
     async function loadTracks() {
       try {
@@ -275,7 +293,31 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
     loadTracks();
     return () => controller.abort();
-  }, [selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
+  }, [attemptId, selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
+
+  useEffect(() => {
+    if (!attemptId) return;
+    let cancelled = false;
+    replayActiveRef.current = true;
+    openChallengeQuestion(attemptId, currentQuestionIndex).then((clip) => {
+      if (cancelled) return;
+      setReplayQuestion({
+        index: currentQuestionIndex,
+        question: {
+          correctTrack: {id: "challenge-clip", name: "", previewUrl: clip.previewUrl},
+          options: clip.options.map((name, index) => ({id: String(index), name, previewUrl: null})),
+          replayOffset: clip.offset,
+        },
+      });
+      setIsLoading(false);
+      setQuizPhase("countdown");
+    }).catch(() => {
+      if (cancelled) return;
+      setError("This challenge question could not load. Return to the invitation and try again.");
+      setIsLoading(false);
+    });
+    return () => { cancelled = true; replayActiveRef.current = false; };
+  }, [attemptId, currentQuestionIndex]);
 
   useEffect(() => {
     if (!currentTrack || currentTrack.previewUrl) return;
@@ -319,12 +361,13 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !previewUrl || !currentQuestion) return;
+    const replayOffset = currentQuestion.replayOffset;
     audioPreparedAtRef.current = performance.now();
     allowLateSeekRef.current = true;
     clipStartTimeRef.current = 0;
     function prepareOffset() {
       if (!audio || audio.error || !allowLateSeekRef.current) return;
-      const offset = chooseSoloClipOffset(audio.duration);
+      const offset = replayOffset ?? chooseSoloClipOffset(audio.duration);
       try {
         audio.currentTime = offset;
         clipStartTimeRef.current = offset;
@@ -510,7 +553,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   }, [flash]);
 
   useEffect(() => {
-    if (!isQuizComplete) {
+    if (!isQuizComplete || attemptId) {
       return;
     }
 
@@ -534,7 +577,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     return () => {
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [isQuizComplete, totalPoints]);
+  }, [attemptId, isQuizComplete, totalPoints]);
 
   useEffect(() => {
     return () => {
@@ -594,7 +637,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     hasAnsweredRef.current = true;
     stopClip(false);
     // Do not offer a fresh scored question after the original started playing.
-    const replacement = answerDeadlineRef.current === 0
+    const replacement = !attemptId && answerDeadlineRef.current === 0
       ? getSoloReserveTrack(tracks, questions.map(question => question.correctTrack), retiredAudioTracksRef.current)
       : undefined;
     if (replacement) {
@@ -612,6 +655,11 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     setAudioSkipped(true);
     setMessage("Question skipped. Points and streak unchanged. This run will not be saved.");
     setRevealMessage("");
+    if (attemptId) {
+      setCloudSaveMessage("This challenge ended because a clip could not be played. No score was saved.");
+      setIsQuizComplete(true);
+      return;
+    }
     startRevealCountdown();
   }
 
@@ -695,6 +743,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
       : "ready";
     if (audioStartRef.current !== attempt || attempt.signal.aborted) return;
     const playRequestedAt = performance.now();
+    const playbackOffset = currentQuestion.replayOffset ?? (audio.seeking ? clipStartTimeRef.current : audio.currentTime);
     const remainingBudgetMs = SOLO_AUDIO_START_TIMEOUT_MS - (playRequestedAt - requestedAt);
     if (metadata === "ready" && remainingBudgetMs > 0) {
       logSoloAudio("play_requested", {
@@ -729,6 +778,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     }
 
     setIsClipPlaying(true);
+    playedOffsetRef.current = playbackOffset;
     clipStartTimeRef.current = audio.currentTime;
     const stopAt = clipStartTimeRef.current + SOLO_CLIP_SECONDS;
     let lastPosition = audio.currentTime;
@@ -774,6 +824,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   }
 
   function resetQuestionFlow() {
+    setRevealedAnswer("");
     stopClip(false);
     setAudioSkipped(false);
     answerDeadlineRef.current = 0;
@@ -794,7 +845,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   function advanceAfterReveal() {
     stopClip(false);
 
-    if (currentQuestionIndex >= questions.length - 1) {
+    if (currentQuestionIndex >= questionCount - 1) {
       finishQuiz();
       return;
     }
@@ -803,7 +854,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     resetQuestionFlow();
   }
 
-  function recordAnswer(selectedGuess: string, timedOut = false) {
+  async function recordAnswer(selectedGuess: string, timedOut = false) {
     if (!currentQuestion) {
       return;
     }
@@ -815,10 +866,33 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
     hasAnsweredRef.current = true;
 
-    const correctAnswer = currentQuestion.correctTrack.name;
+    const remainingSeconds = Math.max(0, Math.ceil((answerDeadlineRef.current - performance.now()) / 1000));
+    let correctIndex = currentQuestion.options.findIndex((option) => option.id === currentQuestion.correctTrack.id);
+    if (attemptId) {
+      setHasAnswered(true);
+      try {
+        correctIndex = await revealChallengeAnswer(attemptId, currentQuestionIndex);
+        if (!replayActiveRef.current || isEndingRunRef.current) return;
+        if (!currentQuestion.options[correctIndex]) throw new Error("Invalid answer");
+        setRevealedAnswer(currentQuestion.options[correctIndex].name);
+      } catch {
+        if (!replayActiveRef.current || isEndingRunRef.current) return;
+        stopClip(false);
+        setError("Could not check this answer. Return to the invitation and try again.");
+        return;
+      }
+    }
+    if (previewUrl && correctIndex >= 0) {
+      questionSnapshotRef.current[currentQuestionIndex] = {
+        options: currentQuestion.options.map((option) => option.name),
+        previewUrl,
+        offset: playedOffsetRef.current,
+        correctIndex,
+      };
+    }
+    const correctAnswer = currentQuestion.options[correctIndex]?.name ?? currentQuestion.correctTrack.name;
     const normalizedGuess = selectedGuess.toLowerCase();
     const normalizedAnswer = correctAnswer.toLowerCase();
-    const remainingSeconds = Math.max(0, Math.ceil((answerDeadlineRef.current - performance.now()) / 1000));
     timedOut ||= remainingSeconds === 0;
     const isCorrect = !timedOut && normalizedGuess === normalizedAnswer;
     const pointsEarned = getPointsForAnswer(isCorrect, remainingSeconds);
@@ -905,8 +979,18 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     }
 
     stopClip(false);
-    if (audioSkipCount > 0 || questionResults.length !== questions.length) {
+    if (audioSkipCount > 0 || questionResults.length !== questionCount) {
       setCloudSaveMessage("Practice only: audio was skipped, so this run does not update scores, badges, or Daily Goals.");
+      setIsQuizComplete(true);
+      return;
+    }
+    const snapshot = questionSnapshotRef.current.filter(Boolean);
+    if (snapshot.length === questionCount && snapshot.every((question) => question.options.length === 4)) {
+      setShareableQuestions(snapshot);
+    }
+    if (replay) {
+      sounds.complete();
+      setCloudSaveMessage("Scores are unverified. Challenge replays don't count toward Solo progression, Daily Goals, achievements, or global leaderboards.");
       setIsQuizComplete(true);
       return;
     }
@@ -1018,6 +1102,8 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   }
 
   function restartQuiz() {
+    questionSnapshotRef.current = [];
+    setShareableQuestions([]);
     runRevisionRef.current += 1;
     stopClip(false);
     setAudioSkipCount(0);
@@ -1080,7 +1166,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     setEarnedBadgeQueue((currentQueue) => currentQueue.slice(1));
   }
 
-  if (isLoading) {
+  if (isLoading || (attemptId && !error && !currentQuestion)) {
     return (
       <section className="quiz">
         <h2>Loading tracks...</h2>
@@ -1093,13 +1179,13 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
       <section className="quiz">
         <h2>{error}</h2>
         <button type="button" onClick={onRestartApp}>
-          Choose Another Album
+          {attemptId ? "Back to Invitation" : "Choose Another Album"}
         </button>
       </section>
     );
   }
 
-  if (questions.length === 0 || !currentQuestion) {
+  if (questionCount === 0 || !currentQuestion) {
     return (
       <section className="quiz">
         <h2>No questions available.</h2>
@@ -1114,7 +1200,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     const playedQuestions = questionResults.length;
     const accuracy =
       playedQuestions > 0 ? Math.round((correctAnswers / playedQuestions) * 100) : 0;
-    const isPerfectRun = audioSkipCount === 0 && questions.length > 0 && correctAnswers === questions.length;
+    const isPerfectRun = audioSkipCount === 0 && questionCount > 0 && correctAnswers === questionCount;
     const averageAnswerTime =
       questionResults.length > 0
         ? questionResults.reduce(
@@ -1151,9 +1237,24 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
           {isPerfectRun ? "Perfect Run Celebration" : pickGrade(accuracy)}
         </p>
 
-        <p className="score score-hero">
-          Final points: {activePoints.toLocaleString()}
-        </p>
+        {replay ? (
+          <section className="solo-challenge-target" aria-labelledby="challenge-outcome">
+            <h3 id="challenge-outcome">{audioSkipCount ? "No comparison" : challengeOutcome(totalPoints, replay.challenge.score)}</h3>
+            {audioSkipCount && <p>A clip could not be played. This attempt was not scored.</p>}
+            <dl className="solo-challenge-scores">
+              <div>
+                <dt>{audioSkipCount ? "Points before the skip" : "Your score"}</dt>
+                <dd className="score-hero">{activePoints.toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt>{replay.challenge.playerName}</dt>
+                <dd>{replay.challenge.score.toLocaleString()}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : (
+          <p className="score score-hero">Final points: {activePoints.toLocaleString()}</p>
+        )}
 
         <div className="score-breakdown">
           <p>
@@ -1191,10 +1292,14 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
         {cloudSaveMessage && (
           <p className="cloud-save-message" role="status">{cloudSaveMessage}</p>
         )}
+        {onChallengeGuest && shareableQuestions.length > 0 && (
+          <ChallengeShare album={selectedAlbum} score={totalPoints} correct={correctAnswers}
+            questions={shareableQuestions} canCreate={canShare} onGuest={onChallengeGuest} />
+        )}
 
         <div className="hero-buttons solo-postgame-actions">
-          <button type="button" onClick={restartQuiz}>
-            Rematch Same Album
+          <button type="button" onClick={replay ? () => void onStartAlbum(selectedAlbum) : restartQuiz}>
+            {replay ? "Replay Album" : "Rematch Same Album"}
           </button>
 
           <button
@@ -1212,7 +1317,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
           <SoloAlbumPicker
             onClose={() => setIsAlbumPickerOpen(false)}
             onStartAlbum={async (album) => {
-              if (album.id === selectedAlbum.id) {
+              if (!replay && album.id === selectedAlbum.id) {
                 setIsAlbumPickerOpen(false);
                 restartQuiz();
               } else {
@@ -1244,7 +1349,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
       <div className="quiz-status">
         <span>
-          Correct: {correctAnswers} / {questions.length}
+          Correct: {correctAnswers} / {questionCount}
         </span>
         <span
           className={
@@ -1364,7 +1469,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
               </>
             ) : (
               <p className="reveal-answer">
-                Correct answer: <strong>{currentQuestion.correctTrack.name}</strong>
+                Correct answer: <strong>{correctAnswerLabel}</strong>
               </p>
             )}
             {revealMessage && (
@@ -1384,7 +1489,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
       </div>
 
       <p className="quiz-clue">
-        Question {currentQuestionIndex + 1} of {questions.length}: Pick the
+        Question {currentQuestionIndex + 1} of {questionCount}: Pick the
         correct track from <strong>{getAlbumDisplayTitle(selectedAlbum.title)}</strong>.
       </p>
 
@@ -1413,7 +1518,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
               Retry Audio
             </button>
             <button type="button" className="secondary-button" onClick={() => skipAudioQuestion("player_skipped")}>
-              Skip Question
+              {attemptId ? "End Challenge" : "Skip Question"}
             </button>
         </div>
       )}
@@ -1426,13 +1531,13 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
             className={`song-button ${
               guess === track.name ? "selected-song" : ""
             } ${
-              hasAnswered && !audioSkipped && track.name === currentQuestion.correctTrack.name
+              hasAnswered && !audioSkipped && track.name === correctAnswerLabel
                 ? "correct-song"
                 : ""
             } ${
               hasAnswered &&
               guess === track.name &&
-              guess !== currentQuestion.correctTrack.name
+              guess !== correctAnswerLabel
                 ? "wrong-song"
                 : ""
             }`}

@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "test:solo-audio": "node --experimental-strip-types --test tools/solo-audio.test.ts",
+    "test:solo-challenges-integration": "node --test tools/solo-challenges.integration.test.mjs",
+    "test:solo-challenges-disabled-integration": "node --test tools/solo-challenges-disabled.integration.test.mjs",
     "test:daily-goals": "node --experimental-strip-types --test tools/daily-goals.test.ts",
     "test:history-clock": "node --experimental-strip-types --test tools/history-clock.test.ts",
     "test:achievement-permanence": "node --experimental-strip-types --test tools/achievement-permanence.test.ts",

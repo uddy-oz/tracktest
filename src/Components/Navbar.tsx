@@ -20,7 +20,7 @@ type NavbarProps = {
   isGuest?: boolean;
   theme: "dark" | "light";
   onToggleTheme: () => void;
-  activeView: "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile";
+  activeView: "home" | "play" | "leaderboard" | "multiplayer" | "auth" | "profile" | "challenge";
 };
 
 function Navbar({
