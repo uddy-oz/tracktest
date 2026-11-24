@@ -44,6 +44,31 @@ Unmatched starts can indicate unobserved exits but are not independently verifie
   accounts, and verify the live ingestion payload on designated test traffic. Check usage against
   the free allowance, especially if increasing the number of audio events. No paid plan is required.
 
+## Discovery funnel
+
+In an isolated analytics environment first, save an ordered PostHog funnel with
+`discovery_viewed → album_selected → game_started → game_finished`, filtered to
+`outcome=completed` on the final step and `mode=solo` on the final two steps.
+Use a 30-minute conversion window and group by the selection surface. For
+completion reliability, separately match Solo starts to runs by `run_id`.
+`album_lookup` distinguishes exact matches from fallbacks. Don't equate an
+automatically selected edition with an intentional quiz start.
+
+| Step | Event | Step filter |
+| --- | --- | --- |
+| Discovery reached | `discovery_viewed` | No additional filter |
+| Edition selected | `album_selected` | No additional filter |
+| Solo started | `game_started` | `mode=solo` |
+| Solo completed | `game_finished` | `mode=solo`, `outcome=completed` |
+
+Break down using the `surface` of the selection step; Home and the following
+Solo page can emit separate discovery views. Exclude test traffic rather than
+forcing visitors into a different consent state to populate the funnel.
+
+The Home discovery view is an editorial shelf exposure, not a popularity
+signal. Show acquisition totals for opted-in traffic only, and keep synthetic
+events out of the production dashboard.
+
 ## Score links
 
 New links carry `album_id=itunes:<STOREFRONT>:<COLLECTION_ID>` and the existing title.

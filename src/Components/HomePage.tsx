@@ -22,6 +22,7 @@ import { isAnonymousUser } from "../lib/authIdentity";
 import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import GuestBadge from "./GuestBadge";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
+import HomeDiscovery, { HomeDiscoverySearch } from "./HomeDiscovery";
 
 type HomePageProps = {
   session: Session | null;
@@ -29,6 +30,7 @@ type HomePageProps = {
   identityBadges: CompactPlayerBadge[] | null;
   activeArenaRoom: ArenaRoom | null;
   onSinglePlayer: () => void;
+  onDiscover: (path: string) => void;
   onMultiplayer: () => void;
   onLeaderboard: () => void;
   onProfile: () => void;
@@ -58,6 +60,7 @@ function HomePage({
   identityBadges,
   activeArenaRoom,
   onSinglePlayer,
+  onDiscover,
   onMultiplayer,
   onLeaderboard,
   onProfile,
@@ -164,7 +167,7 @@ function HomePage({
 
   return (
     <main className="home-dashboard">
-      <section className="home-hero-panel">
+      <section className="home-hero-panel home-discovery-intro">
         <div>
           <div className="home-hero-pulse" aria-hidden="true">
             {Array.from({ length: 18 }, (_, index) => (
@@ -174,9 +177,9 @@ function HomePage({
           <p className="eyebrow">StanZer</p>
           <h1>Prove you're a superfan.</h1>
           <p>
-            Five second clips. Ten seconds to answer. Master your favourite
-            albums, build your solo record, and challenge your friends.
+            Guess the track. Master the album. Challenge your friends.
           </p>
+          <HomeDiscoverySearch navigate={onDiscover} />
           <div className="hero-buttons">
             <button
               type="button"
@@ -184,7 +187,6 @@ function HomePage({
               onClick={onSinglePlayer}
             >
               <strong>Start Single Player</strong>
-              <small>Album quizzes, stats, and badges</small>
             </button>
             <button
               type="button"
@@ -192,26 +194,31 @@ function HomePage({
               onClick={onMultiplayer}
             >
               <strong>Enter Multiplayer</strong>
-              <small>Play With Friends and Party Mode</small>
             </button>
           </div>
         </div>
+      </section>
 
+      <HomeDiscovery navigate={onDiscover} />
+
+      <section className="home-career-strip" aria-label="Player Career">
         <aside className="home-player-card">
-          <div className="home-player-topline">
-            <span>Player Career</span>
-            <strong>{statsSource === "cloud" ? "Cloud" : "Local"}</strong>
-          </div>
-          <div className="guest-name-line">
-            <h2>{displayName}</h2>
-            {isGuestSession && <GuestBadge />}
-          </div>
-          <p>{username}</p>
-          <PlayerIdentityBadges badges={playerBadges} />
-          <div className="home-tier-row">
-            <button type="button" className="secondary-button" onClick={onProfile}>
-              {isGuestSession ? "Create Account" : "View Profile"}
-            </button>
+          <div className="home-career-identity">
+            <div className="home-player-topline">
+              <span>Player Career</span>
+              <strong>{statsSource === "cloud" ? "Cloud" : "Local"}</strong>
+            </div>
+            <div className="guest-name-line">
+              <h2>{displayName}</h2>
+              {isGuestSession && <GuestBadge />}
+            </div>
+            <p>{username}</p>
+            <PlayerIdentityBadges badges={playerBadges} />
+            <div className="home-tier-row">
+              <button type="button" className="secondary-button" onClick={onProfile}>
+                {isGuestSession ? "Create Account" : "View Profile"}
+              </button>
+            </div>
           </div>
           <div className="home-player-stats">
             <span>

@@ -8,11 +8,14 @@ const choices = {
   outcome: ["playing", "failed", "timeout", "blocked", "stalled", "audio_skipped", "abandoned", "completed", "forfeit"],
   method: ["copy", "download", "native"],
   goal: ["warm-up", "sharp-ears", "bring-the-competition", "sweep"],
+  surface: ["home_feature", "home_search", "artist", "search", "score_share"],
+  lookup: ["exact", "fallback"],
 } as const;
 type ChoiceProps = { [Key in keyof typeof choices]?: (typeof choices)[Key][number] };
 type EventProps = ChoiceProps & { album_id?: string; artist_id?: string; run_id?: string; startup_ms?: number; after_countdown_ms?: number };
 type EventName = "visit" | "game_started" | "game_finished" | "room_created" | "room_joined" |
-  "rematch" | "daily_goal" | "score_share_opened" | "score_share_action" | "score_link_viewed" | "audio_playback";
+  "rematch" | "daily_goal" | "score_share_opened" | "score_share_action" | "score_link_viewed" | "audio_playback" |
+  "discovery_viewed" | "album_selected" | "album_lookup";
 type PlayerKind = "registered" | "guest" | "signed_out";
 
 export function analyticsProperties(input: EventProps) {

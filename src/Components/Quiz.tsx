@@ -7,6 +7,7 @@ import SoloAlbumPicker from "./SoloAlbumPicker";
 import ChallengeShare from "./ChallengeShare";
 import ShareScore from "./ShareScore";
 import { captureAnalytics, newAnalyticsRunId } from "../lib/analytics";
+import type { DiscoverySurface } from "../lib/featuredDiscovery";
 import { challengeOutcome, openChallengeQuestion, revealChallengeAnswer, type ChallengeQuestion, type ChallengeReplay } from "../lib/soloChallenges";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
@@ -29,6 +30,7 @@ import {
 
 type QuizProps = {
   selectedAlbum: SpotifyAlbum;
+  discoverySurface?: DiscoverySurface;
   onRestartApp: () => void;
   onStartAlbum: (album: SpotifyAlbum) => Promise<void>;
   onHome: () => void;
@@ -124,7 +126,7 @@ function getNewlyUnlockedBadges(
   );
 }
 
-function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user, scoreShareName, canShare = false, onChallengeGuest, replay }: QuizProps) {
+function Quiz({ selectedAlbum, discoverySurface, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user, scoreShareName, canShare = false, onChallengeGuest, replay }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -286,7 +288,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
         setTracks(cleanedSpotifyTracks);
         analyticsRun.current = newAnalyticsRunId();
         captureAnalytics("game_started", {mode: "solo", album_id: selectedAlbum.id, artist_id: selectedAlbum.artistId,
-          run_id: analyticsRun.current}, analyticsRun.current);
+          surface: discoverySurface, run_id: analyticsRun.current}, analyticsRun.current);
         setQuestions(buildQuizQuestions(cleanedSpotifyTracks));
         setQuizPhase("countdown");
       } catch (error) {
@@ -300,7 +302,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
     loadTracks();
     return () => controller.abort();
-  }, [attemptId, selectedAlbum.id, selectedAlbum.artist, selectedAlbum.artistId, selectedAlbum.title]);
+  }, [attemptId, selectedAlbum.id, selectedAlbum.artist, selectedAlbum.artistId, selectedAlbum.title, discoverySurface]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -991,7 +993,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
     stopClip(false);
     if (!replay && analyticsRun.current) captureAnalytics("game_finished", {mode: "solo", album_id: selectedAlbum.id,
-      artist_id: selectedAlbum.artistId, run_id: analyticsRun.current,
+      artist_id: selectedAlbum.artistId, surface: discoverySurface, run_id: analyticsRun.current,
       outcome: audioSkipCount > 0 || questionResults.length !== questionCount ? "audio_skipped" : "completed"}, analyticsRun.current);
     if (audioSkipCount > 0 || questionResults.length !== questionCount) {
       setCloudSaveMessage("Practice only: audio was skipped, so this run does not update scores, badges, or Daily Goals.");
@@ -1119,7 +1121,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     analyticsRun.current = newAnalyticsRunId();
     captureAnalytics("rematch", {mode: "solo", album_id: selectedAlbum.id}, analyticsRun.current);
     captureAnalytics("game_started", {mode: "solo", album_id: selectedAlbum.id, artist_id: selectedAlbum.artistId,
-      run_id: analyticsRun.current}, analyticsRun.current);
+      surface: discoverySurface, run_id: analyticsRun.current}, analyticsRun.current);
     questionSnapshotRef.current = [];
     setShareableQuestions([]);
     runRevisionRef.current += 1;
@@ -1168,7 +1170,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
     isEndingRunRef.current = true;
     if (!replay && analyticsRun.current) captureAnalytics("game_finished", {mode: "solo", outcome: "abandoned",
-      album_id: selectedAlbum.id, run_id: analyticsRun.current}, analyticsRun.current);
+      album_id: selectedAlbum.id, surface: discoverySurface, run_id: analyticsRun.current}, analyticsRun.current);
     hasAnsweredRef.current = true;
     stopClip(false);
     onRestartApp();

@@ -11,6 +11,7 @@ import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
 import AnalyticsPrivacy from "./Components/AnalyticsPrivacy";
 import { captureAnalytics, setAnalyticsIdentity } from "./lib/analytics";
+import type { DiscoverySurface } from "./lib/featuredDiscovery";
 import HomePage from "./Components/HomePage";
 import GuestNameModal from "./Components/GuestNameModal";
 import type { AuthPageMode } from "./Components/AuthPage";
@@ -168,6 +169,7 @@ function App() {
     getArenaInviteCodeFromPath
   );
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
+  const [quizDiscovery, setQuizDiscovery] = useState<DiscoverySurface>();
   const [isQuizStarted, setIsQuizStarted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(Boolean(supabase));
@@ -571,7 +573,7 @@ function App() {
     return () => window.removeEventListener("focus", refreshProgressionOnFocus);
   }, [refreshIdentityBadges]);
 
-  async function startQuiz(album: SpotifyAlbum) {
+  async function startQuiz(album: SpotifyAlbum, surface?: DiscoverySurface) {
     sounds.prime();
     if (!(await releaseArenaRoomForNavigation())) return;
     window.history.pushState({}, "", "/play");
@@ -579,6 +581,7 @@ function App() {
     setArenaInviteCode(null);
     setActiveView("play");
     setSelectedAlbum(album);
+    setQuizDiscovery(surface);
     setIsQuizStarted(true);
   }
 
@@ -880,6 +883,9 @@ function App() {
           identityBadges={identityBadges}
           activeArenaRoom={activeArenaRoom}
           onSinglePlayer={showPlay}
+          onDiscover={async path => {
+            if (await releaseArenaRoomForNavigation()) navigateToInternalPath(path, false);
+          }}
           onMultiplayer={showMultiplayer}
           onLeaderboard={showLeaderboard}
           onProfile={isGuestSession ? () => showAuth("login") : showProfile}
@@ -902,6 +908,7 @@ function App() {
         <Quiz
           key={selectedAlbum.id}
           selectedAlbum={selectedAlbum}
+          discoverySurface={quizDiscovery}
           onRestartApp={restartApp}
           onStartAlbum={startQuiz}
           onHome={showHome}

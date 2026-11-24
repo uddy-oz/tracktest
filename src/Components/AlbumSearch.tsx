@@ -15,16 +15,19 @@ import {
   searchSpotifyArtists,
 } from "../lib/spotifyApi";
 import { isCatalogDiscoveryEnabled } from "../lib/catalogFeatureFlags";
+import { captureAnalytics } from "../lib/analytics";
+import type { DiscoverySurface } from "../lib/featuredDiscovery";
 
 const CatalogDiscovery = lazy(() => import("./CatalogDiscovery"));
 
 type AlbumSearchProps = {
-  onStartQuiz: (album: SpotifyAlbum) => void;
+  onStartQuiz: (album: SpotifyAlbum, surface?: DiscoverySurface) => void;
   compact?: boolean;
   inPicker?: boolean;
   starting?: boolean;
   initialQuery?: string;
   initialAlbumId?: string;
+  surface?: DiscoverySurface;
 };
 
 const ALBUMS_PER_PAGE = 12;
@@ -32,7 +35,7 @@ const MAX_VISIBLE_ALBUMS = 48;
 const SEARCH_DEBOUNCE_MS = 450;
 type SearchMode = "albums" | "artists" | "playlists";
 
-function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false, initialQuery = "", initialAlbumId }: AlbumSearchProps) {
+function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false, initialQuery = "", initialAlbumId, surface = "search" }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState(initialQuery);
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
@@ -44,6 +47,8 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
   const [isLoading, setIsLoading] = useState(false);
   const searchRequestRef = useRef<AbortController | null>(null);
   const searchSequenceRef = useRef(0);
+  const initialLookupHandled = useRef(false);
+  const [exactUnavailable, setExactUnavailable] = useState(false);
 
   const cappedAlbums = albums.slice(0, MAX_VISIBLE_ALBUMS);
   const visibleAlbums = cappedAlbums.slice(0, visibleAlbumCount);
@@ -77,10 +82,20 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
           setAlbums([]);
         }
       } else {
-        const exact = initialAlbumId && query === initialQuery
+        const isExactLookup = Boolean(initialAlbumId && query === initialQuery && !initialLookupHandled.current);
+        const exact = isExactLookup && initialAlbumId
           ? await lookupSharedAlbum(initialAlbumId, controller.signal).catch(() => null)
           : null;
         if (controller.signal.aborted) return;
+        if (isExactLookup) {
+          initialLookupHandled.current = true;
+          setExactUnavailable(!exact);
+          captureAnalytics("album_lookup", {surface, album_id: initialAlbumId, lookup: exact ? "exact" : "fallback"});
+          if (exact) {
+            setSelectedAlbum(exact);
+            captureAnalytics("album_selected", {surface, album_id: exact.id, artist_id: exact.artistId});
+          }
+        }
         const results = exact ? [exact] : await searchSpotifyAlbums(query, {
           signal: controller.signal,
         });
@@ -100,7 +115,7 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
     } finally {
       if (sequence === searchSequenceRef.current) setIsLoading(false);
     }
-  }, [searchMode, initialAlbumId, initialQuery]);
+  }, [searchMode, initialAlbumId, initialQuery, surface]);
 
   useEffect(() => {
     if (isDiscoveryMode) return;
@@ -147,6 +162,7 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
   }
 
   function handleSelectAlbum(album: SpotifyAlbum) {
+    if (!inPicker && selectedAlbum?.id !== album.id) captureAnalytics("album_selected", {surface, album_id: album.id, artist_id: album.artistId});
     setSelectedAlbum(album.id === selectedAlbum?.id ? null : album);
     prefetchSpotifyAlbumTracks(album.id);
   }
@@ -157,6 +173,16 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
     );
   }
 
+  const startBar = selectedAlbum && (
+    <div className={`start-bar${initialAlbumId ? " discovery-start-bar" : ""}`}>
+      {selectedAlbum.imageUrl && <img src={selectedAlbum.imageUrl} alt="" aria-hidden decoding="async" />}
+      <div className="start-bar-info"><strong>{selectedAlbum.title}</strong><span>{selectedAlbum.artist}</span></div>
+      <button type="button" disabled={starting} onClick={() => onStartQuiz(selectedAlbum, inPicker ? undefined : surface)}>
+        {starting ? "Starting..." : "Start Quiz"}
+      </button>
+    </div>
+  );
+
   return (
     <section
       className={`album-search ${compact ? "album-search-compact" : ""}`}
@@ -165,7 +191,10 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
       {!inPicker && <><p className="eyebrow">
         {isDiscoveryMode ? "StanZer discovery" : "Start a new run"}
       </p>
-      <h2>{isDiscoveryMode ? "Explore future modes" : "Choose an album"}</h2></>}
+      <h2>{isDiscoveryMode ? "Explore future modes" : initialAlbumId && selectedAlbum ? "Ready to play" : "Choose an album"}</h2></>}
+      {initialAlbumId && startBar}
+      {exactUnavailable && searchTerm.trim() === initialQuery && searchMode === "albums" &&
+        <p role="status">This exact edition is unavailable. Choose another result below or try a different search.</p>}
 
       <p className="section-sub">
         {isDiscoveryMode
@@ -360,27 +389,7 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
         </Suspense>
       )}
 
-      {selectedAlbum && (
-        <div className="start-bar">
-          {selectedAlbum.imageUrl && (
-            <img
-              src={selectedAlbum.imageUrl}
-              alt=""
-              aria-hidden
-              decoding="async"
-            />
-          )}
-
-          <div className="start-bar-info">
-            <strong>{selectedAlbum.title}</strong>
-            <span>{selectedAlbum.artist}</span>
-          </div>
-
-          <button type="button" disabled={starting} onClick={() => onStartQuiz(selectedAlbum)}>
-            {starting ? "Starting..." : "Start Quiz"}
-          </button>
-        </div>
-      )}
+      {!initialAlbumId && startBar}
     </section>
   );
 }

@@ -17,12 +17,13 @@ import GuestBadge from "./GuestBadge";
 import { getAlbumDisplayTitle } from "../lib/albumDisplay";
 import { readScoreInvite } from "../lib/scoreCard";
 import { captureAnalytics } from "../lib/analytics";
+import { discoverySurface, type DiscoverySurface } from "../lib/featuredDiscovery";
 
 type SinglePlayerPageProps = {
   session: Session | null;
   profile: UserProfile | null;
   identityBadges: CompactPlayerBadge[] | null;
-  onStartQuiz: (album: SpotifyAlbum) => void;
+  onStartQuiz: (album: SpotifyAlbum, surface?: DiscoverySurface) => void;
 };
 
 function formatNumber(value: number) {
@@ -93,6 +94,10 @@ function SinglePlayerPage({
   const invite = readScoreInvite(window.location.search);
   const isScoreLink = Boolean(invite?.title);
   const linkedAlbumId = invite?.albumId;
+  const surface = discoverySurface(window.location.search, isScoreLink);
+  useEffect(() => {
+    captureAnalytics("discovery_viewed", { mode: "solo", surface, album_id: linkedAlbumId }, `solo-discovery:${surface}:${linkedAlbumId ?? ""}`);
+  }, [surface, linkedAlbumId]);
   useEffect(() => {
     if (isScoreLink) captureAnalytics("score_link_viewed", {mode: "solo", source: "score_share", album_id: linkedAlbumId}, "landing");
   }, [isScoreLink, linkedAlbumId]);
@@ -102,7 +107,7 @@ function SinglePlayerPage({
       ? `@${profile.username}`
       : "Local run";
   return (
-    <main className="single-player-page">
+    <main className={`single-player-page${invite?.album ? " single-player-linked" : ""}`}>
       <section className="single-player-hero">
         <div>
           <p className="eyebrow">StanZer Solo</p>
@@ -160,7 +165,7 @@ function SinglePlayerPage({
 
       <section className="single-player-shell">
         <div className="single-player-search-panel">
-          <AlbumSearch key={invite?.albumId ?? invite?.album ?? ""} initialQuery={invite?.album} initialAlbumId={invite?.albumId} onStartQuiz={onStartQuiz} compact />
+          <AlbumSearch key={invite?.albumId ?? invite?.album ?? ""} initialQuery={invite?.album} initialAlbumId={invite?.albumId} surface={surface} onStartQuiz={onStartQuiz} compact />
         </div>
 
         <aside className="single-player-side-panel">
