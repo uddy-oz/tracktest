@@ -1,9 +1,12 @@
+import { parseSharedAlbumId } from "./albumShareId.ts";
+
 export const STANZER_SHARE_URL = "https://stanzer.app";
 export const STANZER_SCORE_WORDMARK = "/stanzer-wordmark-dark.svg";
 
 export type ScoreCardResult = {
   mode: "Solo" | "Duel" | "Group Lobby" | "Play With Friends" | "Party Mode";
   album: string;
+  albumId?: string;
   artist: string;
   score: number;
   unit: "points" | "round points";
@@ -25,17 +28,23 @@ export function scoreShareLink(result: ScoreCardResult, origin = STANZER_SHARE_U
     from: shareText(result.playerName ?? "", 48) || "Guest Player",
     score: String(result.score),
     unit: result.unit === "round points" ? "round" : "pts",
+    source: "score_share",
   }).toString();
+  if (result.albumId && parseSharedAlbumId(result.albumId)) {
+    url.searchParams.set("album_id", result.albumId);
+  }
   return url.href;
 }
 
 export function readScoreInvite(search: string) {
   const params = new URLSearchParams(search);
   const album = shareText(params.get("album") ?? "", 240);
+  const albumId = params.get("album_id");
   const rawScore = params.get("score") ?? "";
   const score = /^\d{1,12}$/.test(rawScore) ? Number(rawScore) : null;
   return album ? {
     album,
+    ...(albumId && parseSharedAlbumId(albumId) ? { albumId } : {}),
     title: params.has("from") ? scoreInviteTitle(params.get("from") ?? "") : null,
     score: score?.toLocaleString("en-US") ?? null,
     unit: params.get("unit") === "round" ? "round points" : "points",

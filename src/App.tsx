@@ -3,11 +3,14 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Navbar from "./Components/Navbar";
+import AnalyticsPrivacy from "./Components/AnalyticsPrivacy";
+import { captureAnalytics, setAnalyticsIdentity } from "./lib/analytics";
 import HomePage from "./Components/HomePage";
 import GuestNameModal from "./Components/GuestNameModal";
 import type { AuthPageMode } from "./Components/AuthPage";
@@ -168,6 +171,13 @@ function App() {
   const [isQuizStarted, setIsQuizStarted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(Boolean(supabase));
+  useLayoutEffect(() => {
+    if (isAuthLoading) return;
+    const user = session?.user;
+    setAnalyticsIdentity(user ? isAnonymousUser(user) ? "guest" : "registered" : "signed_out",
+      user?.app_metadata.analytics_excluded === true);
+    captureAnalytics("visit", {}, "page");
+  }, [session?.user, isAuthLoading]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [identityBadges, setIdentityBadges] = useState<
@@ -982,6 +992,8 @@ function App() {
         />
         )}
       </Suspense>
+
+      {!isQuizStarted && <AnalyticsPrivacy />}
 
       {isGuestNamePromptOpen && (
         <GuestNameModal

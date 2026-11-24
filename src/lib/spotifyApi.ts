@@ -1,7 +1,10 @@
+import { parseSharedAlbumId } from "./albumShareId.ts";
+
 export type SpotifyAlbum = {
   id: string;
   title: string;
   artist: string;
+  artistId?: string;
   year: string;
   imageUrl: string;
 };
@@ -362,9 +365,23 @@ function mapAlbum(country: string, album: ITunesAlbum): SpotifyAlbum {
     id: makeAlbumId(country, album.collectionId as number),
     title: album.collectionName || "Unknown album",
     artist: album.artistName || "Unknown artist",
+    ...(Number.isSafeInteger(album.artistId) && album.artistId! > 0 ? { artistId: String(album.artistId) } : {}),
     year: album.releaseDate?.slice(0, 4) || "Unknown year",
     imageUrl: album.artworkUrl100 ? improveArtworkUrl(album.artworkUrl100) : "",
   };
+}
+
+export async function lookupSharedAlbum(id: string, signal: AbortSignal): Promise<SpotifyAlbum | null> {
+  const parsed = parseSharedAlbumId(id);
+  if (!parsed) return null;
+  const params = new URLSearchParams({ id: parsed.collectionId, country: parsed.country, entity: "album" });
+  const response = await fetch(`${getITunesBaseUrl("lookup")}?${params}`, { signal });
+  if (!response.ok) return null;
+  const data = await response.json() as { results?: ITunesAlbum[] };
+  const album = data.results?.find(item =>
+    item.wrapperType === "collection" && String(item.collectionId) === parsed.collectionId
+  );
+  return album ? mapAlbum(parsed.country, album) : null;
 }
 
 function isPreviewTrack(item: ITunesTrack | ITunesAlbum | ITunesArtist): item is ITunesTrack {

@@ -99,6 +99,7 @@ import {
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
 import ShareScore from "./ShareScore";
+import { analyticsArenaMode, captureAnalytics } from "../lib/analytics";
 
 const arenaModes = [
   {
@@ -309,6 +310,20 @@ function ArenaPage({
   const [visibleAlbumCount, setVisibleAlbumCount] = useState(ALBUMS_PER_PAGE);
   const [rooms, setRooms] = useState<ArenaRoom[]>([]);
   const [activeRoom, setActiveRoom] = useState<ArenaRoom | null>(null);
+  useEffect(() => {
+    const userId = session?.user.id;
+    const member = activeRoom?.players.find(player => player.userId === userId);
+    if (!activeRoom || !userId || !member) return;
+    const key = `${userId}:${activeRoom.id}:${activeRoom.roundNumber}`;
+    const context = {mode: analyticsArenaMode(activeRoom), album_id: activeRoom.albumId};
+    if (activeRoom.status === "active" && !member.leftAt) {
+      captureAnalytics("game_started", context, key, true);
+    } else if (activeRoom.status === "finished") {
+      const outcome = member.resultStatus === "forfeit" ? "forfeit" : member.finishedAt || activeRoom.hostUserId === userId
+        ? "completed" : null;
+      if (outcome) captureAnalytics("game_finished", {...context, outcome}, key, true);
+    }
+  }, [activeRoom, session?.user.id]);
   const [message, setMessage] = useState("");
   const [isPrivateRoom, setIsPrivateRoom] = useState(false);
   const [pendingPublicRoom, setPendingPublicRoom] = useState<ArenaRoom | null>(
@@ -2913,6 +2928,7 @@ function ArenaPage({
         return;
       }
 
+      const playbackRequestedAt = performance.now();
       const playResult = await playDuelClip({
         roundKey: questionRunKey,
         previewUrl: currentDuelQuestion.correctTrack.previewUrl,
@@ -2925,6 +2941,11 @@ function ArenaPage({
         return;
       }
 
+      if (playResult.status !== "stale" && (activeRoom.partyQuestionIndex === 0 || playResult.status !== "playing")) {
+        captureAnalytics("audio_playback", {mode: "party",
+          outcome: playResult.status === "playing" ? "playing" : playResult.status === "failed" && playResult.autoplayBlocked ? "blocked" : "failed",
+          startup_ms: performance.now() - playbackRequestedAt});
+      }
       if (playResult.status !== "playing") {
         if (playResult.status === "stale") {
           return;
@@ -3029,6 +3050,7 @@ function ArenaPage({
         return;
       }
 
+      const playbackRequestedAt = performance.now();
       const playResult = await playDuelClip({
         roundKey: questionRunKey,
         previewUrl: currentDuelQuestion.correctTrack.previewUrl,
@@ -3041,6 +3063,11 @@ function ArenaPage({
         return;
       }
 
+      if (playResult.status !== "stale" && (activeRoom.competitiveQuestionIndex === 0 || playResult.status !== "playing")) {
+        captureAnalytics("audio_playback", {mode: analyticsArenaMode(activeRoom),
+          outcome: playResult.status === "playing" ? "playing" : playResult.status === "failed" && playResult.autoplayBlocked ? "blocked" : "failed",
+          startup_ms: performance.now() - playbackRequestedAt});
+      }
       if (playResult.status !== "playing") {
         if (playResult.status === "stale") {
           return;
@@ -3572,6 +3599,7 @@ function ArenaPage({
       });
 
       if (room && !error) {
+        captureAnalytics("room_created", {mode: analyticsArenaMode(room), album_id: room.albumId}, room.id, true);
         allowRoomActivation(room);
         resetDuelLocalState();
         setSelectedAlbum(null);
@@ -3642,6 +3670,7 @@ function ArenaPage({
     });
 
     if (joinedRoom) {
+      captureAnalytics("room_joined", {mode: analyticsArenaMode(joinedRoom), album_id: joinedRoom.albumId}, `${session.user.id}:${joinedRoom.id}`, true);
       allowRoomActivation(joinedRoom);
       setPendingPublicRoom(null);
       resetDuelLocalState();
@@ -3683,6 +3712,7 @@ function ArenaPage({
     });
 
     if (room) {
+      captureAnalytics("room_joined", {mode: analyticsArenaMode(room), album_id: room.albumId}, `${session.user.id}:${room.id}`, true);
       allowRoomActivation(room);
       setPendingInvite(null);
       resetDuelLocalState();
@@ -4232,6 +4262,7 @@ function ArenaPage({
       return;
     }
 
+    if (activeRoom.status !== "waiting") captureAnalytics("rematch", {mode: analyticsArenaMode(room), album_id: room.albumId}, `${room.id}:${room.roundNumber}`, true);
     arenaAudioController.resetMatch("host-rematch-generation");
     updateActiveRoom(room);
     setSelectedAlbum(null);
@@ -5470,6 +5501,7 @@ function ArenaPage({
                 <ShareScore result={{
                   mode: isActivePartyMode ? "Party Mode" : activeRoom.unifiedFriends ? "Play With Friends" : activeRoom.mode === "duel" ? "Duel" : "Group Lobby",
                   album: activeRoom.albumName, artist: activeRoom.artistName,
+                  albumId: activeRoom.albumId,
                   score: isActivePartyMode ? currentResult.finalScore : getCompetitivePlayerScore(currentResult),
                   unit: isActivePartyMode ? "points" : "round points",
                   playerName: isGuestArenaPlayer(currentResult) ? undefined : currentResult.displayName,

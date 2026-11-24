@@ -9,6 +9,7 @@ import {
 import type { FormEvent } from "react";
 import type { SpotifyAlbum, SpotifyArtist } from "../lib/spotifyApi";
 import {
+  lookupSharedAlbum,
   prefetchSpotifyAlbumTracks,
   searchSpotifyAlbums,
   searchSpotifyArtists,
@@ -23,6 +24,7 @@ type AlbumSearchProps = {
   inPicker?: boolean;
   starting?: boolean;
   initialQuery?: string;
+  initialAlbumId?: string;
 };
 
 const ALBUMS_PER_PAGE = 12;
@@ -30,7 +32,7 @@ const MAX_VISIBLE_ALBUMS = 48;
 const SEARCH_DEBOUNCE_MS = 450;
 type SearchMode = "albums" | "artists" | "playlists";
 
-function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false, initialQuery = "" }: AlbumSearchProps) {
+function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false, initialQuery = "", initialAlbumId }: AlbumSearchProps) {
   const [searchTerm, setSearchTerm] = useState(initialQuery);
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
@@ -52,7 +54,7 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
 
   const runSearch = useCallback(async (rawQuery: string, mode = searchMode) => {
     const query = rawQuery.trim();
-    if (query.length < 2) {
+    if (query.length < 2 && !(mode === "albums" && initialAlbumId && query === initialQuery)) {
       return;
     }
 
@@ -75,7 +77,11 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
           setAlbums([]);
         }
       } else {
-        const results = await searchSpotifyAlbums(query, {
+        const exact = initialAlbumId && query === initialQuery
+          ? await lookupSharedAlbum(initialAlbumId, controller.signal).catch(() => null)
+          : null;
+        if (controller.signal.aborted) return;
+        const results = exact ? [exact] : await searchSpotifyAlbums(query, {
           signal: controller.signal,
         });
         if (sequence === searchSequenceRef.current) {
@@ -94,19 +100,19 @@ function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting 
     } finally {
       if (sequence === searchSequenceRef.current) setIsLoading(false);
     }
-  }, [searchMode]);
+  }, [searchMode, initialAlbumId, initialQuery]);
 
   useEffect(() => {
     if (isDiscoveryMode) return;
     const query = searchTerm.trim();
-    if (query.length < 2) return;
+    if (query.length < 2 && !(searchMode === "albums" && initialAlbumId && query === initialQuery)) return;
 
     const debounceId = window.setTimeout(() => {
       void runSearch(query);
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(debounceId);
-  }, [isDiscoveryMode, runSearch, searchTerm]);
+  }, [isDiscoveryMode, runSearch, searchTerm, searchMode, initialAlbumId, initialQuery]);
 
   useEffect(
     () => () => {

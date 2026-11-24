@@ -5,11 +5,11 @@ import { formatScoreCardText, readScoreInvite, scoreShareLink } from "../src/lib
 test("a score invitation opens Solo discovery, not a replay", () => {
   const link = new URL(scoreShareLink({
     mode: "Solo", album: "Loseyi Professor", artist: "Asake", score: 1250,
-    unit: "points", playerName: "Uddy",
+    unit: "points", playerName: "Uddy", albumId: "itunes:US:12345",
   }));
   assert.equal(link.origin + link.pathname, "https://stanzer.app/play");
   assert.deepEqual(readScoreInvite(link.search), {
-    album: "Loseyi Professor", title: "Uddy challenged you", score: "1,250", unit: "points",
+    album: "Loseyi Professor", albumId: "itunes:US:12345", title: "Uddy challenged you", score: "1,250", unit: "points",
   });
   assert.equal(formatScoreCardText({
     mode: "Solo", album: "Give or Take", artist: "GIVĒON", score: 1250, unit: "points",

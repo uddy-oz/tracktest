@@ -6,6 +6,7 @@ import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import SoloAlbumPicker from "./SoloAlbumPicker";
 import ChallengeShare from "./ChallengeShare";
 import ShareScore from "./ShareScore";
+import { captureAnalytics, newAnalyticsRunId } from "../lib/analytics";
 import { challengeOutcome, openChallengeQuestion, revealChallengeAnswer, type ChallengeQuestion, type ChallengeReplay } from "../lib/soloChallenges";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
@@ -183,6 +184,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   const previewCacheRef = useRef<Record<string, string>>({});
   const hasSavedQuizResultRef = useRef(false);
   const runRevisionRef = useRef(0);
+  const analyticsRun = useRef("");
   const retiredAudioTracksRef = useRef<SpotifyTrack[]>([]);
   const hasAnsweredRef = useRef(false);
   const isEndingRunRef = useRef(false);
@@ -282,6 +284,9 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
         const cleanedSpotifyTracks = albumTracks;
 
         setTracks(cleanedSpotifyTracks);
+        analyticsRun.current = newAnalyticsRunId();
+        captureAnalytics("game_started", {mode: "solo", album_id: selectedAlbum.id, artist_id: selectedAlbum.artistId,
+          run_id: analyticsRun.current}, analyticsRun.current);
         setQuestions(buildQuizQuestions(cleanedSpotifyTracks));
         setQuizPhase("countdown");
       } catch (error) {
@@ -295,7 +300,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
 
     loadTracks();
     return () => controller.abort();
-  }, [attemptId, selectedAlbum.id, selectedAlbum.artist, selectedAlbum.title]);
+  }, [attemptId, selectedAlbum.id, selectedAlbum.artist, selectedAlbum.artistId, selectedAlbum.title]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -759,6 +764,10 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     if (audioStartRef.current !== attempt || attempt.signal.aborted) return;
     audioStartRef.current = null;
     const observedAt = performance.now();
+    if (!attemptId && analyticsRun.current && outcome !== "aborted" && (currentQuestionIndex === 0 || outcome !== "playing")) {
+      captureAnalytics("audio_playback", {mode: "solo", outcome, startup_ms: observedAt - requestedAt,
+        after_countdown_ms: observedAt - (countdownFinishedAtRef.current ?? requestedAt)});
+    }
     logSoloAudio("play_result", {
       outcome, manual: isManualStart,
       startupMs: Math.round(observedAt - requestedAt),
@@ -981,6 +990,9 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     }
 
     stopClip(false);
+    if (!replay && analyticsRun.current) captureAnalytics("game_finished", {mode: "solo", album_id: selectedAlbum.id,
+      artist_id: selectedAlbum.artistId, run_id: analyticsRun.current,
+      outcome: audioSkipCount > 0 || questionResults.length !== questionCount ? "audio_skipped" : "completed"}, analyticsRun.current);
     if (audioSkipCount > 0 || questionResults.length !== questionCount) {
       setCloudSaveMessage("Practice only: audio was skipped, so this run does not update scores, badges, or Daily Goals.");
       setIsQuizComplete(true);
@@ -1104,6 +1116,10 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
   }
 
   function restartQuiz() {
+    analyticsRun.current = newAnalyticsRunId();
+    captureAnalytics("rematch", {mode: "solo", album_id: selectedAlbum.id}, analyticsRun.current);
+    captureAnalytics("game_started", {mode: "solo", album_id: selectedAlbum.id, artist_id: selectedAlbum.artistId,
+      run_id: analyticsRun.current}, analyticsRun.current);
     questionSnapshotRef.current = [];
     setShareableQuestions([]);
     runRevisionRef.current += 1;
@@ -1151,6 +1167,8 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
     }
 
     isEndingRunRef.current = true;
+    if (!replay && analyticsRun.current) captureAnalytics("game_finished", {mode: "solo", outcome: "abandoned",
+      album_id: selectedAlbum.id, run_id: analyticsRun.current}, analyticsRun.current);
     hasAnsweredRef.current = true;
     stopClip(false);
     onRestartApp();
@@ -1317,6 +1335,7 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
           {!replay && audioSkipCount === 0 && playedQuestions === questionCount && playedQuestions > 0 && (
             <ShareScore result={{
               mode: "Solo", album: getAlbumDisplayTitle(selectedAlbum.title),
+              albumId: selectedAlbum.id,
               artist: selectedAlbum.artist || "Unknown artist", score: totalPoints, unit: "points",
               detail: `${correctAnswers}/${playedQuestions} correct`,
               playerName: scoreShareName,

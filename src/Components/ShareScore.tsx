@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { Copy, Download, Share2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
+import { captureAnalytics } from "../lib/analytics";
 import { createScoreCard, formatScoreCardText, scoreInviteTitle, scoreShareLink, type ScoreCardResult } from "../lib/scoreCard";
 
 const fileName = "stanzer-score.png";
+const scoreModes = {Solo: "solo", Duel: "duel", "Group Lobby": "group", "Play With Friends": "friends", "Party Mode": "party"} as const;
 
 function ScoreDialog({result, onClose}: {result: ScoreCardResult; onClose: () => void}) {
   const dialogRef = useAccessibleDialog<HTMLElement>({open: true, onClose});
@@ -36,6 +38,7 @@ function ScoreDialog({result, onClose}: {result: ScoreCardResult; onClose: () =>
       const payload = {title, text, url: link};
       const filePayload = card ? {...payload, files: [card.file]} : null;
       await navigator.share(filePayload && navigator.canShare?.(filePayload) ? filePayload : payload);
+      captureAnalytics("score_share_action", {method: "native", mode: scoreModes[result.mode], album_id: result.albumId});
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         setMessage("Sharing was unavailable. Download the card or copy the link instead.");
@@ -46,6 +49,7 @@ function ScoreDialog({result, onClose}: {result: ScoreCardResult; onClose: () =>
   async function copy() {
     try {
       await navigator.clipboard.writeText(link);
+      captureAnalytics("score_share_action", {method: "copy", mode: scoreModes[result.mode], album_id: result.albumId});
       setMessage("Album link copied.");
     } catch {
       setMessage("Copy the link from the field below.");
@@ -66,7 +70,8 @@ function ScoreDialog({result, onClose}: {result: ScoreCardResult; onClose: () =>
         {card && <img className="score-share-image" src={card.url} alt={formatScoreCardText(result)} />}
         {!card && !failed && <p role="status">Preparing your score card...</p>}
         <div className="score-share-actions">
-          {card && <a href={card.url} download={fileName} className="secondary-button"><Download size={18} aria-hidden /> Download PNG</a>}
+          {card && <a href={card.url} download={fileName} className="secondary-button"
+            onClick={() => captureAnalytics("score_share_action", {method: "download", mode: scoreModes[result.mode], album_id: result.albumId})}><Download size={18} aria-hidden /> Download PNG</a>}
           {typeof navigator.share === "function" && (
             <button type="button" onClick={() => void share()}><Share2 size={18} aria-hidden /> Share</button>
           )}
@@ -84,7 +89,10 @@ export default function ShareScore({result}: {result: ScoreCardResult}) {
   const [selected, setSelected] = useState<ScoreCardResult | null>(null);
   return (
     <>
-      <button type="button" className="secondary-button" onClick={() => setSelected(result)}>
+      <button type="button" className="secondary-button" onClick={() => {
+        captureAnalytics("score_share_opened", {mode: scoreModes[result.mode], album_id: result.albumId});
+        setSelected(result);
+      }}>
         <Share2 size={18} aria-hidden /> Share My Score
       </button>
       {selected && <ScoreDialog result={selected} onClose={() => setSelected(null)} />}

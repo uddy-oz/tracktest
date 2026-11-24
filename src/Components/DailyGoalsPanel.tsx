@@ -4,6 +4,7 @@ import { useUtcGoalDay } from "../hooks/useUtcGoalDay";
 import { getDailyGoalPeriod, getDailyGoals, type DailyGoalResult } from "../lib/dailyGoals";
 import { collectHistoryPages, historyCursorFilter } from "../lib/historyPagination";
 import { supabase } from "../lib/supabaseClient";
+import { captureAnalytics } from "../lib/analytics";
 
 type Props = {
   ownerId?: string;
@@ -54,7 +55,20 @@ export default function DailyGoalsPanel({ ownerId, guest, compact, progressionRe
   }, [accountId, requestKey, start, end]);
 
   const current = requestKey && snapshot?.key === requestKey ? snapshot : undefined;
-  const goals = getDailyGoals(current?.rows || [], clock.now);
+  const completedGoals = getDailyGoals(current?.rows || [], clock.now);
+  const completedKey = completedGoals.filter(goal => goal.complete).map(goal => goal.id).join(",");
+  useEffect(() => {
+    if (!accountId || !completedKey) return;
+    const eligible = ["warm-up", "sharp-ears", "bring-the-competition"] as const;
+    const completedIds = completedKey.split(",");
+    for (const goal of eligible) {
+      if (completedIds.includes(goal)) captureAnalytics("daily_goal", {goal}, `${accountId}:${start}:${goal}`, true);
+    }
+    if (eligible.length === completedIds.length) {
+      captureAnalytics("daily_goal", {goal: "sweep"}, `${accountId}:${start}:sweep`, true);
+    }
+  }, [accountId, completedKey, start]);
+  const goals = completedGoals;
   const ready = Boolean(current?.rows);
   const completed = goals.filter((goal) => goal.complete).length;
   const swept = ready && completed === goals.length;

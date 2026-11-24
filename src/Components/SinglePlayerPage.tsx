@@ -16,6 +16,7 @@ import { isAnonymousUser } from "../lib/authIdentity";
 import GuestBadge from "./GuestBadge";
 import { getAlbumDisplayTitle } from "../lib/albumDisplay";
 import { readScoreInvite } from "../lib/scoreCard";
+import { captureAnalytics } from "../lib/analytics";
 
 type SinglePlayerPageProps = {
   session: Session | null;
@@ -90,6 +91,11 @@ function SinglePlayerPage({
     : "Guest Player";
   const isGuestSession = isAnonymousUser(session?.user);
   const invite = readScoreInvite(window.location.search);
+  const isScoreLink = Boolean(invite?.title);
+  const linkedAlbumId = invite?.albumId;
+  useEffect(() => {
+    if (isScoreLink) captureAnalytics("score_link_viewed", {mode: "solo", source: "score_share", album_id: linkedAlbumId}, "landing");
+  }, [isScoreLink, linkedAlbumId]);
   const username = isGuestSession
     ? "Temporary player"
     : profile?.username
@@ -154,7 +160,7 @@ function SinglePlayerPage({
 
       <section className="single-player-shell">
         <div className="single-player-search-panel">
-          <AlbumSearch key={invite?.album ?? ""} initialQuery={invite?.album} onStartQuiz={onStartQuiz} compact />
+          <AlbumSearch key={invite?.albumId ?? invite?.album ?? ""} initialQuery={invite?.album} initialAlbumId={invite?.albumId} onStartQuiz={onStartQuiz} compact />
         </div>
 
         <aside className="single-player-side-panel">
