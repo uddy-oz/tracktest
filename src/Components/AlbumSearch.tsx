@@ -22,6 +22,7 @@ type AlbumSearchProps = {
   compact?: boolean;
   inPicker?: boolean;
   starting?: boolean;
+  initialQuery?: string;
 };
 
 const ALBUMS_PER_PAGE = 12;
@@ -29,8 +30,8 @@ const MAX_VISIBLE_ALBUMS = 48;
 const SEARCH_DEBOUNCE_MS = 450;
 type SearchMode = "albums" | "artists" | "playlists";
 
-function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false }: AlbumSearchProps) {
-  const [searchTerm, setSearchTerm] = useState("");
+function AlbumSearch({ onStartQuiz, compact = false, inPicker = false, starting = false, initialQuery = "" }: AlbumSearchProps) {
+  const [searchTerm, setSearchTerm] = useState(initialQuery);
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedAlbum, setSelectedAlbum] = useState<SpotifyAlbum | null>(null);
   const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);

@@ -897,6 +897,7 @@ function App() {
           onHome={showHome}
           onStatsUpdated={refreshIdentityBadges}
           user={isGuestSession ? null : session?.user || null}
+          scoreShareName={session && !isGuestSession ? profile?.username ?? undefined : undefined}
           canShare={Boolean(session?.user && (!isGuestSession || getGuestName(session.user)))}
           onChallengeGuest={isSoloChallengeEnabled && supabase ? () => {
             preserveSoloOnGuestRef.current = true;

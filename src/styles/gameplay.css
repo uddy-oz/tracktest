@@ -776,6 +776,76 @@
   white-space: normal;
 }
 
+.multiplayer-access-dialog.score-share-dialog {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 720px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.score-share-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.score-share-header > h2 {
+  margin: 0;
+}
+
+.score-share-header > button {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  padding: 0;
+}
+
+.score-share-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+}
+
+.score-share-invite-title,
+.single-player-hero > div {
+  overflow-wrap: anywhere;
+}
+
+.score-share-invite-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.score-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.score-share-actions > :is(button, a) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.score-share-link {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--game-border);
+  border-radius: 8px;
+  background: var(--game-surface);
+  color: var(--game-text);
+}
+
 .multiplayer-access-dialog.solo-album-picker {
   width: min(100%, 760px);
   padding: clamp(14px, 4vw, 28px);

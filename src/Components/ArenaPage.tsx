@@ -98,6 +98,7 @@ import {
 } from "../lib/arenaLobbyStart";
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
+import ShareScore from "./ShareScore";
 
 const arenaModes = [
   {
@@ -5464,6 +5465,15 @@ function ArenaPage({
                     </strong>
                   </div>
                 </div>
+              )}
+              {currentResult && currentResult.resultStatus !== "forfeit" && (
+                <ShareScore result={{
+                  mode: isActivePartyMode ? "Party Mode" : activeRoom.unifiedFriends ? "Play With Friends" : activeRoom.mode === "duel" ? "Duel" : "Group Lobby",
+                  album: activeRoom.albumName, artist: activeRoom.artistName,
+                  score: isActivePartyMode ? currentResult.finalScore : getCompetitivePlayerScore(currentResult),
+                  unit: isActivePartyMode ? "points" : "round points",
+                  playerName: isGuestArenaPlayer(currentResult) ? undefined : currentResult.displayName,
+                }} />
               )}
               {earnedMatchBadges.length > 0 && (
                 <div className="match-badges-earned">

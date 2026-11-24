@@ -5,6 +5,7 @@ import type { SpotifyAlbum, SpotifyTrack } from "../lib/spotifyApi";
 import BadgeEarnedPopup from "./BadgeEarnedPopup";
 import SoloAlbumPicker from "./SoloAlbumPicker";
 import ChallengeShare from "./ChallengeShare";
+import ShareScore from "./ShareScore";
 import { challengeOutcome, openChallengeQuestion, revealChallengeAnswer, type ChallengeQuestion, type ChallengeReplay } from "../lib/soloChallenges";
 import { getSpotifyAlbumTracks } from "../lib/spotifyApi";
 import { searchITunesPreview } from "../lib/itunesApi";
@@ -32,6 +33,7 @@ type QuizProps = {
   onHome: () => void;
   onStatsUpdated?: () => void;
   user: User | null;
+  scoreShareName?: string;
   canShare?: boolean;
   onChallengeGuest?: () => void;
   replay?: ChallengeReplay;
@@ -121,7 +123,7 @@ function getNewlyUnlockedBadges(
   );
 }
 
-function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user, canShare = false, onChallengeGuest, replay }: QuizProps) {
+function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdated, user, scoreShareName, canShare = false, onChallengeGuest, replay }: QuizProps) {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -1312,6 +1314,14 @@ function Quiz({ selectedAlbum, onRestartApp, onStartAlbum, onHome, onStatsUpdate
           <button type="button" className="secondary-button" onClick={onHome}>
             Back to Home
           </button>
+          {!replay && audioSkipCount === 0 && playedQuestions === questionCount && playedQuestions > 0 && (
+            <ShareScore result={{
+              mode: "Solo", album: getAlbumDisplayTitle(selectedAlbum.title),
+              artist: selectedAlbum.artist || "Unknown artist", score: totalPoints, unit: "points",
+              detail: `${correctAnswers}/${playedQuestions} correct`,
+              playerName: scoreShareName,
+            }} />
+          )}
         </div>
         {isAlbumPickerOpen && (
           <SoloAlbumPicker

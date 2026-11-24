@@ -15,6 +15,7 @@ import { getTrackTestStats, type TrackTestStats } from "../lib/stats";
 import { isAnonymousUser } from "../lib/authIdentity";
 import GuestBadge from "./GuestBadge";
 import { getAlbumDisplayTitle } from "../lib/albumDisplay";
+import { readScoreInvite } from "../lib/scoreCard";
 
 type SinglePlayerPageProps = {
   session: Session | null;
@@ -88,6 +89,7 @@ function SinglePlayerPage({
     ? getProfileDisplayLabel(profile, session.user.email)
     : "Guest Player";
   const isGuestSession = isAnonymousUser(session?.user);
+  const invite = readScoreInvite(window.location.search);
   const username = isGuestSession
     ? "Temporary player"
     : profile?.username
@@ -98,11 +100,13 @@ function SinglePlayerPage({
       <section className="single-player-hero">
         <div>
           <p className="eyebrow">StanZer Solo</p>
-          <h1>Find your next album</h1>
-          <p>
+          <h1>{invite?.title ?? "Find your next album"}</h1>
+          {invite?.title ? (
+            <p><strong>{invite.album}</strong>{invite.score !== null && ` · Shared score: ${invite.score} ${invite.unit} (unverified)`}. Start a fresh Solo quiz.</p>
+          ) : <p>
             Search albums or explore an artist, then start your next
             five-second challenge.
-          </p>
+          </p>}
         </div>
 
         <aside className="single-player-card">
@@ -150,7 +154,7 @@ function SinglePlayerPage({
 
       <section className="single-player-shell">
         <div className="single-player-search-panel">
-          <AlbumSearch onStartQuiz={onStartQuiz} compact />
+          <AlbumSearch key={invite?.album ?? ""} initialQuery={invite?.album} onStartQuiz={onStartQuiz} compact />
         </div>
 
         <aside className="single-player-side-panel">
