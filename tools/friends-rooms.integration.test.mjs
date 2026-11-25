@@ -263,6 +263,31 @@ test("a full private Party room refuses an invitation", {skip:!configured}, asyn
   assert.match((await join(state,overflow)).error?.message ?? "",/full/i);
 });
 
+test("public Party rooms have no private code and a guest can join using the public ID", {skip:!configured}, async()=>{
+  const host=await player("Public Party host");
+  const guest=await player("Public Party guest",true);
+  const createParty=roomIsPrivate=>value(host.client.rpc("create_arena_room",{
+    room_mode:"party_mode",selected_album_id:albumId,selected_album_name:"Party fixture",
+    selected_artist_name:"Test artist",selected_artwork_url:null,requested_max_players:3,
+    room_is_private:roomIsPrivate,player_display_name:host.label,player_username:null,
+  }));
+  const publicLookup=id=>guest.client.from("arena_rooms").select("id,is_private,mode,invite_code")
+    .eq("id",id).eq("is_private",false).eq("mode","party_mode").maybeSingle();
+  const id=await createParty(false);
+  assert.deepEqual(await value(publicLookup(id)),{id,is_private:false,mode:"party_mode",invite_code:null});
+  assert.equal(await value(join(await room(id),guest)),id);
+  await value(host.client.rpc("end_arena_room",{target_room_id:id}));
+  const privateId=await createParty(true);
+  const privateRoom=await room(privateId);
+  assert.ok(privateRoom.invite_code);
+  assert.equal(await value(publicLookup(privateId)),null);
+  const directPublicAttempt=await guest.client.rpc("join_public_arena_room",{
+    target_room_id:privateId,player_display_name:guest.label,player_username:null,
+  });
+  assert.match(directPublicAttempt.error?.message ?? "",/private|invite/i);
+  assert.equal(await value(join(privateRoom,guest)),privateId);
+});
+
 after(async()=>{
   for(const id of userIds.reverse()) await value(admin.auth.admin.deleteUser(id));
 });

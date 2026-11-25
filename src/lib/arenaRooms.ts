@@ -1,6 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 import { calculateServerClockOffset } from "./arenaClock";
+import { getArenaInvitationCode, publicPartyInviteId } from "./arenaInvite";
 import type { UserProfile } from "./profiles";
 import type { SpotifyAlbum } from "./spotifyApi";
 import {
@@ -715,6 +716,27 @@ export async function fetchArenaInvite(inviteCode: string) {
     return { invite: null, error: "Supabase is not configured yet." };
   }
 
+  const publicRoomId = publicPartyInviteId(inviteCode);
+  if (publicRoomId) {
+    const { room } = await fetchArenaRoom(publicRoomId, "public-party");
+    if (!room || room.isPrivate || room.mode !== "party_mode") {
+      return { invite: null, error: "This public Party room is unavailable." };
+    }
+    const host = room.players.find(player => player.userId === room.hostUserId);
+    const hostIsGuest = Boolean(getStoredArenaGuestId(host?.username, host?.displayName));
+    const invite: ArenaInvite = {
+      roomId: room.id, mode: room.mode, status: room.status, albumId: room.albumId,
+      albumName: room.albumName, artistName: room.artistName, artworkUrl: room.artworkUrl,
+      maxPlayers: room.maxPlayers, isPrivate: false, inviteCode: publicRoomId,
+      hostUserId: room.hostUserId, hostDisplayName: host?.displayName || "Party Host",
+      hostUsername: hostIsGuest ? null : host?.username || null,
+      hostIsGuest,
+      playerCount: room.players.filter(player => !player.leftAt && !["left", "cancelled", "forfeit"].includes(player.resultStatus)).length,
+      expiresAt: room.expiresAt,
+    };
+    return { invite, error: null };
+  }
+
   const { data, error } = await supabase.rpc("get_arena_invite", {
     target_invite_code: normalizeArenaInviteCode(inviteCode),
   });
@@ -797,7 +819,7 @@ export async function joinArenaRoomByInvite({
 
   if (currentRoom.room) {
     if (
-      currentRoom.room.inviteCode?.toLowerCase() ===
+      getArenaInvitationCode(currentRoom.room)?.toLowerCase() ===
         normalizeArenaInviteCode(inviteCode).toLowerCase()
     ) {
       return { room: currentRoom.room, error: null };
@@ -810,6 +832,9 @@ export async function joinArenaRoomByInvite({
   }
 
   const inviteResult = await fetchArenaInvite(inviteCode);
+  if (publicPartyInviteId(inviteCode) && !inviteResult.invite) {
+    return { room: null, error: inviteResult.error || "This public Party room is unavailable." };
+  }
   const { displayName, username } = getPlayerDisplay(
     profile,
     user,
@@ -876,16 +901,17 @@ export async function joinArenaRoomByInvite({
     : fetchArenaRoom(joinedRoom.room.id);
 }
 
-export async function fetchArenaRoom(roomId: string) {
+export async function fetchArenaRoom(roomId: string, scope?: "public-party") {
   if (!supabase) {
     return { room: null, error: "Supabase is not configured yet." };
   }
 
-  const { data: roomData, error: roomError } = await supabase
+  const query = supabase
     .from("arena_rooms")
     .select("*")
-    .eq("id", roomId)
-    .single();
+    .eq("id", roomId);
+  if (scope === "public-party") query.eq("is_private", false).eq("mode", "party_mode");
+  const { data: roomData, error: roomError } = await query.single();
 
   if (roomError || !roomData) {
     return { room: null, error: roomError?.message || "Room not found." };

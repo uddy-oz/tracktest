@@ -64,7 +64,7 @@ export default function PartyStage(stage: Props) {
               <p>{stage.artist}</p>
               {stage.invite && <QRCodeSVG className="party-stage-qr" value={stage.invite} size={512} marginSize={4}
                 bgColor="#fff" fgColor="#000" title="Party Mode invitation" />}
-              {stage.code && <p className="party-stage-code">Room code <strong>{stage.code}</strong></p>}
+              {stage.code && <p className="party-stage-code">Room code <strong data-long-code={stage.code.length > 8}>{stage.code}</strong></p>}
             </> : finished ? <Trophy className="party-stage-trophy" aria-hidden /> : <>
               {reveal ? <p>Round reveal · {stage.seconds}s</p> : <>
                 {(stage.phase === "countdown" || stage.phase === "answering") &&

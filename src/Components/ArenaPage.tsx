@@ -98,6 +98,7 @@ import {
 } from "../lib/arenaLobbyStart";
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 import RoomInviteQr from "./RoomInviteQr";
+import { arenaInvitationUrl, getArenaInvitationCode } from "../lib/arenaInvite";
 import PartyStage from "./PartyStage";
 import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
 import ShareScore from "./ShareScore";
@@ -3734,11 +3735,12 @@ function ArenaPage({
   }
 
   async function handleCopyInvite(room: ArenaRoom) {
-    if (!room.inviteCode) {
+    const code = getArenaInvitationCode(room);
+    if (!code) {
       return;
     }
 
-    const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
+    const inviteUrl = arenaInvitationUrl(code, window.location.origin);
 
     try {
       await navigator.clipboard.writeText(inviteUrl);
@@ -3750,11 +3752,12 @@ function ArenaPage({
   }
 
   async function handleShareInvite(room: ArenaRoom) {
-    if (!room.inviteCode || !navigator.share) {
+    const code = getArenaInvitationCode(room);
+    if (!code || !navigator.share) {
       return;
     }
 
-    const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
+    const inviteUrl = arenaInvitationUrl(code, window.location.origin);
     const hostHandle = isAnonymousUser(session?.user)
       ? getHostName(room)
       : profile?.username
@@ -4712,11 +4715,12 @@ function ArenaPage({
   }
 
   function renderRoomInvitePanel(room: ArenaRoom) {
-    if (!room.inviteCode || room.status !== "waiting") {
+    const code = getArenaInvitationCode(room);
+    if (!code || room.status !== "waiting") {
       return null;
     }
 
-    const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
+    const inviteUrl = arenaInvitationUrl(code, window.location.origin);
     const party = room.mode === "party_mode";
 
     return (
@@ -4724,7 +4728,7 @@ function ArenaPage({
         <div>
           {party && <h3 className="party-invite-heading">Scan to Join</h3>}
           <p className="eyebrow">{party ? "Room code" : room.isPrivate ? "Private Invite" : "Public Room Code"}</p>
-          {party ? <strong className="party-invite-code">{room.inviteCode}</strong> : <h3>{room.inviteCode}</h3>}
+          {party ? <strong className="party-invite-code" data-long-code={code.length > 8}>{code}</strong> : <h3>{code}</h3>}
           {!room.unifiedFriends && !party && <p>{inviteUrl}</p>}
         </div>
         {party && <RoomInviteQr url={inviteUrl} mode="party" inline />}
@@ -5288,9 +5292,10 @@ function ArenaPage({
       !["left", "cancelled"].includes(player.resultStatus))) : [];
     const players = phase === "waiting" ? getArenaLobbyStartEligibility(room).members :
       phase === "finished" ? finalPlayers : phase === "reveal" ? getLiveRankedPlayers(room) : [];
+    const code = phase === "waiting" ? getArenaInvitationCode(room) : null;
     return <PartyStage key={room.id} phase={phase} album={room.albumName} artist={room.artistName}
-      code={phase === "waiting" ? room.inviteCode || undefined : undefined}
-      invite={phase === "waiting" && room.inviteCode ? `${window.location.origin}/multiplayer/invite/${room.inviteCode}` : undefined}
+      code={code || undefined}
+      invite={code ? arenaInvitationUrl(code, window.location.origin) : undefined}
       question={gameQuestionIndex + 1} total={arenaQuestionTotal}
       seconds={phase === "countdown" ? duelStartCountdown : phase === "reveal" ? duelRevealCountdown : duelTimeRemaining}
       answered={getPartyAnsweredCount(room)} competitors={getPartyCompetitors(room).length}
@@ -5961,7 +5966,7 @@ function ArenaPage({
                 onClick={() => void handleBeginRematchAlbumSelection()}>Change Album</button>}
             </header>
             {isHost && renderRematchAlbumPicker()}
-            <div className={`party-waiting-layout${activeRoom.inviteCode ? "" : " party-waiting-no-invite"}`}>
+            <div className={`party-waiting-layout${getArenaInvitationCode(activeRoom) ? "" : " party-waiting-no-invite"}`}>
               {renderRoomInvitePanel(activeRoom)}
               <section className="party-lobby-roster" aria-label="Lobby players">
                 <h3>Players <span>{lobbyMembers.length}/{activeRoom.maxPlayers}</span></h3>

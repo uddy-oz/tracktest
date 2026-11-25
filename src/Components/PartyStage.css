@@ -42,6 +42,7 @@
 .party-stage .party-stage-kicker { color: #78eff5; font-weight: 750; }
 .party-stage-qr { display: block; width: min(100%, 340px); height: auto; margin: 16px auto; }
 .party-stage-code strong { font-size: 38px; padding-left: 6px; color: #fff; }
+.party-stage-code strong[data-long-code="true"] { display: block; padding-left: 0; font-size: 21px; }
 .party-stage-roster h2 { margin: 0 0 10px; font-size: 26px; color: #f5f7ff; }
 .party-stage-roster ol { margin: 0; padding: 0; list-style: none; }
 .party-stage-roster li { display: flex; align-items: baseline; gap: 8px; padding: 9px 0; border-bottom: 1px solid #394463; font-size: 20px; overflow-wrap: anywhere; }

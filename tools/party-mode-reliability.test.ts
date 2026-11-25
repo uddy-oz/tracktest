@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { arenaInvitationUrl, getArenaInvitationCode, publicPartyInviteId } from "../src/lib/arenaInvite.ts";
 import {
   canPreparePartyHostAudio,
   canStartPartyHostPlayback,
@@ -15,6 +16,18 @@ const migration = readFileSync(
   ),
   "utf8"
 );
+
+test("public Party links use a room ID only when a server invitation code is absent", () => {
+  const id = "12345678-1234-4123-8123-123456789abc";
+  const party = { id, mode: "party_mode", isPrivate: false, inviteCode: null };
+  assert.equal(getArenaInvitationCode(party), id);
+  assert.equal(getArenaInvitationCode({ ...party, isPrivate: true }), null);
+  assert.equal(getArenaInvitationCode({ ...party, mode: "duel" }), null);
+  assert.equal(getArenaInvitationCode({ ...party, isPrivate: true, inviteCode: "ABCD1234" }), "ABCD1234");
+  assert.equal(publicPartyInviteId(id.toUpperCase()), id);
+  assert.equal(publicPartyInviteId("ABCD1234"), null);
+  assert.equal(arenaInvitationUrl(id, "https://stanzer.app"), `https://stanzer.app/multiplayer/invite/${id}`);
+});
 
 test("Stage Mode displays only the host's existing public Party state", () => {
   const arena = readFileSync(new URL("../src/Components/ArenaPage.tsx", import.meta.url), "utf8");
