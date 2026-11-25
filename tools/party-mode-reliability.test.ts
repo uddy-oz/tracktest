@@ -16,6 +16,18 @@ const migration = readFileSync(
   "utf8"
 );
 
+test("Stage Mode displays only the host's existing public Party state", () => {
+  const arena = readFileSync(new URL("../src/Components/ArenaPage.tsx", import.meta.url), "utf8");
+  const stage = readFileSync(new URL("../src/Components/PartyStage.tsx", import.meta.url), "utf8");
+  const stageWiring = arena.split("function renderPartyStage")[1]?.split("function renderDuelLobby")[0];
+  assert.ok(stageWiring);
+  assert.match(arena, /activeRoom\.hostUserId === session\?\.user\.id && activeRoom\.status !== "cancelled"/);
+  assert.match(stageWiring, /answer=\{phase === "reveal" \? room\.partyRevealedAnswer/);
+  assert.match(stageWiring, /onStart=\{\(\) => void handleStartDuel\(\)\}/);
+  assert.doesNotMatch(stageWiring, /quizQuestions|correctTrack|previewUrl/);
+  assert.doesNotMatch(stage, /<(?:audio|video)\b|setInterval\(|new Audio\(|\.rpc\(/);
+});
+
 function identity(
   matchGeneration: number,
   questionIndex: number

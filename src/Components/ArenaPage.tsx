@@ -98,6 +98,7 @@ import {
 } from "../lib/arenaLobbyStart";
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
 import RoomInviteQr from "./RoomInviteQr";
+import PartyStage from "./PartyStage";
 import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
 import ShareScore from "./ShareScore";
 import { analyticsArenaMode, captureAnalytics } from "../lib/analytics";
@@ -349,6 +350,7 @@ function ArenaPage({
     () => new Set()
   );
   const [isPresenceSynced, setIsPresenceSynced] = useState(false);
+  const [stageRoomId, setStageRoomId] = useState<string | null>(null);
   const startRequestInFlightRef = useRef(false);
   const canShowRoomDialogs = Boolean(session?.user) && !isGuestNamePromptOpen;
   const isArenaDialogOpen = canShowRoomDialogs && Boolean(
@@ -365,8 +367,11 @@ function ArenaPage({
   const isConfirmationDialogOpen = canShowRoomDialogs && Boolean(
     albumPlaybackError || (isConfirmingEndLobby && activeRoom)
   );
+  const canOpenStage = canShowRoomDialogs && activeRoom?.mode === "party_mode" &&
+    activeRoom.hostUserId === session?.user.id && activeRoom.status !== "cancelled";
+  const isStageOpen = canOpenStage && stageRoomId === activeRoom?.id && !isConfirmationDialogOpen;
   const arenaDialogRef = useAccessibleDialog<HTMLDivElement>({
-    open: isArenaDialogOpen && !isConfirmationDialogOpen,
+    open: isArenaDialogOpen && !isConfirmationDialogOpen && !isStageOpen,
     closeOnEscape: canDismissArenaDialog,
     focusDialog: true,
     onClose: () => {
@@ -5264,6 +5269,40 @@ function ArenaPage({
     );
   }
 
+  function renderPartyStage(room: ArenaRoom) {
+    const phase = room.status === "waiting" ? "waiting" : room.status === "finished" ? "finished" :
+      room.status === "active" && room.partyQuestionPhase === "reveal" ? "reveal" :
+        room.status === "active" && room.partyQuestionPhase === "answering" ? "answering" :
+        room.partyQuestionPhase === "countdown" ? "countdown" : "preparing";
+    const finalPlayers = phase === "finished" ? sortDuelResults(room.players.filter(player =>
+      player.userId !== room.hostUserId &&
+      (!player.leftAt || ["completed", "forfeit", "win_by_forfeit"].includes(player.resultStatus)) &&
+      !["left", "cancelled"].includes(player.resultStatus))) : [];
+    const players = phase === "waiting" ? getArenaLobbyStartEligibility(room).members :
+      phase === "finished" ? finalPlayers : phase === "reveal" ? getLiveRankedPlayers(room) : [];
+    return <PartyStage key={room.id} phase={phase} album={room.albumName} artist={room.artistName}
+      code={phase === "waiting" ? room.inviteCode || undefined : undefined}
+      invite={phase === "waiting" && room.inviteCode ? `${window.location.origin}/multiplayer/invite/${room.inviteCode}` : undefined}
+      question={gameQuestionIndex + 1} total={arenaQuestionTotal}
+      seconds={phase === "countdown" ? duelStartCountdown : phase === "reveal" ? duelRevealCountdown : duelTimeRemaining}
+      answered={getPartyAnsweredCount(room)} competitors={getPartyCompetitors(room).length}
+      playing={phase === "answering" && room.partyAudioStatus === "playing"}
+      answer={phase === "reveal" ? room.partyRevealedAnswer || undefined : undefined}
+      winner={phase === "finished" ? getWinnerLabel(finalPlayers) : undefined}
+      players={players.map(player => ({
+        id: player.id, name: player.displayName || "Arena Player",
+        detail: phase === "waiting" ? player.userId === room.hostUserId ? "Host" :
+          getLobbyPlayerState(player) === "RECONNECTING" ? "Reconnecting" :
+            player.lobbyReady ? "Ready" : "Connected" :
+          `${(phase === "finished" ? player.finalScore : player.currentScore).toLocaleString()} pts`,
+      }))}
+      muted={isDuelMuted} onMute={handleToggleDuelMute}
+      onStart={() => void handleStartDuel()}
+      startDisabled={!getArenaHostStartEligibility(room).canStart || isPreparingDuel || isChoosingRematchAlbum}
+      audioNeedsAttention={duelPhase === "audioBlocked"}
+      onClose={() => setStageRoomId(null)} />;
+  }
+
   function renderDuelLobby() {
     if (
       !activeRoom &&
@@ -6594,12 +6633,19 @@ function ArenaPage({
             {visibleMessage && (
               <p className="arena-message" role="status">{visibleMessage}</p>
             )}
+            {canOpenStage && activeRoom && (
+              <button type="button" className="secondary-button" onClick={() => {
+                captureAnalytics("party_stage_opened", { mode: "party" });
+                setStageRoomId(activeRoom.id);
+              }}>Open Stage Mode</button>
+            )}
             {renderDuelLobby()}
           </div>
         </div>
       )}
 
       {canShowRoomDialogs && shouldShowAlbumDock && renderSelectedAlbumStartBar()}
+      {isStageOpen && activeRoom && renderPartyStage(activeRoom)}
 
       {!session && isAccessPromptOpen && !isGuestNamePromptOpen && (
         <MultiplayerAccessDialog
