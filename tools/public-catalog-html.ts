@@ -1,12 +1,11 @@
 import { catalogAlbums, catalogArtists, catalogOrigin, catalogPaths, catalogSlug } from "../src/lib/publicCatalog.ts";
-import { approvedDailyCoverIds } from "../src/lib/dailyPickCatalog.ts";
 import { discoveryPlayPath } from "../src/lib/featuredDiscovery.ts";
 
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c));
 type Artist = typeof catalogArtists[number];
 type Album = Artist["albums"][number];
 const play = (album: Album, source: "artist_page" | "album_page") => escape(discoveryPlayPath(album.title, source, album.id));
-const covers = (album: Album) => `<span class="catalog-art" data-motif="${Number(album.id.split(":").at(-1)) % 4}" aria-hidden="true"${approvedDailyCoverIds.has(album.id) ? ` data-cover="${escape(album.id)}"` : ""}><svg viewBox="0 0 32 32" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="16" cy="16" r="13"/><circle cx="16" cy="16" r="8"/><circle cx="16" cy="16" r="2"/></svg></span>`;
+const covers = (album: Album) => `<span class="catalog-art" data-motif="${Number(album.id.split(":").at(-1)) % 4}" aria-hidden="true" data-cover="${escape(album.id)}"><svg viewBox="0 0 32 32" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="16" cy="16" r="13"/><circle cx="16" cy="16" r="8"/><circle cx="16" cy="16" r="2"/></svg></span>`;
 const newestFirst = (a: Album, b: Album) => b.year - a.year || a.title.localeCompare(b.title, "en");
 const releaseCard = (album: Album, caption: string, source?: "artist_page" | "album_page") =>
   `<li data-catalog-item>${covers(album)}<div class="catalog-card-info"><a class="catalog-release-title" href="${album.path}">${escape(album.title)}</a><p>${escape(caption)}</p></div>${source ? `<a class="catalog-button catalog-card-play" href="${play(album, source)}">Play<span class="catalog-sr"> ${escape(album.title)}</span></a>` : ""}</li>`;

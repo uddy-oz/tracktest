@@ -51,6 +51,16 @@ test("exact edition and discovery attribution survive each play link", () => {
   }
 });
 
+test("every curated edition has an exact artwork slot with a static fallback", () => {
+  const directory = catalogDocument("/albums").body;
+  for (const { artist, album } of catalogAlbums) {
+    const slot = `data-cover="${album.id}"><svg`;
+    assert.ok(directory.includes(slot), album.id);
+    assert.ok(catalogDocument(artist.path).body.includes(slot), album.id);
+    assert.ok(catalogDocument(album.path).body.includes(slot), album.id);
+  }
+});
+
 test("unknown catalog routes stay out of the sitemap and use a noindex 404", () => {
   const invalid = catalogDocument("/albums/not-a-release");
   assert.equal(invalid.status, 404);

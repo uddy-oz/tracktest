@@ -2,9 +2,9 @@ import { ChevronLeft, ChevronRight, Play, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { captureAnalytics } from "../lib/analytics";
 import { discoveryPlayPath } from "../lib/featuredDiscovery";
-import { approvedDailyArtistPhotos, approvedDailyCoverIds } from "../lib/dailyPickCatalog";
+import { approvedDailyArtistPhotos } from "../lib/dailyPickCatalog";
 import { dailyPickHash, formatDailyPickCountdown, getDailyPicks } from "../lib/dailyPicks";
-import { lookupSharedAlbum } from "../lib/spotifyApi";
+import { canLoadDiscoveryArtwork, resolveDiscoveryArtwork } from "../lib/discoveryArtwork";
 import { albumCatalogPath, artistCatalogPath } from "../lib/publicCatalog";
 import "./HomeDiscovery.css";
 
@@ -25,26 +25,16 @@ export function HomeDiscoverySearch({ navigate }: Props) {
   );
 }
 
-const coverCache = new Map<string, string>();
-const localCoverIds = new Set<string>(import.meta.env.DEV
-  ? (import.meta.env.VITE_LOCAL_DAILY_COVER_IDS ?? "").split(",").map((id: string) => id.trim())
-  : []);
 const motif = (key: string) => dailyPickHash(key) % 8 + 1;
 
 function ApprovedCover({ id }: { id: string }) {
   const target = useRef<HTMLSpanElement>(null);
-  const [cover, setCover] = useState(() => coverCache.get(id) ?? "");
+  const [cover, setCover] = useState("");
   useEffect(() => {
-    if (coverCache.has(id)) return;
     const controller = new AbortController();
     const load = () => {
-      void lookupSharedAlbum(id, controller.signal).then(album => {
-        if (controller.signal.aborted || !album?.imageUrl) return;
-        const url = new URL(album.imageUrl);
-        if (url.protocol !== "https:" || !url.hostname.endsWith(".mzstatic.com")) return;
-        const square = url.href.replace(/600x600(?=bb)/, "400x400");
-        coverCache.set(id, square);
-        setCover(square);
+      void resolveDiscoveryArtwork(id, controller.signal).then(url => {
+        if (url && !controller.signal.aborted) setCover(url);
       }).catch(() => {});
     };
     const observer = typeof IntersectionObserver !== "undefined" && target.current
@@ -120,7 +110,7 @@ export default function HomeDiscovery({ navigate, now, synced }: Props & { now: 
               aria-label={`Play ${album.title} by ${album.artist}`}
               onClick={() => navigate(discoveryPlayPath(album.title, "daily_picks", album.id))}>
               <span className="home-discovery-art" data-edition={motif(album.id)} aria-hidden="true">
-                {(approvedDailyCoverIds.has(album.id) || localCoverIds.has(album.id)) && <ApprovedCover id={album.id} />}
+                {canLoadDiscoveryArtwork(album.id) && <ApprovedCover key={album.id} id={album.id} />}
               </span>
               <span className="daily-pick-details">
                 <strong>{album.title}</strong>

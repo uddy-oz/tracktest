@@ -1,4 +1,5 @@
 import { analyticsAvailable, analyticsConsent, captureAnalytics, setAnalyticsIdentity } from "./lib/analytics";
+import { canLoadDiscoveryArtwork, resolveDiscoveryArtwork } from "./lib/discoveryArtwork";
 
 const html = document.documentElement;
 const themeButton = document.querySelector<HTMLButtonElement>(".catalog-theme");
@@ -80,18 +81,16 @@ if ((surface === "artist_page" || surface === "album_page") && analyticsAvailabl
 
 for (const slot of document.querySelectorAll<HTMLElement>("[data-cover]")) {
   const id = slot.dataset.cover;
-  if (!id) continue;
+  if (!id || !canLoadDiscoveryArtwork(id)) continue;
   const controller = new AbortController();
   window.addEventListener("pagehide", () => controller.abort(), { once: true });
   const load = () => {
-    void import("./lib/spotifyApi").then(({ lookupSharedAlbum }) => lookupSharedAlbum(id, controller.signal)).then(album => {
-      if (!album?.imageUrl || controller.signal.aborted) return;
-      const url = new URL(album.imageUrl);
-      if (url.protocol !== "https:" || !url.hostname.endsWith(".mzstatic.com")) return;
+    void resolveDiscoveryArtwork(id, controller.signal).then(url => {
+      if (!url || controller.signal.aborted) return;
       const image = new Image();
       image.alt = ""; image.decoding = "async";
       image.onload = () => { if (!controller.signal.aborted) slot.replaceChildren(image); };
-      image.src = url.href;
+      image.src = url;
     }).catch(() => { /* Original artwork stays visible. */ });
   };
   if (typeof IntersectionObserver === "undefined") load();
