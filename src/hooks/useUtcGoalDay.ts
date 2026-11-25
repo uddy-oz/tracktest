@@ -3,9 +3,10 @@ import { supabase } from "../lib/supabaseClient";
 import { dailyResetLabel, parseChallengePeriod } from "../lib/challengeClock";
 
 // Re-evaluate calendar-scoped UI at UTC midnight and when a sleeping tab returns.
-export function useUtcGoalDay() {
+export function useUtcGoalDay(enabled = true) {
   const [clock, setClock] = useState(() => ({ now: new Date(), synced: false }));
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     let request: AbortController | null = null;
     let rollover: number | undefined;
@@ -17,6 +18,11 @@ export function useUtcGoalDay() {
         setClock({ now: new Date(now), synced: now < anchor.end });
       } else {
         setClock({ now: new Date(), synced: false });
+      }
+      if (!anchor || Date.parse(getPeriodEnd(anchor.server)) <= anchor.server + performance.now() - anchor.measured) {
+        const current = anchor ? anchor.server + performance.now() - anchor.measured : Date.now();
+        window.clearTimeout(rollover);
+        rollover = window.setTimeout(update, Date.parse(getPeriodEnd(current)) - current + 50);
       }
       if (!supabase) return;
       const controller = new AbortController();
@@ -48,7 +54,12 @@ export function useUtcGoalDay() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", update);
     };
-  }, []);
-  const end = new Date(Date.UTC(clock.now.getUTCFullYear(), clock.now.getUTCMonth(), clock.now.getUTCDate() + 1)).toISOString();
+  }, [enabled]);
+  const end = getPeriodEnd(clock.now.getTime());
   return { ...clock, label: dailyResetLabel(end, clock.synced) };
+}
+
+function getPeriodEnd(time: number) {
+  const day = new Date(time);
+  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 1)).toISOString();
 }

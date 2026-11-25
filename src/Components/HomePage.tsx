@@ -23,6 +23,7 @@ import ArenaActiveRoomCard from "./ArenaActiveRoomCard";
 import GuestBadge from "./GuestBadge";
 import PlayerIdentityBadges from "./PlayerIdentityBadges";
 import HomeDiscovery, { HomeDiscoverySearch } from "./HomeDiscovery";
+import { useUtcGoalDay } from "../hooks/useUtcGoalDay";
 
 type HomePageProps = {
   session: Session | null;
@@ -68,6 +69,7 @@ function HomePage({
   onCloseArenaRoom,
   progressionRevision = 0,
 }: HomePageProps) {
+  const dailyClock = useUtcGoalDay();
   const [stats, setStats] = useState<TrackTestStats>(() => getTrackTestStats());
   const [statsSource, setStatsSource] = useState<"cloud" | "local">("local");
   const [globalRank, setGlobalRank] = useState<number | null>(null);
@@ -199,7 +201,7 @@ function HomePage({
         </div>
       </section>
 
-      <HomeDiscovery navigate={onDiscover} />
+      <HomeDiscovery navigate={onDiscover} now={dailyClock.now} synced={dailyClock.synced} />
 
       <section className="home-career-strip" aria-label="Player Career">
         <aside className="home-player-card">
@@ -260,6 +262,7 @@ function HomePage({
 
       <section className="home-dashboard-grid">
         <DailyGoalsPanel
+          sharedClock={dailyClock}
           ownerId={session?.user.id}
           guest={isAnonymousUser(session?.user)}
           progressionRevision={progressionRevision}

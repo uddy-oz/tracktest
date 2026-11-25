@@ -77,7 +77,25 @@
 .home-discovery-search button { min-height: 44px; padding: 6px 14px; border-radius: 6px; }
 .home-discovery-heading { justify-content: space-between; }
 .home-discovery h2 { margin: 0 0 8px; font-size: 22px; }
-.home-discovery-heading > span { color: var(--game-text-secondary); }
+.daily-picks-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--game-text-secondary);
+  font-size: 13px;
+}
+.home-discovery .daily-picks-controls button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--game-border);
+  border-radius: 8px;
+  background: var(--game-surface);
+  color: var(--game-text);
+}
+.daily-picks-controls button:disabled { opacity: .45; }
 
 .home-discovery-albums,
 .home-discovery-artists {
@@ -91,7 +109,10 @@
 
 .home-discovery .home-discovery-album {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   gap: 5px;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -104,10 +125,39 @@
   overflow-wrap: anywhere;
 }
 
-.home-discovery-album > span:last-child,
+.home-discovery .home-discovery-albums {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: calc((100% - 40px) / 5);
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 4px;
+  padding: 4px 4px 9px;
+}
+.home-discovery-albums::-webkit-scrollbar { display: none; }
+.home-discovery-albums li { scroll-snap-align: start; }
+.daily-pick-details > span:not(.daily-pick-play),
 .home-discovery-artists small { color: var(--game-text-secondary); }
-.home-discovery-album > :is(strong, span:last-child) { padding-inline: 5px; }
-.home-discovery-album > span:last-child { font-weight: 500; font-size: 14px; }
+.daily-pick-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: start;
+  column-gap: 4px;
+  padding: 3px 4px 0;
+  font-size: 14px;
+}
+.daily-pick-details > :is(strong, span:not(.daily-pick-play)) { grid-column: 1; }
+.daily-pick-play {
+  grid-area: 1 / 2 / span 2;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--game-border);
+  border-radius: 50%;
+}
 .home-discovery-art,
 .home-artist-avatar {
   --art-base: #381b46;
@@ -124,31 +174,26 @@
 .home-discovery [data-edition="7"] { --art-base: #44233e; --art-ink: #d58faa; --art-pattern: repeating-linear-gradient(36deg, transparent 0 20px, var(--art-ink) 22px 24px, transparent 26px 35px); }
 .home-discovery [data-edition="8"] { --art-base: #113d52; --art-ink: #52c7bd; --art-pattern: repeating-linear-gradient(155deg, transparent 0 13px, var(--art-ink) 14px 15px, transparent 17px 28px), linear-gradient(40deg, transparent 57%, #3d6d97 58%); }
 .home-discovery-art {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: end;
-  aspect-ratio: 16 / 8;
-  padding: 8px;
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
   border-radius: 5px;
-  font-size: 13px;
 }
-.home-discovery-art > span:not(.home-discovery-edition),
-.home-discovery-art svg {
-  width: fit-content;
-  padding: 4px 6px;
-  background: #121322;
-  border-radius: 4px;
+.daily-cover-slot,
+.home-artist-avatar img {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
 }
-.home-discovery-art svg { width: 25px; height: 25px; }
-.home-discovery-edition {
-  grid-column: 1 / -1;
-  align-self: start;
-  justify-self: end;
-  padding: 2px 7px;
-  background: #121322;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
+.daily-cover-slot img,
+.home-artist-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
+.home-artist-avatar img { object-fit: cover; }
 .home-discovery-album:hover { border-color: var(--game-text-secondary); }
 .home-discovery :is(button, input):focus-visible { outline: 2px solid var(--game-text); outline-offset: 2px; }
 
@@ -166,6 +211,7 @@
 }
 .home-discovery-artists small { display: block; }
 .home-artist-avatar {
+  position: relative;
   display: grid;
   place-items: center;
   width: 62px;
@@ -198,12 +244,17 @@
 .discovery-start-bar .start-bar-info { min-width: 0; overflow-wrap: anywhere; }
 .single-player-linked .album-search .search-result { color: var(--game-text-secondary); }
 
+@media (max-width: 1000px) {
+  .home-discovery .home-discovery-albums { grid-auto-columns: calc((100% - 30px) / 4); }
+}
+
 @media (max-width: 680px) {
+  .home-discovery .home-discovery-albums { grid-auto-columns: 43%; }
   .home-dashboard .home-discovery-intro h1 { font-size: 30px; }
   .home-dashboard .home-discovery-intro > div:first-child { padding: 9px 10px 5px; }
   .home-dashboard .home-discovery-intro .home-hero-pulse { display: none; }
   .home-dashboard .home-discovery-intro .home-decision-button { padding: 7px 9px; font-size: 13px; }
-  .home-discovery-albums, .home-discovery-artists {
+  .home-discovery-artists {
     grid-template-columns: none;
     grid-auto-flow: column;
     grid-auto-columns: 46%;
@@ -213,7 +264,7 @@
     padding: 4px 4px 9px;
   }
   .home-discovery-artists { grid-auto-columns: 35%; }
-  .home-discovery :is(.home-discovery-albums, .home-discovery-artists) li { scroll-snap-align: start; }
+  .home-discovery-artists li { scroll-snap-align: start; }
   .home-career-strip .home-player-card { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .home-career-strip .home-player-stats > span { padding: 6px 8px; }
   .home-career-strip .home-player-stats strong { font-size: 16px; }

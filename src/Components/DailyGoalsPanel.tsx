@@ -11,11 +11,13 @@ type Props = {
   guest?: boolean;
   compact?: boolean;
   progressionRevision?: number;
+  sharedClock?: ReturnType<typeof useUtcGoalDay>;
 };
 
-export default function DailyGoalsPanel({ ownerId, guest, compact, progressionRevision = 0 }: Props) {
+export default function DailyGoalsPanel({ ownerId, guest, compact, progressionRevision = 0, sharedClock }: Props) {
   const titleId = useId();
-  const clock = useUtcGoalDay();
+  const ownClock = useUtcGoalDay(!sharedClock);
+  const clock = sharedClock ?? ownClock;
   const { start, end } = getDailyGoalPeriod(clock.now);
   const accountId = guest ? undefined : ownerId;
   const requestKey = accountId && clock.synced ? `${accountId}:${start}:${progressionRevision}` : "";
