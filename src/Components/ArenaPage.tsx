@@ -4717,21 +4717,24 @@ function ArenaPage({
     }
 
     const inviteUrl = `${window.location.origin}/multiplayer/invite/${room.inviteCode}`;
+    const party = room.mode === "party_mode";
 
     return (
-      <div className="arena-invite-panel">
+      <div className={party ? "arena-invite-panel party-waiting-invite" : "arena-invite-panel"}>
         <div>
-          <p className="eyebrow">{room.isPrivate ? "Private Invite" : "Public Room Code"}</p>
-          <h3>{room.inviteCode}</h3>
-          {!room.unifiedFriends && <p>{inviteUrl}</p>}
+          {party && <h3 className="party-invite-heading">Scan to Join</h3>}
+          <p className="eyebrow">{party ? "Room code" : room.isPrivate ? "Private Invite" : "Public Room Code"}</p>
+          {party ? <strong className="party-invite-code">{room.inviteCode}</strong> : <h3>{room.inviteCode}</h3>}
+          {!room.unifiedFriends && !party && <p>{inviteUrl}</p>}
         </div>
+        {party && <RoomInviteQr url={inviteUrl} mode="party" inline />}
         <div className="arena-invite-actions">
           <button
             type="button"
             className="secondary-button"
             onClick={() => void handleCopyInvite(room)}
           >
-            Copy Link
+            {party ? "Copy Invite Link" : "Copy Link"}
           </button>
           {"share" in navigator && (
             <button
@@ -5267,6 +5270,11 @@ function ArenaPage({
         </p>
       </>
     );
+  }
+
+  function openPartyStage(room: ArenaRoom) {
+    captureAnalytics("party_stage_opened", { mode: "party" });
+    setStageRoomId(room.id);
   }
 
   function renderPartyStage(room: ArenaRoom) {
@@ -5938,6 +5946,70 @@ function ArenaPage({
         );
       }
 
+      if (isActivePartyMode && activeRoom.status === "waiting") {
+        return (
+          <section className="duel-room-screen party-lobby" aria-label="Party Mode waiting room">
+            <header className="party-lobby-album">
+              {activeRoom.artworkUrl && <img src={activeRoom.artworkUrl} alt="" width={68} height={68} />}
+              <div className="party-lobby-album-text">
+                <p className="eyebrow">{activeModeSettings.roomTitle}</p>
+                <h2>{activeRoom.albumName}</h2>
+                <p>{activeRoom.artistName}</p>
+              </div>
+              {isHost && <button type="button" className="secondary-button"
+                disabled={isPreparingDuel || isChoosingRematchAlbum}
+                onClick={() => void handleBeginRematchAlbumSelection()}>Change Album</button>}
+            </header>
+            {isHost && renderRematchAlbumPicker()}
+            <div className={`party-waiting-layout${activeRoom.inviteCode ? "" : " party-waiting-no-invite"}`}>
+              {renderRoomInvitePanel(activeRoom)}
+              <section className="party-lobby-roster" aria-label="Lobby players">
+                <h3>Players <span>{lobbyMembers.length}/{activeRoom.maxPlayers}</span></h3>
+                <ul>
+                  {lobbyDisplayPlayers.map(player => {
+                    const state = getLobbyPlayerState(player);
+                    const host = player.userId === activeRoom.hostUserId;
+                    return <li key={player.id}>
+                      <div className="guest-name-line">
+                        <strong>{player.displayName || "Arena Player"}</strong>
+                        {isGuestArenaPlayer(player) && <GuestBadge compact />}
+                      </div>
+                      <div className="party-lobby-player-status">
+                        {host && <span>Host</span>}
+                        <span data-ready={state === "READY"}>{state === "RECONNECTING" ? "Reconnecting" :
+                          state === "READY" ? "Ready" : "Connected"}</span>
+                      </div>
+                    </li>;
+                  })}
+                </ul>
+                {lobbyMembers.length < activeRoom.maxPlayers && <p className="party-lobby-waiting">Waiting for players</p>}
+              </section>
+            </div>
+            <footer className="party-lobby-actions">
+              <div>
+                {isHost ? <>
+                  <button type="button" className="duel-start-button"
+                    disabled={!canHostStartLobby || isPreparingDuel || isChoosingRematchAlbum}
+                    onClick={() => void handleStartDuel()}>{isPreparingDuel ? "Starting match..." : "Start Game"}</button>
+                  <button type="button" className="secondary-button" onClick={() => openPartyStage(activeRoom)}>Open Stage Mode</button>
+                </> : <span>Waiting for the host to start.</span>}
+              </div>
+              <div>
+                <button type="button" className="secondary-button" onClick={() => void refreshActiveRoom()}>Refresh Room</button>
+                <button type="button" className="secondary-button danger-button"
+                  disabled={isLeavingRoom || (isHost && isClosingActiveRoom)}
+                  onClick={() => isHost ? setIsConfirmingEndLobby(true) : void handleLeaveDuelRoom()}>
+                  {isHost ? isLeavingRoom || isClosingActiveRoom ? "Ending..." : "End Lobby" :
+                    isLeavingRoom ? "Leaving..." : "Leave Lobby"}
+                </button>
+              </div>
+            </footer>
+            {isHost && !canHostStartLobby && hostStartEligibility.reason && <p className="party-lobby-waiting" role="status">{hostStartEligibility.reason}</p>}
+            {startError && <p className="arena-message" role="alert">{startError}</p>}
+          </section>
+        );
+      }
+
       return (
         <section className={`duel-room-screen${activeRoom.unifiedFriends ? " friends-waiting-room" : ""}`}>
           <div className="duel-room-actions">
@@ -6587,7 +6659,9 @@ function ArenaPage({
           ref={arenaDialogRef}
           className={`arena-mode-overlay ${
             activeRoom?.status === "active" ? "arena-game-overlay" : ""
-          } ${shouldShowAlbumDock ? "arena-overlay-has-dock" : ""}`}
+          } ${shouldShowAlbumDock ? "arena-overlay-has-dock" : ""}${
+            activeRoom?.mode === "party_mode" && activeRoom.status === "waiting" ? " party-waiting-overlay" : ""
+          }`}
           role="dialog"
           aria-modal="true"
           aria-label={activeRoom?.unifiedFriends && activeRoom.status === "waiting"
@@ -6633,11 +6707,9 @@ function ArenaPage({
             {visibleMessage && (
               <p className="arena-message" role="status">{visibleMessage}</p>
             )}
-            {canOpenStage && activeRoom && (
-              <button type="button" className="secondary-button" onClick={() => {
-                captureAnalytics("party_stage_opened", { mode: "party" });
-                setStageRoomId(activeRoom.id);
-              }}>Open Stage Mode</button>
+            {canOpenStage && activeRoom && activeRoom.status !== "waiting" && (
+              <button type="button" className="secondary-button"
+                onClick={() => openPartyStage(activeRoom)}>Open Stage Mode</button>
             )}
             {renderDuelLobby()}
           </div>

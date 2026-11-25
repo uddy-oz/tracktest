@@ -45,3 +45,109 @@
   padding-inline: 14px;
   border-radius: 8px;
 }
+
+.arena-mode-overlay.party-waiting-overlay {
+  top: var(--nav-height, 74px);
+  padding-top: 14px;
+  box-shadow: 0 calc(-1 * var(--nav-height, 74px)) 0 var(--game-surface);
+}
+
+.duel-room-screen.party-lobby {
+  width: min(100%, 960px);
+  margin-inline: auto;
+  padding: clamp(12px, 3%, 24px);
+  gap: 16px;
+  color: var(--game-text);
+  background: var(--game-surface);
+  border: 1px solid var(--game-border);
+  border-radius: 8px;
+}
+
+.party-lobby-album {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--game-border);
+}
+.party-lobby-album > img { flex: 0 0 auto; object-fit: cover; border-radius: 6px; }
+.party-lobby-album-text { flex: 1 1 210px; min-width: 0; overflow-wrap: anywhere; }
+.party-lobby-album-text h2 { margin: 2px 0; font-size: 26px; line-height: 1.15; letter-spacing: 0; color: var(--game-text); }
+.party-lobby-album-text p { margin: 0; color: var(--game-text-secondary); }
+.party-lobby-album button { margin-left: auto; }
+
+.party-waiting-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 390px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.party-waiting-layout.party-waiting-no-invite { grid-template-columns: minmax(0, 1fr); }
+
+.party-waiting-layout .party-waiting-invite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--game-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--game-surface) 90%, var(--game-text) 10%);
+  color: var(--game-text);
+  text-align: center;
+}
+
+.party-waiting-layout .party-waiting-invite h3 { margin: 0 0 3px; color: var(--game-text); font-size: 18px; letter-spacing: 0; }
+.party-waiting-invite .party-invite-code { font-size: 24px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.party-waiting-invite .eyebrow { color: var(--game-text-secondary); }
+.party-waiting-invite .arena-invite-actions { justify-content: center; }
+.party-waiting-invite .arena-invite-actions button { min-height: 44px; padding: 6px 12px; font-size: 14px; }
+.party-waiting-invite .arena-invite-actions button:first-child { width: 100%; }
+
+.party-waiting-qr-code {
+  display: block;
+  width: min(100%, 176px);
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.party-lobby-roster { min-width: 0; }
+.party-lobby-roster h3 { display: flex; justify-content: space-between; margin: 0; padding: 4px 0 8px; font-size: 18px; color: var(--game-text); }
+.party-lobby-roster h3 span, .party-lobby-waiting { color: var(--game-text-secondary); }
+.party-lobby-roster ul { list-style: none; margin: 0; padding: 0; }
+.party-lobby-roster li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 44px;
+  padding: 5px 0;
+  border-top: 1px solid var(--game-border);
+  overflow-wrap: anywhere;
+}
+.party-lobby-player-status { display: flex; flex-wrap: wrap; gap: 4px; }
+.party-lobby-player-status span { padding: 2px 6px; border: 1px solid var(--game-border); border-radius: 5px; color: var(--game-text-secondary); font-size: 12px; }
+.party-lobby-player-status [data-ready="true"] { color: var(--ui-success-text); }
+.party-lobby .party-lobby-waiting { margin: 6px 0 0; font-size: 14px; }
+.party-lobby-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid var(--game-border); }
+.party-lobby-actions > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.party-lobby :is(.party-lobby-album, .party-lobby-actions) button { min-height: 44px; padding: 6px 12px; font-size: 14px; }
+
+@media (min-width: 761px) {
+  .party-waiting-layout .party-waiting-invite {
+    grid-template-columns: minmax(0, 152px) minmax(0, 1fr);
+    column-gap: 12px;
+  }
+  .party-waiting-invite .party-waiting-qr-code { grid-area: 1 / 1 / span 2; }
+  .party-waiting-invite .arena-invite-actions { gap: 5px; }
+}
+
+@media (max-width: 760px) {
+  .party-waiting-layout { grid-template-columns: minmax(0, 1fr); }
+  .party-lobby-album-text { flex-basis: 155px; }
+  .party-lobby-album-text h2 { font-size: 22px; }
+  .party-lobby-album > img { width: 52px; height: 52px; }
+  .party-lobby-album button { margin-left: 0; }
+}
