@@ -1,0 +1,47 @@
+.arena-invite-actions .room-invite-qr-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+}
+
+.room-invite-qr-backdrop .room-invite-qr-dialog {
+  width: min(100%, 600px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  text-align: center;
+}
+
+.room-invite-qr-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.room-invite-qr-dialog header button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.room-invite-qr-dialog .room-invite-qr-code {
+  display: block;
+  width: min(100%, 480px, max(200px, 64dvh));
+  height: auto;
+  aspect-ratio: 1;
+  margin: 12px auto;
+}
+
+.room-invite-qr-dialog .room-invite-qr-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 14px;
+  border-radius: 8px;
+}

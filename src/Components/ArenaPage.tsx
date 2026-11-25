@@ -97,6 +97,7 @@ import {
   prepareArenaLobbyStart,
 } from "../lib/arenaLobbyStart";
 import { useAccessibleDialog } from "../hooks/useAccessibleDialog";
+import RoomInviteQr from "./RoomInviteQr";
 import MultiplayerAccessDialog from "./MultiplayerAccessDialog";
 import ShareScore from "./ShareScore";
 import { analyticsArenaMode, captureAnalytics } from "../lib/analytics";
@@ -4735,6 +4736,9 @@ function ArenaPage({
             >
               Share
             </button>
+          )}
+          {(room.unifiedFriends || room.mode === "party_mode") && (
+            <RoomInviteQr key={inviteUrl} url={inviteUrl} mode={room.mode === "party_mode" ? "party" : "friends"} />
           )}
         </div>
       </div>

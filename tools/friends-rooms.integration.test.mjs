@@ -227,6 +227,42 @@ for (const size of [5,10]) test(`public Friends room starts with ${size} and ret
   await start(state,host,members,await stage(state,host));
 });
 
+test("private invitation rejects late joins after a Friends match starts", {skip:!configured}, async()=>{
+  const host=await player("Invite host");
+  const guest=await player("Invite guest",true);
+  const late=await player("Late invite");
+  const state=await room(await create(host,true));
+  assert.equal(await value(join(state,guest)),state.id);
+  await start(state,host,[host,guest],await stage(state,host));
+  assert.match((await join(state,late)).error?.message ?? "",/no longer waiting/i);
+});
+
+test("the private invite reports expired waiting rooms and rejects guest joins", {skip:!configured}, async()=>{
+  const host=await player("Expired host");
+  const guest=await player("Expired guest",true);
+  const state=await room(await create(host,true));
+  await value(admin.from("arena_rooms").update({expires_at:"2000-01-01T00:00:00Z"}).eq("id",state.id));
+  const invite=await value(guest.client.rpc("get_arena_invite",{target_invite_code:state.invite_code}));
+  assert.ok(Date.parse(invite[0].expires_at)<Date.now());
+  assert.match((await join(state,guest)).error?.message ?? "",/expired/i);
+});
+
+test("a full private Party room refuses an invitation", {skip:!configured}, async()=>{
+  const host=await player("Party host",true);
+  const member=await player("Party member");
+  const second=await player("Party second member",true);
+  const overflow=await player("Party overflow",true);
+  const id=await value(host.client.rpc("create_arena_room",{
+    room_mode:"party_mode",selected_album_id:albumId,selected_album_name:"Party fixture",
+    selected_artist_name:"Test artist",selected_artwork_url:null,requested_max_players:3,
+    room_is_private:true,player_display_name:host.label,player_username:null,
+  }));
+  const state=await room(id);
+  assert.equal(await value(join(state,member)),state.id);
+  assert.equal(await value(join(state,second)),state.id);
+  assert.match((await join(state,overflow)).error?.message ?? "",/full/i);
+});
+
 after(async()=>{
   for(const id of userIds.reverse()) await value(admin.auth.admin.deleteUser(id));
 });

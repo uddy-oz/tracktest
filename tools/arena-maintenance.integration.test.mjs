@@ -9,6 +9,7 @@ const supabaseUrl = process.env.LOCAL_SUPABASE_URL;
 const anonKey = process.env.LOCAL_SUPABASE_ANON_KEY;
 const dbContainer = process.env.LOCAL_DB_CONTAINER;
 const dbName = process.env.LOCAL_DB_NAME || 'postgres';
+const dbRole = process.env.LOCAL_MAINTENANCE_DB_ROLE || 'postgres';
 const serviceKey = process.env.LOCAL_SERVICE;
 
 assert.ok(supabaseUrl && anonKey && dbContainer && serviceKey,
@@ -20,13 +21,16 @@ assert.ok(dbContainer.startsWith('supabase_db_stanzer-pr2-local-supabase-'),
   'Refusing to toggle a database outside the isolated StanZer local Supabase container.');
 assert.ok(dbName === 'postgres' || /^stanz_maintenance_validation_[0-9]+$/.test(dbName),
   'Refusing to toggle an unexpected local database.');
+assert.ok(dbRole === 'postgres' ||
+  (dbRole === 'supabase_admin' && /^stanz_maintenance_validation_[0-9]+$/.test(dbName)),
+  'The Supabase maintenance owner may only be used on a disposable local clone.');
 
 const admin = createClient(supabaseUrl, serviceKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
 const sql = (statement) => execFileSync('docker', [
-  'exec', dbContainer, 'psql', '-X', '-q', '-U', 'postgres', '-d', dbName,
+  'exec', dbContainer, 'psql', '-X', '-q', '-U', dbRole, '-d', dbName,
   '-v', 'ON_ERROR_STOP=1', '-c', statement,
 ], { stdio: 'ignore' });
 
@@ -264,7 +268,7 @@ try {
     stdio: 'ignore',
   });
   execFileSync('docker', [
-    'exec', dbContainer, 'psql', '-X', '-U', 'postgres', '-d', dbName,
+    'exec', dbContainer, 'psql', '-X', '-U', dbRole, '-d', dbName,
     '-v', 'ON_ERROR_STOP=1', '-f', '/tmp/20261030_arena_maintenance_gate_test.sql',
   ], { stdio: 'inherit' });
   console.log('Local Auth/PostgREST and SQL maintenance checks passed for registered users, guests, all three modes, public/private joins, starts, and unlock/relock.');

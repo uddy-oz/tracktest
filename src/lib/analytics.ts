@@ -15,7 +15,7 @@ type ChoiceProps = { [Key in keyof typeof choices]?: (typeof choices)[Key][numbe
 type EventProps = ChoiceProps & { album_id?: string; artist_id?: string; run_id?: string; startup_ms?: number; after_countdown_ms?: number };
 type EventName = "visit" | "game_started" | "game_finished" | "room_created" | "room_joined" |
   "rematch" | "daily_goal" | "score_share_opened" | "score_share_action" | "score_link_viewed" | "audio_playback" |
-  "discovery_viewed" | "album_selected" | "album_lookup";
+  "discovery_viewed" | "album_selected" | "album_lookup" | "room_invite_qr_opened";
 type PlayerKind = "registered" | "guest" | "signed_out";
 
 export function analyticsProperties(input: EventProps) {
