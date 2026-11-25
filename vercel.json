@@ -5,10 +5,11 @@
       "maxDuration": 60
     }
   },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/((?:artists|albums)(?:/[a-z0-9-]+)?)/?", "dest": "/$1/index.html", "check": true },
+    { "src": "/(?:artists|albums)(?:/.*)?", "dest": "/catalog-not-found.html", "status": 404 },
+    { "src": "/api(?:/.*)?", "status": 404 },
+    { "src": "/.*", "dest": "/index.html" }
   ]
 }

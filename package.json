@@ -28,6 +28,7 @@
     "test:arena-maintenance": "node tools/arena-maintenance.integration.test.mjs",
     "test:multiplayer-progression": "node --experimental-strip-types tools/multiplayer-progression.test.ts",
     "test:catalog": "node --experimental-strip-types --test tools/catalog-discovery.test.ts",
+    "test:public-catalog": "node --experimental-strip-types --test tools/public-catalog.test.ts",
     "test:apple-catalog": "node --experimental-strip-types --test tools/apple-music-catalog.test.ts",
     "test:guest-identity": "node --experimental-strip-types --test tools/guest-identity.test.ts",
     "test:music-search": "node --experimental-strip-types --test tools/music-search.test.ts",

@@ -5,6 +5,7 @@ import { discoveryPlayPath } from "../lib/featuredDiscovery";
 import { approvedDailyArtistPhotos, approvedDailyCoverIds } from "../lib/dailyPickCatalog";
 import { dailyPickHash, formatDailyPickCountdown, getDailyPicks } from "../lib/dailyPicks";
 import { lookupSharedAlbum } from "../lib/spotifyApi";
+import { albumCatalogPath, artistCatalogPath } from "../lib/publicCatalog";
 import "./HomeDiscovery.css";
 
 type Props = { navigate: (path: string) => void };
@@ -101,7 +102,7 @@ export default function HomeDiscovery({ navigate, now, synced }: Props & { now: 
   return (
     <section className="home-discovery" aria-labelledby="daily-picks">
       <div className="home-discovery-heading">
-        <h2 id="daily-picks">Daily Picks</h2>
+        <div className="home-discovery-title"><h2 id="daily-picks">Daily Picks</h2><a href="/albums" aria-label="View all albums">View All</a></div>
         <div className="daily-picks-controls">
           <span title={synced ? "Rotates at midnight UTC" : "Offline estimate; rotates at midnight UTC"}>
             Next in {formatDailyPickCountdown(now, endsAt)}
@@ -127,20 +128,21 @@ export default function HomeDiscovery({ navigate, now, synced }: Props & { now: 
                 <span className="daily-pick-play"><Play size={15} fill="currentColor" aria-hidden="true" /></span>
               </span>
             </button>
+            <a className="home-catalog-details" href={albumCatalogPath(album.title, album.id)} aria-label={`About ${album.title}`}>Album details</a>
           </li>
         ))}
       </ul>
-      <h2 id="explore-artists">Explore Artists</h2>
+      <div className="home-discovery-title"><h2 id="explore-artists">Explore Artists</h2><a href="/artists" aria-label="View all artists">View All</a></div>
       <ul className="home-discovery-artists" aria-labelledby="explore-artists">
         {artists.map(({artist, genre}) => (
           <li key={artist}>
-            <button type="button" className="secondary-button" onClick={() => navigate(discoveryPlayPath(artist, "artist"))}>
+            <a className="secondary-button" href={artistCatalogPath(artist)}>
               <span className="home-artist-avatar" data-edition={motif(artist)} aria-hidden="true">
                 {artist.split(" ").slice(0, 2).map(word => word[0]).join("")}
                 <ArtistPhoto artist={artist} />
               </span>
               <strong>{artist}</strong><small>{genre}</small>
-            </button>
+            </a>
           </li>
         ))}
       </ul>

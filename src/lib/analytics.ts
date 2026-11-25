@@ -8,7 +8,7 @@ const choices = {
   outcome: ["playing", "failed", "timeout", "blocked", "stalled", "audio_skipped", "abandoned", "completed", "forfeit"],
   method: ["copy", "download", "native"],
   goal: ["warm-up", "sharp-ears", "bring-the-competition", "sweep"],
-  surface: ["daily_picks", "home_feature", "home_search", "artist", "search", "score_share"],
+  surface: ["daily_picks", "home_feature", "home_search", "artist", "artist_page", "album_page", "search", "score_share"],
   lookup: ["exact", "fallback"],
 } as const;
 type ChoiceProps = { [Key in keyof typeof choices]?: (typeof choices)[Key][number] };
